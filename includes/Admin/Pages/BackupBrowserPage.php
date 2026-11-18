@@ -135,6 +135,7 @@ class BackupBrowserPage extends AbstractPage {
 			</td>
 			<td>
 				<strong><?php echo esc_html( $backup['file_name'] ); ?></strong>
+				<?php self::render_remote_status( (string) ( $backup['destination'] ?? '' ) ); ?>
 				<?php
 				// Site · WP x / PHP y — parts that aren't known (an encrypted
 				// backup received by Direct Migration) are left out.
@@ -234,6 +235,26 @@ class BackupBrowserPage extends AbstractPage {
 				</div>
 			</div>
 		</div>
+		<?php
+	}
+
+	/**
+	 * "Copy on FTP / FTPS" (or "Off-site copy failed") after a backup's name,
+	 * from Settings → Remote storage.
+	 */
+	private static function render_remote_status( string $destination ): void {
+		if ( ! preg_match( '/^(remote|remote-failed):(\w+)$/', $destination, $m ) ) {
+			return;
+		}
+
+		$label  = \WPBP\Remote\RemoteStorage::types()[ $m[2] ] ?? $m[2];
+		$failed = 'remote-failed' === $m[1];
+		/* translators: %s: storage name, e.g. FTP / FTPS */
+		$text = $failed ? __( 'Off-site copy failed', 'wrensafe' ) : sprintf( __( 'Copy on %s', 'wrensafe' ), $label );
+		/* translators: %s: storage name */
+		$title = $failed ? sprintf( __( 'This backup couldn’t be copied to %s. See Activity Logs for the reason.', 'wrensafe' ), $label ) : sprintf( __( 'A copy of this backup is stored on %s.', 'wrensafe' ), $label );
+		?>
+		<span class="wpbp-remote-pill<?php echo $failed ? ' is-failed' : ''; ?>" title="<?php echo esc_attr( $title ); ?>"><span class="dashicons <?php echo $failed ? 'dashicons-warning' : 'dashicons-cloud-saved'; ?>" aria-hidden="true"></span><?php echo esc_html( $text ); ?></span>
 		<?php
 	}
 }

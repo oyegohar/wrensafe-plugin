@@ -18,6 +18,8 @@ namespace WPBP\Backup;
 
 use WPBP\Core\Database\BackupsRepository;
 use WPBP\Core\Database\JobsRepository;
+use WPBP\Core\Settings;
+use WPBP\Remote\RemoteStorage;
 use WPBP\Restore\ArchiveReader;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
@@ -164,6 +166,14 @@ class BackupManager {
 
 				case 'record':
 					$this->step_record( $job, $payload );
+					break;
+
+				case 'verify_backup':
+					$this->step_verify_backup( $job, $payload );
+					break;
+
+				case 'remote_copy':
+					$this->step_remote_copy( $job, $payload );
 					break;
 
 				case 'upload_cloud':
@@ -766,16 +776,142 @@ class BackupManager {
 		}
 
 		$payload['backup_id'] = $backup_id;
-		$destination          = $payload['destination'] ?? 'local';
+
+		// Optional check of the finished archive (Settings → Backup). Rollback
+		// points, made in the middle of a restore, are checked by the restore.
+		if ( Settings::get( 'verify_after_backup', false ) && 0 !== strpos( (string) ( $payload['note'] ?? '' ), 'Automatic rollback point' ) ) {
+			$verify                   = \WPBP\Backup\VerifyManager::start( $backup_id );
+			$payload['verify_job_id'] = (string) $verify['job_id'];
+			$payload['phase']         = 'verify_backup';
+			$job->set_payload( $payload );
+			$job->update_progress( 95, __( 'Checking the backup…', 'wrensafe' ) );
+			return;
+		}
+
+		$this->after_checks( $job, $payload );
+	}
+
+	/**
+	 * Phase 'verify_backup': run the same integrity check as Verify in the
+	 * Backup Browser. A backup that fails it is not kept as good: the job
+	 * fails (and the failure email is sent), and it isn't copied off-site.
+	 */
+	private function step_verify_backup( BackupJob $job, array $payload ): void {
+		$state = \WPBP\Backup\VerifyManager::step( (string) ( $payload['verify_job_id'] ?? '' ) );
+
+		if ( null === $state ) {
+			Logger::warning( 'backup_verify_skipped: the check of backup #' . (int) $payload['backup_id'] . ' couldn’t continue; run Verify in the Backup Browser.', array(), $job->id() );
+			$this->after_checks( $job, $payload );
+			return;
+		}
+
+		if ( ! in_array( $state['status'], array( 'completed', 'failed' ), true ) ) {
+			$job->update_progress( 95, __( 'Checking the backup…', 'wrensafe' ) );
+			return;
+		}
+
+		if ( 'failed' === ( $state['result'] ?? '' ) ) {
+			/* translators: %s: what the check found */
+			$job->mark_failed( sprintf( __( 'The backup was made, but it failed its check: %s', 'wrensafe' ), (string) ( $state['message'] ?? '' ) ) );
+			return;
+		}
+
+		$payload['verified'] = (string) ( $state['result'] ?? 'passed' );
+
+		if ( 'warning' === $payload['verified'] ) {
+			Logger::warning( 'backup_verified_with_warnings: backup #' . (int) $payload['backup_id'] . ' was checked after it was made, with warnings: ' . implode( ' ', (array) ( $state['warnings'] ?? array() ) ), array(), $job->id() );
+		} else {
+			Logger::info( 'backup_verified: backup #' . (int) $payload['backup_id'] . ' passed its check after it was made.', array(), $job->id() );
+		}
+		$this->after_checks( $job, $payload );
+	}
+
+	/**
+	 * After the archive is recorded (and checked): copy it off-site when
+	 * Remote storage asks for it, then finish.
+	 */
+	private function after_checks( BackupJob $job, array $payload ): void {
+		if ( RemoteStorage::wants( $payload ) ) {
+			$payload['phase']        = 'remote_copy';
+			$payload['remote_state'] = array();
+			$job->set_payload( $payload );
+			/* translators: %s: storage name, e.g. FTP / FTPS */
+			$job->update_progress( 96, sprintf( __( 'Copying the backup to %s…', 'wrensafe' ), RemoteStorage::types()[ RemoteStorage::get()['type'] ] ?? '' ) );
+			return;
+		}
+
+		$this->finish( $job, $payload );
+	}
+
+	/**
+	 * Phase 'remote_copy': upload the backup to the remote storage in
+	 * bounded steps. A failed copy is reported, but the backup itself is
+	 * complete and stays on this server.
+	 */
+	private function step_remote_copy( BackupJob $job, array $payload ): void {
+		$backup = BackupsRepository::find( (int) $payload['backup_id'] );
+		$state  = (array) ( $payload['remote_state'] ?? array() );
+		$label  = RemoteStorage::types()[ RemoteStorage::get()['type'] ] ?? '';
+
+		if ( null === $backup ) {
+			$this->finish( $job, $payload );
+			return;
+		}
+
+		try {
+			$done = RemoteStorage::copy_step( $state, (string) $backup['file_path'], (string) $backup['file_name'], self::remote_deadline() );
+		} catch ( \Throwable $e ) {
+			RemoteStorage::abort( $state );
+			RemoteStorage::record( (int) $backup['id'], false, RemoteStorage::error_text( $e ) );
+			$payload['remote_copy'] = 'failed';
+			$this->finish( $job, $payload );
+			return;
+		}
+
+		$payload['remote_state'] = $state;
+
+		if ( ! $done ) {
+			$job->set_payload( $payload );
+			$percent = ! empty( $state['size'] ) ? (int) floor( 100 * (int) $state['offset'] / (int) $state['size'] ) : 0;
+			/* translators: 1: storage name, 2: percentage */
+			$job->update_progress( 96 + (int) floor( $percent * 3 / 100 ), sprintf( __( 'Copying the backup to %1$s (%2$d%%)…', 'wrensafe' ), $label, $percent ) );
+			return;
+		}
+
+		RemoteStorage::record( (int) $backup['id'], true );
+		$payload['remote_copy'] = 'completed';
+		$this->finish( $job, $payload );
+	}
+
+	/** Time for one remote-copy request, inside PHP's own limit. */
+	private static function remote_deadline(): float {
+		$max = (int) ini_get( 'max_execution_time' );
+
+		return microtime( true ) + ( ( $max > 0 && $max < 30 ) ? max( 4, $max - 10 ) : 15 );
+	}
+
+	/**
+	 * Complete the job, or hand the backup to an add-on's cloud destination
+	 * first (phase 'upload_cloud').
+	 */
+	private function finish( BackupJob $job, array $payload ): void {
+		$destination = $payload['destination'] ?? 'local';
 
 		if ( 'local' === $destination || ! is_numeric( $destination ) ) {
-			$job->mark_completed(
-				array(
-					'backup_id'   => $backup_id,
-					'backup_type' => $payload['backup_type'] ?? 'full',
-				)
+			$result = array(
+				'backup_id'   => (int) $payload['backup_id'],
+				'backup_type' => $payload['backup_type'] ?? 'full',
 			);
-			Logger::success( 'backup_completed: ' . ( $payload['backup_type'] ?? 'full' ) . ' backup job #' . $job->id() . ' completed, archive #' . $backup_id . '.', array(), $job->id() );
+
+			foreach ( array( 'verified', 'remote_copy' ) as $key ) {
+				if ( isset( $payload[ $key ] ) ) {
+					$result[ $key ] = $payload[ $key ];
+				}
+			}
+
+			$job->set_payload( $payload );
+			$job->mark_completed( $result );
+			Logger::success( 'backup_completed: ' . ( $payload['backup_type'] ?? 'full' ) . ' backup job #' . $job->id() . ' completed, archive #' . (int) $payload['backup_id'] . '.', array(), $job->id() );
 			return;
 		}
 

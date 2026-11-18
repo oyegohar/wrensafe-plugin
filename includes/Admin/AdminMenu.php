@@ -16,6 +16,7 @@ use WPBP\Admin\Pages\LogsPage;
 use WPBP\Admin\Pages\MigrationAssistantPage;
 use WPBP\Admin\Pages\RollbackPage;
 use WPBP\Admin\Pages\SchedulePage;
+use WPBP\Admin\Pages\SearchReplacePage;
 use WPBP\Admin\Pages\SettingsPage;
 use WPBP\Admin\Pages\StagingPage;
 use WPBP\Admin\Pages\SystemInfoPage;
@@ -65,6 +66,7 @@ class AdminMenu {
 			'wrensafe-schedule'            => array( __( 'Scheduled Backups', 'wrensafe' ), SchedulePage::class, CapabilityManager::MANAGE_SCHEDULES ),
 			'wrensafe-staging'             => array( __( 'Staging', 'wrensafe' ), StagingPage::class, CapabilityManager::MANAGE_STAGING ),
 			'wrensafe-rollback'            => array( __( 'Rollback', 'wrensafe' ), RollbackPage::class, CapabilityManager::RESTORE_BACKUPS ),
+			'wrensafe-search-replace'      => array( __( 'Search & Replace', 'wrensafe' ), SearchReplacePage::class, CapabilityManager::RESTORE_BACKUPS ),
 			'wrensafe-logs'                => array( __( 'Activity Logs', 'wrensafe' ), LogsPage::class, CapabilityManager::VIEW_LOGS ),
 			'wrensafe-settings'            => array( __( 'Settings', 'wrensafe' ), SettingsPage::class, CapabilityManager::MANAGE_SETTINGS ),
 			'wrensafe-system-info'         => array( __( 'System Info', 'wrensafe' ), SystemInfoPage::class, CapabilityManager::VIEW_DASHBOARD ),

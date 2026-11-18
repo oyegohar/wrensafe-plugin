@@ -266,7 +266,7 @@ class FileScanner {
 	 * 'config' (wp-config.php: database password, keys and salts), 'dir' (VCS
 	 * metadata, own storage, cache location), 'backup_dir' (another backup
 	 * plugin's storage folder), 'backup_archive' (.wpress/.wbp anywhere),
-	 * 'ext', 'custom'.
+	 * 'ext', 'custom'. (consider_file() adds 'size' for the size limit.)
 	 *
 	 * @param string $relative_path Path relative to the scanned root.
 	 * @param string $absolute_path Absolute path (used for location rules).
@@ -470,6 +470,19 @@ class FileScanner {
 	private function consider_file( string $root_key, string $relative, string $absolute, $manifest_handle, ?array $baseline_checksums, array &$cursor ): void {
 		$size   = (int) @filesize( $absolute ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a file deleted mid-scan is skipped below.
 		$reason = $this->exclusion_reason( $relative, $absolute );
+
+		// Settings → Backup → "Leave out files larger than". Never plugin or
+		// theme code: a missing file there can break the restored site.
+		$limit = (int) Settings::get( 'exclude_larger_than_mb', 0 ) * MB_IN_BYTES;
+
+		if ( '' === $reason && $limit > 0 && $size > $limit && ! $this->is_inside_plugin_or_theme( wp_normalize_path( $absolute ) ) ) {
+			$reason = 'size';
+
+			if ( (int) ( $cursor['size_logged'] ?? 0 ) < 10 ) {
+				$cursor['size_logged'] = (int) ( $cursor['size_logged'] ?? 0 ) + 1;
+				Logger::info( 'large_file_excluded: ' . $relative . ' (' . size_format( $size ) . ') is larger than the limit set under Settings → Backup.' );
+			}
+		}
 
 		if ( '' !== $reason ) {
 			++$this->excluded_count;

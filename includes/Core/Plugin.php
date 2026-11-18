@@ -83,12 +83,15 @@ class Plugin {
 		$this->container->get( CheckoutMaintenance::class )->register_hooks();
 		$this->container->get( RestoreSiteMaintenance::class )->register_hooks();
 		$this->container->get( BackupBeforeUpdates::class )->register_hooks();
+		// Site Health also runs its checks from WP-Cron, outside wp-admin.
+		( new \WPBP\Admin\SiteHealth() )->register_hooks();
 
 		if ( is_admin() ) {
 			$this->container->get( AdminMenu::class )->register_hooks();
 			$this->container->get( Assets::class )->register_hooks();
 			$this->container->get( Notices::class )->register_hooks();
 			( new \WPBP\Admin\Onboarding() )->register_hooks();
+			( new \WPBP\Admin\DashboardWidget() )->register_hooks();
 			$this->container->get( AjaxRouter::class )->register_hooks();
 			$this->container->get( DownloadHandler::class )->register_hooks();
 			$this->container->get( LogsExport::class )->register_hooks();

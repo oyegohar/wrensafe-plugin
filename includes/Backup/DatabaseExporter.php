@@ -37,8 +37,9 @@ class DatabaseExporter {
 	 * accounts, etc.) are excluded unless the Advanced setting opts in,
 	 * since they describe this installation rather than site content and
 	 * are never restored anyway (see DatabaseImporter/RestoreManager).
+	 * Tables left out under Settings → Backup are skipped too, unless $all.
 	 */
-	public function get_tables(): array {
+	public function get_tables( bool $all = false ): array {
 		global $wpdb;
 
 		// Base tables only: a VIEW has no rows of its own and its CREATE
@@ -56,6 +57,21 @@ class DatabaseExporter {
 			if ( '' !== $table && 0 === strpos( $table, $wpdb->prefix ) && ! self::is_restore_work_table( $table ) ) {
 				$tables[] = $table;
 			}
+		}
+
+		// Tables left out under Settings → Backup → Exclusions (names saved
+		// without the prefix, so they survive a prefix change).
+		$excluded = $all ? array() : (array) Settings::get( 'excluded_tables', array() );
+
+		if ( $excluded ) {
+			$tables = array_values(
+				array_filter(
+					$tables,
+					static function ( $table ) use ( $excluded, $wpdb ) {
+						return ! in_array( substr( (string) $table, strlen( $wpdb->prefix ) ), $excluded, true );
+					}
+				)
+			);
 		}
 
 		if ( ! Settings::get( 'include_wpbp_internal_tables', false ) ) {

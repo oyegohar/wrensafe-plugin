@@ -57,6 +57,7 @@ class SettingsPage extends AbstractPage {
 		$tabs = array(
 			'general'          => __( 'General', 'wrensafe' ),
 			'backup'           => __( 'Backup', 'wrensafe' ),
+			'remote'           => __( 'Remote storage', 'wrensafe' ),
 			'direct-migration' => __( 'Direct Migration', 'wrensafe' ),
 			'woocommerce'      => __( 'WooCommerce Safe Mode', 'wrensafe' ),
 			'notifications'    => __( 'Notifications', 'wrensafe' ),
@@ -119,7 +120,7 @@ class SettingsPage extends AbstractPage {
 		?>
 		<?php
 		$groups = array(
-			__( 'Backups', 'wrensafe' )           => array( 'general', 'backup', 'cloud' ),
+			__( 'Backups', 'wrensafe' )           => array( 'general', 'backup', 'remote', 'cloud' ),
 			__( 'Migration', 'wrensafe' )         => array( 'direct-migration', 'woocommerce' ),
 			__( 'Reporting', 'wrensafe' )         => array( 'notifications', 'reports' ),
 			__( 'Access & security', 'wrensafe' ) => array( 'security', 'team-access' ),
@@ -378,6 +379,179 @@ class SettingsPage extends AbstractPage {
 		<?php
 	}
 
+	/**
+	 * Checklist of the site's extra tables (not WordPress's own), with their
+	 * size; checked tables are left out of backups.
+	 *
+	 * @param string[] $excluded
+	 */
+	private function render_table_exclusions( array $excluded ): void {
+		global $wpdb;
+
+		$tables = Settings::excludable_tables();
+
+		if ( ! $tables ) {
+			echo '<p class="description">' . esc_html__( 'This site has only WordPress’s own tables, which are always backed up.', 'wrensafe' ) . '</p>';
+			return;
+		}
+
+		$sizes = array();
+		$rows  = $wpdb->get_results( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $wpdb->esc_like( $wpdb->prefix ) . '%' ), ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- table sizes for the settings screen; no WordPress API.
+
+		foreach ( (array) $rows as $row ) {
+			$sizes[ (string) $row['Name'] ] = (int) $row['Data_length'] + (int) $row['Index_length'];
+		}
+
+		$name = Settings::OPTION_NAME;
+		?>
+		<fieldset class="wpbp-checkbox-list wpbp-table-checklist">
+			<legend class="screen-reader-text"><?php esc_html_e( 'Database tables to leave out', 'wrensafe' ); ?></legend>
+			<?php foreach ( $tables as $table ) : ?>
+				<label>
+					<input type="checkbox" name="<?php echo esc_attr( $name ); ?>[excluded_tables][]" value="<?php echo esc_attr( $table ); ?>" <?php checked( in_array( $table, $excluded, true ) ); ?> />
+					<code><?php echo esc_html( $wpdb->prefix . $table ); ?></code>
+					<span class="wpbp-muted"><?php echo esc_html( size_format( $sizes[ $wpdb->prefix . $table ] ?? 0 ) ); ?></span>
+				</label>
+			<?php endforeach; ?>
+		</fieldset>
+		<p class="description"><?php esc_html_e( 'Checked tables are left out, for example large log or statistics tables. WordPress’s own tables (posts, users, options…) are always backed up. When you restore, a left-out table keeps the version already on the site.', 'wrensafe' ); ?></p>
+		<?php
+	}
+
+	/**
+	 * Settings → Remote storage: where backups are copied after they're made.
+	 */
+	private function render_tab_remote(): void {
+		$r     = \WPBP\Remote\RemoteStorage::get();
+		$types = \WPBP\Remote\RemoteStorage::types();
+		$base  = Settings::OPTION_NAME . '[remote]';
+		$saved = __( 'Saved. Leave empty to keep it.', 'wrensafe' );
+
+		$field = static function ( string $kind, string $key, string $label, string $type = 'text', string $help = '', string $placeholder = '' ) use ( $r, $base, $saved ): void {
+			$id     = 'wpbp-remote-' . $kind . '-' . str_replace( '_', '-', $key );
+			$secret = 'password' === $type;
+			$value  = $secret ? '' : (string) ( $r[ $kind ][ $key ] ?? '' );
+			$hint   = $secret && \WPBP\Remote\RemoteStorage::has_secret( $kind, $key ) ? $saved : $placeholder;
+			?>
+			<tr data-wpbp-remote="<?php echo esc_attr( $kind ); ?>">
+				<th scope="row"><label for="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $label ); ?></label></th>
+				<td>
+					<input type="<?php echo esc_attr( $type ); ?>" id="<?php echo esc_attr( $id ); ?>" class="<?php echo 'number' === $type ? 'small-text' : 'regular-text'; ?>" name="<?php echo esc_attr( $base . '[' . $kind . '][' . $key . ']' ); ?>" value="<?php echo esc_attr( $value ); ?>" placeholder="<?php echo esc_attr( $hint ); ?>" autocomplete="<?php echo $secret ? 'new-password' : 'off'; ?>" />
+					<?php if ( '' !== $help ) : ?>
+						<p class="description"><?php echo esc_html( $help ); ?></p>
+					<?php endif; ?>
+				</td>
+			</tr>
+			<?php
+		};
+
+		$checkbox = static function ( string $kind, string $key, string $label, string $help = '' ) use ( $r, $base ): void {
+			?>
+			<tr data-wpbp-remote="<?php echo esc_attr( $kind ); ?>">
+				<th scope="row"></th>
+				<td>
+					<label><input type="checkbox" name="<?php echo esc_attr( $base . '[' . $kind . '][' . $key . ']' ); ?>" value="1" <?php checked( ! empty( $r[ $kind ][ $key ] ) ); ?> /> <?php echo esc_html( $label ); ?></label>
+					<?php if ( '' !== $help ) : ?>
+						<p class="description"><?php echo esc_html( $help ); ?></p>
+					<?php endif; ?>
+				</td>
+			</tr>
+			<?php
+		};
+		?>
+		<form method="post" action="options.php" class="wpbp-card" id="wpbp-remote-form">
+			<?php settings_fields( Settings::OPTION_GROUP ); ?>
+			<input type="hidden" name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[_tab]" value="remote" />
+
+			<h2><?php esc_html_e( 'Off-site copies', 'wrensafe' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Keep a copy of your backups on another server, so you still have them if this server fails or the site is hacked. Each backup is copied right after it’s made, in small parts, so large backups work on any host.', 'wrensafe' ); ?></p>
+
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="wpbp-remote-type"><?php esc_html_e( 'Copy backups to', 'wrensafe' ); ?></label></th>
+					<td>
+						<select id="wpbp-remote-type" name="<?php echo esc_attr( $base ); ?>[type]">
+							<option value="" <?php selected( $r['type'], '' ); ?>><?php esc_html_e( 'Nowhere (keep backups on this server only)', 'wrensafe' ); ?></option>
+							<?php foreach ( $types as $kind => $label ) : ?>
+								<?php $reason = \WPBP\Remote\RemoteStorage::unavailable_reason( $kind ); ?>
+								<option value="<?php echo esc_attr( $kind ); ?>" <?php selected( $r['type'], $kind ); ?> <?php disabled( '' !== $reason && $r['type'] !== $kind ); ?> data-unavailable="<?php echo esc_attr( $reason ); ?>">
+									<?php echo esc_html( '' !== $reason ? sprintf( /* translators: %s: storage name */ __( '%s (not available on this server)', 'wrensafe' ), $label ) : $label ); ?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+						<?php foreach ( array_keys( $types ) as $kind ) : ?>
+							<?php $reason = \WPBP\Remote\RemoteStorage::unavailable_reason( $kind ); ?>
+							<?php if ( '' !== $reason ) : ?>
+								<p class="description"><?php echo esc_html( $types[ $kind ] . ': ' . $reason ); ?></p>
+							<?php endif; ?>
+						<?php endforeach; ?>
+					</td>
+				</tr>
+
+				<?php
+				$field( 'ftp', 'host', __( 'Server', 'wrensafe' ), 'text', '', 'ftp.example.com' );
+				$field( 'ftp', 'port', __( 'Port', 'wrensafe' ), 'number' );
+				$field( 'ftp', 'username', __( 'Username', 'wrensafe' ) );
+				$field( 'ftp', 'password', __( 'Password', 'wrensafe' ), 'password' );
+				$field( 'ftp', 'folder', __( 'Folder', 'wrensafe' ), 'text', __( 'Inside the folder you log in to, unless it starts with / (a full path). Created if it doesn’t exist. Use a folder only for these backups.', 'wrensafe' ) );
+				$checkbox( 'ftp', 'ftps', __( 'Use TLS (FTPS)', 'wrensafe' ), __( 'Recommended: without TLS the password and the backup travel unencrypted. Turn it off only if your server doesn’t support it.', 'wrensafe' ) );
+				$checkbox( 'ftp', 'passive', __( 'Passive mode', 'wrensafe' ), __( 'Works behind most firewalls. Turn it off only if your FTP host asks you to.', 'wrensafe' ) );
+
+				$field( 'sftp', 'host', __( 'Server', 'wrensafe' ), 'text', '', 'sftp.example.com' );
+				$field( 'sftp', 'port', __( 'Port', 'wrensafe' ), 'number' );
+				$field( 'sftp', 'username', __( 'Username', 'wrensafe' ) );
+				$field( 'sftp', 'password', __( 'Password', 'wrensafe' ), 'password' );
+				$field( 'sftp', 'folder', __( 'Folder', 'wrensafe' ), 'text', __( 'Inside the folder you log in to, unless it starts with / (a full path). Created if it doesn’t exist. Use a folder only for these backups.', 'wrensafe' ) );
+
+				$field( 's3', 'endpoint', __( 'Endpoint', 'wrensafe' ), 'url', __( 'The storage service’s S3 address, for example https://s3.us-west-004.backblazeb2.com, https://s3.wasabisys.com or https://ACCOUNT.r2.cloudflarestorage.com. For Amazon S3, use the endpoint of your bucket’s region from the list at docs.aws.amazon.com/general/latest/gr/s3.html.', 'wrensafe' ), 'https://s3.example.com' );
+				$field( 's3', 'region', __( 'Region', 'wrensafe' ), 'text', __( 'As shown by the service, for example us-east-1 or eu-central-003 (Cloudflare R2: auto).', 'wrensafe' ) );
+				$field( 's3', 'bucket', __( 'Bucket', 'wrensafe' ) );
+				$field( 's3', 'access_key', __( 'Access key', 'wrensafe' ) );
+				$field( 's3', 'secret_key', __( 'Secret key', 'wrensafe' ), 'password' );
+				$field( 's3', 'folder', __( 'Folder in the bucket', 'wrensafe' ), 'text', __( 'Optional. Backups are stored under this prefix.', 'wrensafe' ) );
+				$checkbox( 's3', 'path_style', __( 'Path-style addresses', 'wrensafe' ), __( 'Needed for MinIO and some other self-hosted services. Leave it off for Amazon S3, Backblaze B2, Wasabi and Cloudflare R2.', 'wrensafe' ) );
+				?>
+
+				<tr data-wpbp-remote="any">
+					<th scope="row"><?php esc_html_e( 'Which backups', 'wrensafe' ); ?></th>
+					<td>
+						<fieldset class="wpbp-checkbox-list">
+							<legend class="screen-reader-text"><?php esc_html_e( 'Which backups are copied', 'wrensafe' ); ?></legend>
+							<label><input type="checkbox" name="<?php echo esc_attr( $base ); ?>[copy_automatic]" value="1" <?php checked( ! empty( $r['copy_automatic'] ) ); ?> /> <?php esc_html_e( 'Automatic backups (schedules and backups before updates)', 'wrensafe' ); ?></label>
+							<label><input type="checkbox" name="<?php echo esc_attr( $base ); ?>[copy_manual]" value="1" <?php checked( ! empty( $r['copy_manual'] ) ); ?> /> <?php esc_html_e( 'Backups you make yourself', 'wrensafe' ); ?></label>
+						</fieldset>
+					</td>
+				</tr>
+				<tr data-wpbp-remote="any">
+					<th scope="row"><label for="wpbp-remote-keep"><?php esc_html_e( 'Keep there', 'wrensafe' ); ?></label></th>
+					<td>
+						<?php
+						printf(
+							/* translators: %s: number input */
+							esc_html__( 'The newest %s copies', 'wrensafe' ),
+							'<input type="number" id="wpbp-remote-keep" class="small-text" min="0" step="1" name="' . esc_attr( $base ) . '[keep]" value="' . esc_attr( (string) (int) $r['keep'] ) . '" />'
+						);
+						?>
+						<p class="description"><?php esc_html_e( 'Older copies in the folder are deleted after each upload. 0 keeps them all.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+				<tr data-wpbp-remote="any">
+					<th scope="row"><?php esc_html_e( 'Connection', 'wrensafe' ); ?></th>
+					<td>
+						<button type="button" class="button" id="wpbp-remote-test"><?php esc_html_e( 'Test connection', 'wrensafe' ); ?></button>
+						<span class="wpbp-inline-status" id="wpbp-remote-test-result" role="status" aria-live="polite"></span>
+						<p class="description"><?php esc_html_e( 'Writes a small test file there and removes it. Uses what’s in the form, so you can test before saving.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+			</table>
+
+			<p class="wpbp-limit-note"><span><?php esc_html_e( 'Passwords and keys are stored encrypted with this site’s own security keys. They can’t be read on another site, so after moving the site, enter them again here.', 'wrensafe' ); ?></span></p>
+
+			<?php submit_button(); ?>
+		</form>
+		<?php
+	}
+
 	private function render_tab_backup(): void {
 		\WPBP\Admin\Onboarding::page_viewed( 'folder' );
 
@@ -467,8 +641,24 @@ class SettingsPage extends AbstractPage {
 				</tr>
 			</table>
 
+			<h2><?php esc_html_e( 'Checks', 'wrensafe' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'The same check as Verify in the Backup Browser: the archive, its database files and every file’s checksum.', 'wrensafe' ); ?></p>
+
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'After each backup', 'wrensafe' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="<?php echo esc_attr( $name ); ?>[verify_after_backup]" value="1" <?php checked( ! empty( $settings['verify_after_backup'] ) ); ?> />
+							<?php esc_html_e( 'Check each backup right after it’s made', 'wrensafe' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'A backup that fails the check is reported (by email too, if failure emails are on) and isn’t copied to remote storage. Takes a little longer for large sites.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+			</table>
+
 			<h2><?php esc_html_e( 'Exclusions', 'wrensafe' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Files left out of every new backup.', 'wrensafe' ); ?></p>
+			<p class="description"><?php esc_html_e( 'Files and database tables left out of every new backup.', 'wrensafe' ); ?></p>
 
 			<table class="form-table" role="presentation">
 				<tr>
@@ -510,6 +700,25 @@ class SettingsPage extends AbstractPage {
 							value="<?php echo esc_attr( (string) ( $settings['custom_excluded_extensions'] ?? '' ) ); ?>"
 							placeholder="mp4, mov" />
 						<p class="description"><?php esc_html_e( 'File extensions to leave out, separated by commas.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wpbp-exclude-larger-than"><?php esc_html_e( 'Large files', 'wrensafe' ); ?></label></th>
+					<td>
+						<?php
+						printf(
+							/* translators: %s: number input for megabytes */
+							esc_html__( 'Leave out files larger than %s MB', 'wrensafe' ),
+							'<input type="number" id="wpbp-exclude-larger-than" class="small-text" min="0" step="1" name="' . esc_attr( $name ) . '[exclude_larger_than_mb]" value="' . esc_attr( (string) (int) ( $settings['exclude_larger_than_mb'] ?? 0 ) ) . '" />'
+						);
+						?>
+						<p class="description"><?php esc_html_e( '0 keeps every file. Plugin and theme files are always backed up, whatever their size.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Database tables', 'wrensafe' ); ?></th>
+					<td>
+						<?php $this->render_table_exclusions( (array) ( $settings['excluded_tables'] ?? array() ) ); ?>
 					</td>
 				</tr>
 			</table>

@@ -159,7 +159,7 @@ class StagingManager {
 		global $wpdb;
 
 		if ( ! isset( $payload['tables'] ) ) {
-			$payload['tables'] = ( new DatabaseExporter() )->get_tables();
+			$payload['tables'] = ( new DatabaseExporter() )->get_tables( true ); // Staging copies every table, whatever backups leave out.
 			$job->set_payload( $payload );
 			$job->update_progress( 57, __( 'Preparing database clone…', 'wrensafe' ) );
 			return;

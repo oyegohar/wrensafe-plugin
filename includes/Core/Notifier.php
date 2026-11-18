@@ -105,6 +105,43 @@ class Notifier {
 		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, $subject ), implode( "\n\n", $lines ) );
 	}
 
+	/**
+	 * Email that a backup couldn't be copied to remote storage (when failure
+	 * emails are on). The backup itself completed.
+	 */
+	public static function remote_copy_failed( int $backup_id, string $reason ): void {
+		if ( ! Settings::get( 'notify_on_failure', false ) ) {
+			return;
+		}
+
+		$to = (string) Settings::get( 'notification_email', '' );
+		$to = is_email( $to ) ? $to : (string) get_option( 'admin_email' );
+
+		if ( ! is_email( $to ) ) {
+			return;
+		}
+
+		$backup = BackupsRepository::find( $backup_id );
+		$site   = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
+		$lines  = array(
+			__( 'A backup was made, but copying it to your remote storage failed. The backup is safe on this server.', 'wrensafe' ),
+			/* translators: %s: error message */
+			sprintf( __( 'Reason: %s', 'wrensafe' ), $reason ),
+		);
+
+		if ( $backup ) {
+			/* translators: 1: backup file name, 2: file size */
+			$lines[] = sprintf( __( 'Backup: %1$s (%2$s)', 'wrensafe' ), $backup['file_name'], size_format( (int) $backup['size'] ) );
+		}
+
+		/* translators: %s: link to the Remote storage settings */
+		$lines[] = sprintf( __( 'Check the connection: %s', 'wrensafe' ), admin_url( 'admin.php?page=wrensafe-settings&tab=remote' ) );
+		/* translators: %s: site address */
+		$lines[] = sprintf( __( '— Wrensafe on %s', 'wrensafe' ), home_url() );
+
+		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, __( 'Off-site copy failed', 'wrensafe' ) ), implode( "\n\n", $lines ) );
+	}
+
 	private static function reason( AbstractJob $job ): string {
 		$message = (string) $job->error_message();
 

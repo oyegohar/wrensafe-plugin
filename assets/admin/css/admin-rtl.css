@@ -6198,3 +6198,71 @@ body.wpbp-modal-open {
 	align-items: center;
 	gap: var(--wpbp-space-2);
 }
+
+/* Settings → Backup → Database tables (1.1.0): scrollable checklist. */
+.wpbp-wrap .wpbp-card fieldset.wpbp-table-checklist {
+	max-height: 260px;
+	overflow-y: auto;
+	padding: var(--wpbp-space-2) var(--wpbp-space-3);
+	border: 1px solid var(--wpbp-border);
+	border-radius: var(--wpbp-radius-md);
+	background: var(--wpbp-surface-subtle);
+}
+
+.wpbp-wrap .wpbp-table-checklist code {
+	font-size: var(--wpbp-text-xs);
+	background: transparent;
+	padding: 0;
+}
+
+.wpbp-wrap .wpbp-muted {
+	color: var(--wpbp-text-muted);
+	font-size: var(--wpbp-text-xs);
+	margin-inline-start: var(--wpbp-space-1);
+}
+
+/* Backup Browser: off-site copy status next to the file name (1.1.0). */
+.wpbp-wrap .wpbp-remote-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-inline-start: var(--wpbp-space-2);
+	font-size: var(--wpbp-text-xs);
+	font-weight: var(--wpbp-weight-medium);
+	color: var(--wpbp-text-secondary);
+}
+
+.wpbp-wrap .wpbp-remote-pill .dashicons {
+	width: 14px;
+	height: 14px;
+	font-size: 14px;
+}
+
+.wpbp-wrap .wpbp-remote-pill.is-failed {
+	color: var(--wpbp-danger-text);
+}
+
+/* Search & Replace ---------------------------------------------------------- */
+.wpbp-sr-table-tools {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+	margin: 0 0 6px;
+}
+
+.wpbp-sr-results {
+	max-width: 640px;
+	margin-top: 12px;
+}
+
+.wpbp-sr-form.is-locked {
+	opacity: 0.65;
+}
+
+.wpbp-sr-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 16px 0 0;
+}

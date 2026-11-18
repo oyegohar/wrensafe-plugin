@@ -44,6 +44,12 @@ class Settings {
 			'woo_safe_mode_default'         => true,
 			// Folder for backups ('' = wp-content/wrensafe-storage).
 			'backup_dir'                    => '',
+			// Check each backup right after it's made (1.1.0).
+			'verify_after_backup'           => false,
+			// Leave out files larger than this many MB (0 = no limit; 1.1.0).
+			'exclude_larger_than_mb'        => 0,
+			// Database tables left out of backups, without the table prefix (1.1.0).
+			'excluded_tables'               => array(),
 		);
 	}
 
@@ -160,6 +166,14 @@ class Settings {
 				$current['exclude_cache_folders']      = ! empty( $value['exclude_cache_folders'] );
 				$current['custom_excluded_paths']      = sanitize_textarea_field( $value['custom_excluded_paths'] ?? '' );
 				$current['custom_excluded_extensions'] = sanitize_text_field( $value['custom_excluded_extensions'] ?? '' );
+				$current['verify_after_backup']        = ! empty( $value['verify_after_backup'] );
+				$current['exclude_larger_than_mb']     = min( 1000000, absint( $value['exclude_larger_than_mb'] ?? 0 ) );
+				$current['excluded_tables']            = self::clean_excluded_tables( (array) ( $value['excluded_tables'] ?? array() ) );
+				break;
+
+			case 'remote':
+				// Remote storage keeps its own option (secrets encrypted).
+				\WPBP\Remote\RemoteStorage::save( \WPBP\Remote\RemoteStorage::sanitize( is_array( $value['remote'] ?? null ) ? $value['remote'] : array() ) );
 				break;
 
 			case 'woocommerce':
@@ -187,6 +201,49 @@ class Settings {
 		\WPBP\Utils\Logger::info( 'Settings saved (' . ( $submitted_tab ? $submitted_tab : 'general' ) . ' tab) by user #' . get_current_user_id() . '.' );
 
 		return $current;
+	}
+
+	/**
+	 * Database tables of this site that can be left out of backups: every
+	 * table with the site's prefix except WordPress's own tables and
+	 * Wrensafe's, without the prefix.
+	 *
+	 * @return string[]
+	 */
+	public static function excludable_tables(): array {
+		global $wpdb;
+
+		$core   = array_values( $wpdb->tables( 'all', false ) );
+		$tables = array();
+
+		foreach ( ( new \WPBP\Backup\DatabaseExporter() )->get_tables( true ) as $table ) {
+			$name = substr( (string) $table, strlen( $wpdb->prefix ) );
+
+			if ( '' !== $name && ! in_array( $name, $core, true ) && 0 !== strpos( $name, 'wpbp_' ) ) {
+				$tables[] = $name;
+			}
+		}
+
+		return $tables;
+	}
+
+	/**
+	 * @param array<int|string,mixed> $submitted Table names (without prefix).
+	 * @return string[]
+	 */
+	private static function clean_excluded_tables( array $submitted ): array {
+		$allowed = self::excludable_tables();
+		$clean   = array();
+
+		foreach ( $submitted as $name ) {
+			$name = sanitize_text_field( (string) $name );
+
+			if ( in_array( $name, $allowed, true ) ) {
+				$clean[] = $name;
+			}
+		}
+
+		return array_values( array_unique( $clean ) );
 	}
 
 	/**

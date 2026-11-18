@@ -4,11 +4,11 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.3
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Back up, restore and migrate WordPress with confidence: full or partial backups, encrypted archives, schedules, staging and guided restores.
+Back up, restore and migrate WordPress: full or partial backups, off-site copies (FTP, SFTP, S3), schedules, staging and guided restores.
 
 == Description ==
 
@@ -18,10 +18,12 @@ Wrensafe backs up your WordPress site and restores it — on the same server or 
 
 * **Full site or just what you need:** database, files, media, themes, plugins, or everything.
 * **AES-256 encryption** (optional, per backup). The password is never stored.
-* **Automatic backups** every day, week or month at the time you choose, keeping only the newest copies — plus an automatic safety backup before WordPress, plugin or theme updates.
+* **Automatic backups** every day, week or month at the time you choose, keeping only the newest copies — with a separate schedule for the database, for example the database every day and the whole site every week. Plus an automatic safety backup before WordPress, plugin or theme updates.
+* **Off-site copies:** each backup can be copied to your own FTP/FTPS, SFTP or S3-compatible storage right after it's made. It's sent in small parts that resume after an interruption, so large backups work on any host, and only the newest copies are kept there. Passwords and keys are stored encrypted.
+* **Checked after every backup** (optional): the same integrity check as Verify runs as soon as a backup is made, and a backup that fails it is reported instead of being kept as good.
 * **No size limits:** multi-gigabyte sites back up, download, upload and restore. Interrupted downloads and uploads resume where they stopped.
 * **Works on shared hosting:** backups and restores run in small, time-limited steps, so they finish even where PHP may only run for 30 seconds.
-* **Smart exclusions:** other plugins' backup archives and cache folders are skipped by default; plugin and theme code is always backed up completely.
+* **Smart exclusions:** other plugins' backup archives and cache folders are skipped by default; plugin and theme code is always backed up completely. You can also leave out files larger than a size you choose, and database tables you don't need, such as large log or statistics tables.
 
 ### Restore safely
 
@@ -39,6 +41,7 @@ Wrensafe backs up your WordPress site and restores it — on the same server or 
 * **Direct Migration:** send a backup straight to another WordPress site using a one-time migration key — no download or upload. It arrives in that site's backup list, ready to review and restore.
 * **Migration Assistant:** scans your server limits, database and files, and recommends the safest way to migrate.
 * **Staging:** create a password-protected copy of your site, test changes, then push them to live.
+* **Search & Replace:** change text anywhere in the database — for example an old address — safely inside serialized and JSON data. A dry run shows how many rows would change before anything is saved.
 
 ### Switch from another backup plugin
 
@@ -51,6 +54,8 @@ Wrensafe backs up your WordPress site and restores it — on the same server or 
 * **Dashboard:** protection status, recent backups, schedules and migration readiness at a glance.
 * **Activity Logs** that record every step with the exact reason when something fails (passwords and keys are never logged), plus a one-click debug bundle for support.
 * **Email notifications** when a backup or restore fails, and, if you like, when one completes.
+* **Site Health checks:** Tools → Site Health tells you when the newest backup is out of date, when backups are only on this server, and when the backup folder can be downloaded from the web.
+* **Dashboard widget:** the newest backup, the next scheduled one and the off-site copy status on the WordPress Dashboard, with a Back up now button.
 
 == Installation ==
 
@@ -66,6 +71,14 @@ To move a site: create a full backup on the old site, download it from the **Bac
 = Where are my backups stored? =
 
 On your own server, in `wp-content/wrensafe-storage/` by default. You can choose another folder under **Settings → Backup → Backup folder**; a folder outside the website folder is safest, and existing backups move with it. Folders inside the website are protected from direct web access. Download a copy now and then and keep it somewhere safe, away from the server.
+
+= Can backups be copied to another server or to cloud storage? =
+
+Yes. Under **Settings → Remote storage**, choose FTP/FTPS, SFTP or S3-compatible storage (Amazon S3 or any service with an S3-compatible API), enter the details and select **Test connection**. Each automatic backup, and optionally each backup you make yourself, is copied there right after it's made, and only the newest copies you choose to keep are left there. SFTP needs the PHP SSH2 extension; FTP needs PHP's FTP extension (most hosts have it). If a copy fails, the backup stays on your server, the Backup Browser shows it, and you get an email if failure emails are on.
+
+= How do I change my site's address in the database? =
+
+Open **Wrensafe → Search & Replace**, enter the old address and the new one, and start a dry run: it shows how many rows in each table would change, without saving anything. Then select **Replace now**. Serialized data and JSON stay valid, and post GUIDs are left as they are unless you choose otherwise. Make a database backup first: a replacement can only be undone by restoring one.
 
 = Is wp-config.php in my backups? =
 
@@ -134,7 +147,7 @@ WordPress 6.0 or later and PHP 7.4 or later (PHP 8.3 or newer is recommended). T
 
 == Privacy ==
 
-Wrensafe stores backups on your own server and never sends them, or any usage data, to Wrensafe or anyone else. Data leaves your site only when an administrator starts one of the actions listed under External services. Backups can contain personal data (user accounts, orders, form entries), so download and store them as carefully as the site itself.
+Wrensafe stores backups on your own server and never sends them, or any usage data, to Wrensafe. Data leaves your site only when an administrator sets up or starts one of the features listed under External services, such as copying backups to their own remote storage. Backups can contain personal data (user accounts, orders, form entries), so download and store them as carefully as the site itself.
 
 == External services ==
 
@@ -143,6 +156,8 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * **WordPress.org core checksums API** (api.wordpress.org) — when an administrator runs the Malware Scanner, to compare WordPress core files with the official checksums. Data sent: the site's WordPress version. [Privacy Policy](https://wordpress.org/about/privacy/).
 * **Import from URL** — downloads a backup archive from the URL the administrator enters on the Import / Restore page.
 * **Direct Migration** — sends backup data to the other WordPress site the administrator pairs with a one-time migration key.
+* **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS, SFTP or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice; Wrensafe has no service of its own.
+* **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. No other server is contacted.
 
 == Screenshots ==
 
@@ -152,12 +167,25 @@ Wrensafe only contacts the services below, and only after a site administrator c
 4. Backup Browser: restore, download, verify, lock, tag and delete the backups stored on your server.
 5. Review before you restore: where the backup comes from, what's inside, what will change, and which parts to restore.
 6. Integrity verification checks the archive, manifest, database files and checksums before you restore.
-7. Automatic backups: every day, week or month at the time you choose, keeping only the newest copies.
+7. Automatic backups: the whole site and the database on separate schedules, keeping only the newest copies.
 8. Migration Assistant scores how ready the site is to move, recommends the safest method and lists the next steps.
 9. Settings grouped by task: the backup folder, backups before updates, exclusions, notifications, migration and WooCommerce Safe Mode.
 10. Restore backups made by other backup plugins: upload the files just as that plugin saved them.
+11. Off-site copies: copy each backup to FTP/FTPS, SFTP or S3-compatible storage, and test the connection before saving.
+12. Search & Replace: a dry run shows how many rows would change in each table before anything is saved.
+13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 
 == Changelog ==
+
+= 1.1.0 =
+* New: off-site copies (Settings → Remote storage). Each backup can be copied to FTP/FTPS, SFTP or S3-compatible storage right after it's made, in parts that resume after an interruption, keeping only the newest copies there. Choose whether automatic backups, backups you make yourself, or both are copied. Passwords and keys are stored encrypted with the site's own security keys. The Backup Browser shows each backup's copy status, and a failed copy is emailed when failure emails are on.
+* New: a separate schedule for the database, next to the full-site schedule, on the Scheduled Backups page.
+* New: leave chosen database tables out of backups (Settings → Backup → Exclusions). WordPress's own tables are always backed up, and a left-out table keeps its current version when you restore.
+* New: leave out files larger than a size you set. Plugin and theme files are always backed up.
+* New: check each backup right after it's made (Settings → Backup → Checks). A backup that fails the check is marked damaged, isn't copied off-site, and is reported.
+* New: Search & Replace page with a dry run, for serialized and JSON data too. Post GUIDs are left alone by default.
+* New: Site Health checks for a recent backup, off-site copies and a private backup folder, and a Wrensafe section under Site Health → Info.
+* New: Dashboard widget with the newest backup, the next scheduled one, the off-site copy status and Back up now.
 
 = 1.0.3 =
 * Fixed: some hosting malware scanners (SiteGround's among them) reported a file of the security scan as malicious, because it listed the PHP function names that malware uses, and could suspend the site. The security scan no longer keeps such a list; it now looks for long encoded payloads in PHP files instead. Nothing in the plugin matches common malware signatures (checked with ClamAV, Linux Malware Detect and PHP Malware Finder).
@@ -188,6 +216,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+Adds off-site copies to FTP, SFTP and S3-compatible storage, a separate database schedule, table and large-file exclusions, automatic backup checks, Search & Replace, Site Health checks and a Dashboard widget.
 
 = 1.0.3 =
 Fixes hosting malware scanners (such as SiteGround's) wrongly flagging the security scan file, and stops storing staging passwords.

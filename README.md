@@ -33,12 +33,20 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 <td><img src=".wordpress-org/screenshot-6.png" alt="Integrity check"><br><sub><b>Integrity check</b>: archive, database and every file's checksum.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-7.png" alt="Scheduled Backups"><br><sub><b>Automatic backups</b> at the time you choose, keeping the newest copies.</sub></td>
+<td><img src=".wordpress-org/screenshot-7.png" alt="Scheduled Backups"><br><sub><b>Two schedules</b>: the whole site weekly, the database every day.</sub></td>
 <td><img src=".wordpress-org/screenshot-8.png" alt="Migration Assistant"><br><sub><b>Migration Assistant</b>: readiness score, recommended method, next steps.</sub></td>
 </tr>
 <tr>
 <td><img src=".wordpress-org/screenshot-9.png" alt="Settings"><br><sub><b>Settings</b> grouped by task: backup folder, exclusions, notifications.</sub></td>
 <td><img src=".wordpress-org/screenshot-10.png" alt="Restore backups from other plugins"><br><sub><b>Restore backups made by 10 other plugins</b>, just as they saved them.</sub></td>
+</tr>
+<tr>
+<td><img src=".wordpress-org/screenshot-11.png" alt="Remote storage"><br><sub><b>Off-site copies</b> to FTP/FTPS, SFTP or S3-compatible storage, with a connection test.</sub></td>
+<td><img src=".wordpress-org/screenshot-12.png" alt="Search &amp; Replace"><br><sub><b>Search &amp; Replace</b>: a dry run shows what would change before anything is saved.</sub></td>
+</tr>
+<tr>
+<td><img src=".wordpress-org/screenshot-13.png" alt="Dashboard widget"><br><sub><b>Dashboard widget</b>: newest backup, next run, off-site copy and Back up now.</sub></td>
+<td></td>
 </tr>
 </table>
 
@@ -49,10 +57,12 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 - One `.wbp` file per backup, with a manifest and checksums.
 - Optional AES-256 encryption per backup; the password is never stored.
 - Notes and tags on backups.
-- Automatic backups every day, week or month at a set time, keeping the newest copies.
+- Automatic backups every day, week or month at a set time, keeping the newest copies, with a separate schedule for the database (for example daily, while the whole site is backed up weekly).
+- **Off-site copies** to your own FTP/FTPS, SFTP or S3-compatible storage right after each backup, sent in parts that resume, keeping the newest copies there. Passwords and keys are stored encrypted.
+- Optional check of every backup right after it's made.
 - A backup before WordPress, plugin and theme updates.
 - No size limit: backups run in short steps, so they finish even where PHP stops scripts after 30 seconds. Interrupted uploads and downloads resume.
-- Smart exclusions: other plugins' backup files and cache folders are skipped by default; add your own folders and file types.
+- Smart exclusions: other plugins' backup files and cache folders are skipped by default; add your own folders and file types, files above a size you set, and database tables you don't need.
 - Choose where backups are kept, including a folder outside the website.
 - `wp-config.php` and the site's security keys are never put in a backup.
 
@@ -70,17 +80,20 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 - Direct Migration: send a backup straight to another site with a one-time key.
 - Migration Assistant: readiness score, server checks, recommended method and a checklist.
 - Staging: a private copy with its own tables and keys, optional password protection, push to live.
+- Search & Replace with a dry run, safe for serialized and JSON data.
 
 ### Stay informed
 - Dashboard with protection status, backups, schedules and migration readiness.
 - Activity Logs and a one-click debug bundle for support.
-- Email when a backup or restore fails (and, if you like, when one succeeds).
+- Email when a backup or restore fails (and, if you like, when one succeeds), or when an off-site copy fails.
+- Site Health checks: an out-of-date backup, backups kept only on the server, a backup folder that can be downloaded from the web.
+- A Dashboard widget with the newest backup, the next scheduled one and a Back up now button.
 - A security scan: core files checked against WordPress.org, PHP in uploads, hidden encoded code, unsafe permissions.
 - Fully translatable, with right-to-left language support.
 
 ## Privacy
 
-Backups stay on your server. Nothing is sent to Wrensafe or anyone else, and there is no tracking. Data leaves your site only when an administrator starts one of these: the core-file check (WordPress.org checksums API), Import from URL, or Direct Migration to another site.
+Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP, SFTP or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, or Direct Migration to another site.
 
 ## Found a problem?
 

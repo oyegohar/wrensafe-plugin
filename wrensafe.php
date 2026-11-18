@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Wrensafe – WP Backup, Restore & Migration
  * Description:       Back up, restore and migrate WordPress with confidence: full or partial backups, encryption, schedules, staging, rollback, and restores of backups made by other plugins.
- * Version:           1.0.3
+ * Version:           1.1.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Husnain Gohar
@@ -33,7 +33,7 @@ if ( defined( 'WPBP_VERSION' ) ) {
 // Core plugin constants.
 // ---------------------------------------------------------------------------
 
-define( 'WPBP_VERSION', '1.0.3' );
+define( 'WPBP_VERSION', '1.1.0' );
 define( 'WPBP_PLUGIN_FILE', __FILE__ );
 define( 'WPBP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPBP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

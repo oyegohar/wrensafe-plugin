@@ -109,10 +109,12 @@ class SearchReplaceEngine {
 	 * costs the same no matter how deep into a large table it is (LIMIT
 	 * offset re-scans every skipped row). Pass null to start a table.
 	 *
-	 * @param array<int,array{0:string,1:string}> $pairs [search, replace] pairs.
-	 * @return array{cursor:?string,done:bool,rows_changed:int}
+	 * @param array<int,array{0:string,1:string}> $pairs        [search, replace] pairs.
+	 * @param bool                                $dry_run      Count the rows that would change without saving them.
+	 * @param string[]                            $skip_columns Columns left as they are (e.g. post GUIDs).
+	 * @return array{cursor:?string,done:bool,rows_changed:int,rows_seen?:int}
 	 */
-	public function process_table_after( string $table, ?string $after, array $pairs ): array {
+	public function process_table_after( string $table, ?string $after, array $pairs, bool $dry_run = false, array $skip_columns = array() ): array {
 		global $wpdb;
 
 		$map = array();
@@ -150,13 +152,14 @@ class SearchReplaceEngine {
 			);
 		}
 
-		$rows_changed = $this->apply_to_rows( $table, $rows, $primary_key, $map );
+		$rows_changed = $this->apply_to_rows( $table, $rows, $primary_key, $map, $dry_run, $skip_columns );
 		$last         = end( $rows );
 
 		return array(
 			'cursor'       => (string) $last[ $primary_key ],
 			'done'         => count( $rows ) < self::ROWS_PER_CHUNK,
 			'rows_changed' => $rows_changed,
+			'rows_seen'    => count( $rows ),
 		);
 	}
 
@@ -166,8 +169,9 @@ class SearchReplaceEngine {
 	 *
 	 * @param array<int,array<string,mixed>> $rows
 	 * @param array<string,string>           $map
+	 * @param string[]                       $skip_columns
 	 */
-	private function apply_to_rows( string $table, array $rows, string $primary_key, array $map ): int {
+	private function apply_to_rows( string $table, array $rows, string $primary_key, array $map, bool $dry_run = false, array $skip_columns = array() ): int {
 		global $wpdb;
 
 		$rows_changed = 0;
@@ -176,7 +180,7 @@ class SearchReplaceEngine {
 			$updates = array();
 
 			foreach ( $row as $column => $value ) {
-				if ( $column === $primary_key || ! is_string( $value ) ) {
+				if ( $column === $primary_key || ! is_string( $value ) || in_array( $column, $skip_columns, true ) ) {
 					continue;
 				}
 
@@ -188,7 +192,9 @@ class SearchReplaceEngine {
 			}
 
 			if ( ! empty( $updates ) ) {
-				$wpdb->update( $table, $updates, array( $primary_key => $row[ $primary_key ] ) );
+				if ( ! $dry_run ) {
+					$wpdb->update( $table, $updates, array( $primary_key => $row[ $primary_key ] ) );
+				}
 				++$rows_changed;
 			}
 		}
@@ -208,7 +214,7 @@ class SearchReplaceEngine {
 	 * The table's single-column primary key, or null when it has none (or a
 	 * composite one, which a single-column WHERE can't address safely).
 	 */
-	private function get_primary_key( string $table ): ?string {
+	public function get_primary_key( string $table ): ?string {
 		global $wpdb;
 
 		if ( array_key_exists( $table, $this->primary_keys ) ) {

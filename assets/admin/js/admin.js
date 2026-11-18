@@ -21,6 +21,7 @@
 		initImportRestorePage();
 		initRollbackPage();
 		initSchedulePage();
+		initSearchReplacePage();
 		initDirectMigrationPage();
 		initStagingPage();
 		initMalwareScan();
@@ -341,6 +342,46 @@
 		}
 
 		$( '#wpbp-backup-dir-check' ).on( 'click', checkDir );
+
+		// Settings → Remote storage: show the fields of the chosen storage,
+		// and test the connection with what's in the form.
+		var $remoteType = $( '#wpbp-remote-type' );
+
+		function showRemoteFields() {
+			var type = $remoteType.val();
+
+			$( '#wpbp-remote-form [data-wpbp-remote]' ).each( function () {
+				var kind = $( this ).data( 'wpbp-remote' );
+				$( this ).prop( 'hidden', 'any' === kind ? ! type : kind !== type );
+			} );
+		}
+
+		if ( $remoteType.length ) {
+			$remoteType.on( 'change', showRemoteFields );
+			showRemoteFields();
+		}
+
+		$( '#wpbp-remote-test' ).on( 'click', function () {
+			var $button = $( this );
+			var $result = $( '#wpbp-remote-test-result' );
+			var data = $( '#wpbp-remote-form' ).find( '[name^="wpbp_settings[remote]"]' ).serializeArray();
+
+			data.push( { name: 'action', value: 'wpbp_remote_test' }, { name: '_wpbp_nonce', value: wpbpAdmin.nonce } );
+			wpbpBusy( $button, true );
+			$result.removeClass( 'is-success is-error' ).text( wpbpT( 'Connecting…' ) );
+
+			$.post( wpbpAdmin.ajaxUrl, $.param( data ) )
+				.done( function ( res ) {
+					var ok = !! ( res && res.success );
+					$result.addClass( ok ? 'is-success' : 'is-error' ).text( ( res && res.data && res.data.message ) || wpbpAdmin.i18n.genericError );
+				} )
+				.fail( function ( xhr ) {
+					$result.addClass( 'is-error' ).text( wpbpXhrMessage( xhr ) );
+				} )
+				.always( function () {
+					wpbpBusy( $button, false );
+				} );
+		} );
 
 		$( '[data-wpbp-dir]' ).on( 'click', function () {
 			$dir.val( $( this ).data( 'wpbp-dir' ) ).trigger( 'focus' );
@@ -3822,33 +3863,250 @@
 	 * Wires the Create Schedule form and per-row Run Now / Enable-Disable /
 	 * Delete actions on the Scheduled Backups page.
 	 */
-	function initSchedulePage() {
-		var $table = $( '.wpbp-schedules-table' );
-		var $saveButton = $( '#wpbp-sch-save' );
+	/**
+	 * Search & Replace page: a dry run (default) or a real run, processed in
+	 * short steps until every selected table is done.
+	 */
+	function initSearchReplacePage() {
+		var $form = $( '#wpbp-sr-form' );
 
-		if ( ! $saveButton.length ) {
+		if ( ! $form.length ) {
 			return;
 		}
 
-		$( '#wpbp-sch-frequency' ).on( 'change', function () {
-			$( '#wpbp-sch-custom-interval' ).toggle( 'custom' === $( this ).val() );
+		var $run = $( '#wpbp-sr-run' );
+		var $dry = $( '#wpbp-sr-dry-run' );
+		var $search = $( '#wpbp-sr-search' );
+		var $replace = $( '#wpbp-sr-replace' );
+		var $tables = $( '#wpbp-sr-tables' );
+		var $progress = $( '#wpbp-sr-progress' );
+		var $fill = $progress.find( '.wpbp-progress-bar-fill' );
+		var $percent = $progress.find( '.wpbp-progress-percent' );
+		var $status = $( '#wpbp-sr-status' );
+		var $title = $( '#wpbp-sr-progress-title' );
+		var $summary = $( '#wpbp-sr-summary' );
+		var $results = $( '#wpbp-sr-results' );
+		var $actions = $( '#wpbp-sr-actions' );
+		var $apply = $( '#wpbp-sr-apply' );
+		var running = false;
+		var previewed = null; // The values of the last dry run with matches.
+
+		function values() {
+			return {
+				search: $search.val(),
+				replace: $replace.val(),
+				tables: $tables.find( 'input:checked' ).map( function () {
+					return this.value;
+				} ).get(),
+				skip_guid: $( '#wpbp-sr-skip-guid' ).is( ':checked' ) ? '1' : '0'
+			};
+		}
+
+		function updateLabel() {
+			$run.text( $dry.is( ':checked' ) ? wpbpT( 'Start dry run' ) : wpbpT( 'Replace now' ) );
+		}
+
+		// inert instead of disabled: WordPress draws a disabled checked box
+		// almost empty, which would misstate what is being searched.
+		function lockForm( locked ) {
+			$form.toggleClass( 'is-locked', locked ).attr( 'aria-busy', locked ? 'true' : null );
+			$form[ 0 ].inert = locked;
+		}
+
+		function setProgress( percent, text ) {
+			percent = Math.max( 0, Math.min( 100, parseInt( percent, 10 ) || 0 ) );
+			$fill.css( 'width', percent + '%' );
+			$percent.text( percent + '%' );
+			$status.text( text || '' );
+		}
+
+		function confirmReal( vals ) {
+			return wpbpConfirm( {
+				title: wpbpT( 'Replace in the database?' ),
+				message: wpbpFormat( wpbpT( 'Every “%1$s” in the selected tables becomes “%2$s”. This can only be undone by restoring a backup.' ), vals.search, vals.replace ),
+				confirmLabel: wpbpT( 'Replace now' ),
+				danger: true
+			} );
+		}
+
+		function fail( message ) {
+			running = false;
+			lockForm( false );
+			$title.text( wpbpT( 'Search & Replace stopped' ) );
+			$summary.empty().append( $( '<div class="wpbp-inline-notice is-error" role="alert"></div>' ).text( message || wpbpAdmin.i18n.genericError ) );
+		}
+
+		function finish( data, vals ) {
+			var $body = $results.find( 'tbody' ).empty();
+
+			running = false;
+			lockForm( false );
+			previewed = data.dry_run && data.rows > 0 ? vals : null;
+			setProgress( 100, '' );
+			$title.text( data.dry_run ? wpbpT( 'Dry run finished' ) : wpbpT( 'Replacement finished' ) );
+			$summary.empty().append( $( '<div class="wpbp-inline-notice"></div>' ).toggleClass( 'is-success', ! data.dry_run ).text( data.summary || '' ) );
+			$( '#wpbp-sr-rows-heading' ).text( data.dry_run ? wpbpT( 'Rows that would change' ) : wpbpT( 'Rows changed' ) );
+
+			$.each( data.results || [], function ( i, item ) {
+				$body.append(
+					$( '<tr></tr>' )
+						.append( $( '<td></td>' ).append( $( '<code></code>' ).text( item.table ) ) )
+						.append( $( '<td></td>' ).text( wpbpNumber( item.rows ) ) )
+				);
+			} );
+
+			$results.toggleClass( 'wpbp-is-hidden', ! ( data.results && data.results.length ) );
+			$apply.toggleClass( 'wpbp-is-hidden', ! previewed );
+			$actions.removeClass( 'wpbp-is-hidden' );
+		}
+
+		function step( token, vals ) {
+			$.post( wpbpAdmin.ajaxUrl, { action: 'wpbp_search_replace_step', _wpbp_nonce: wpbpAdmin.nonce, token: token } )
+				.done( function ( response ) {
+					if ( ! response || ! response.success ) {
+						fail( response && response.data && response.data.message );
+						return;
+					}
+
+					var data = response.data;
+
+					if ( data.done ) {
+						finish( data, vals );
+						return;
+					}
+
+					setProgress( data.percent, wpbpFormat( wpbpT( 'Searching %s…' ), data.table ) );
+					step( token, vals );
+				} )
+				.fail( function ( xhr ) {
+					fail( wpbpXhrMessage( xhr ) );
+				} );
+		}
+
+		function start( dryRun, vals ) {
+			running = true;
+			previewed = null;
+			lockForm( true );
+			$actions.addClass( 'wpbp-is-hidden' );
+			$results.addClass( 'wpbp-is-hidden' ).find( 'tbody' ).empty();
+			$summary.empty();
+			$progress.removeClass( 'wpbp-is-hidden' );
+			$title.text( dryRun ? wpbpT( 'Dry run' ) : wpbpT( 'Replacing' ) );
+			setProgress( 0, wpbpAdmin.i18n.starting || wpbpT( 'Starting…' ) );
+
+			$.post( wpbpAdmin.ajaxUrl, $.extend( {
+				action: 'wpbp_search_replace_start',
+				_wpbp_nonce: wpbpAdmin.nonce,
+				dry_run: dryRun ? '1' : '0'
+			}, vals ) )
+				.done( function ( response ) {
+					if ( ! response || ! response.success ) {
+						fail( response && response.data && response.data.message );
+						return;
+					}
+
+					step( response.data.token, vals );
+				} )
+				.fail( function ( xhr ) {
+					fail( wpbpXhrMessage( xhr ) );
+				} );
+
+			$progress[ 0 ].scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+		}
+
+		$dry.on( 'change', updateLabel );
+		updateLabel();
+
+		$( '#wpbp-sr-all' ).on( 'click', function () {
+			$tables.find( 'input' ).prop( 'checked', true );
 		} );
 
-		$saveButton.on( 'click', function () {
+		$( '#wpbp-sr-none' ).on( 'click', function () {
+			$tables.find( 'input' ).prop( 'checked', false );
+		} );
+
+		$form.on( 'submit', function ( event ) {
+			event.preventDefault();
+
+			if ( running ) {
+				return;
+			}
+
+			if ( '' === $search.val() ) {
+				wpbpToast( wpbpT( 'Enter the text to search for.' ), 'warning' );
+				$search.trigger( 'focus' );
+				return;
+			}
+
+			if ( ! $tables.find( 'input:checked' ).length ) {
+				wpbpToast( wpbpT( 'Select at least one table.' ), 'warning' );
+				return;
+			}
+
+			var vals = values();
+
+			if ( $dry.is( ':checked' ) ) {
+				start( true, vals );
+				return;
+			}
+
+			confirmReal( vals ).then( function () {
+				start( false, vals );
+			} );
+		} );
+
+		// "Replace now" runs exactly what the dry run previewed; changing the
+		// form afterwards withdraws it until a new dry run.
+		$form.on( 'input change', function () {
+			if ( previewed && JSON.stringify( values() ) !== JSON.stringify( previewed ) ) {
+				previewed = null;
+				$apply.addClass( 'wpbp-is-hidden' );
+			}
+		} );
+
+		$apply.on( 'click', function () {
+			var vals = previewed;
+
+			if ( ! running && vals ) {
+				confirmReal( vals ).then( function () {
+					start( false, vals );
+				} );
+			}
+		} );
+
+		$( '#wpbp-sr-again' ).on( 'click', function () {
+			previewed = null;
+			$progress.addClass( 'wpbp-is-hidden' );
+			$search.trigger( 'focus' );
+		} );
+	}
+
+	function initSchedulePage() {
+		var $table = $( '.wpbp-schedules-table' );
+		var $forms = $( '.wpbp-schedule-form' );
+
+		if ( ! $forms.length ) {
+			return;
+		}
+
+		// Two schedules (full website, database), each saved on its own.
+		$forms.on( 'click', '.wpbp-sch-save', function () {
+			var $form = $( this ).closest( '.wpbp-schedule-form' );
+			var $saveButton = $( this );
+
 			wpbpBusy( $saveButton, true );
 
 			$.post( wpbpAdmin.ajaxUrl, {
 				action: 'wpbp_schedule_save',
 				_wpbp_nonce: wpbpAdmin.nonce,
-				id: $( '#wpbp-sch-id' ).val() || 0,
-				title: $( '#wpbp-sch-title' ).val(),
-				frequency: $( '#wpbp-sch-frequency' ).val(),
-				custom_interval_seconds: $( '#wpbp-sch-custom-interval' ).val(),
-				run_time: $( '#wpbp-sch-time' ).val(),
-				backup_type: $( '#wpbp-sch-type' ).val(),
-				destination: $( '#wpbp-sch-destination' ).val(),
-				retention_count: $( '#wpbp-sch-retention' ).val(),
-				enabled: $( '#wpbp-sch-enabled' ).is( ':checked' ) ? 1 : 0
+				id: $form.find( '.wpbp-sch-id' ).val() || 0,
+				title: $form.find( '.wpbp-sch-title' ).val(),
+				frequency: $form.find( '.wpbp-sch-frequency' ).val(),
+				run_time: $form.find( '.wpbp-sch-time' ).val(),
+				backup_type: $form.find( '.wpbp-sch-type' ).val(),
+				destination: $form.find( '.wpbp-sch-destination' ).val(),
+				retention_count: $form.find( '.wpbp-sch-retention' ).val(),
+				enabled: $form.find( '.wpbp-sch-enabled' ).is( ':checked' ) ? 1 : 0
 			} ).done( function ( response ) {
 				if ( ! response.success ) {
 					wpbpBusy( $saveButton, false );
