@@ -10,12 +10,14 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 
 ## Download and install
 
-1. Download **`wrensafe-<version>.zip`** from the [latest release](https://github.com/oyegohar/wrensafe-plugin/releases/latest).
-   Use the file under **Assets**, not GitHub's green **Code → Download ZIP** button: that one has a different folder name and won't update properly later.
+1. Download **`wrensafe-<version>.zip`** from the **Assets** of the [latest release](https://github.com/oyegohar/wrensafe-plugin/releases/latest).
+   Don't use **Source code (zip)** or the green **Code → Download ZIP** button: those are GitHub's copies of the repository, not the plugin package, and WordPress won't install them.
 2. In WordPress go to **Plugins → Add New Plugin → Upload Plugin**, choose the zip, click **Install Now**, then **Activate**.
 3. Open **Wrensafe** in the admin menu and click **Create backup**.
 
-**Updating:** install a newer zip the same way; WordPress replaces the old version and your settings and backups stay. Once Wrensafe is on WordPress.org, updates arrive in your dashboard automatically.
+**Updating:** upload the newer `wrensafe-<version>.zip` the same way. WordPress says the plugin is already installed; choose **Replace current with uploaded**. Your settings and backups stay. Once Wrensafe is on WordPress.org, updates arrive in your dashboard automatically.
+
+**Installed twice?** An older "Source code" download installed Wrensafe in a folder such as `wrensafe-plugin-1.1.0`, so later uploads were added as a second plugin. Fix it once: upload `wrensafe-<version>.zip` from the Assets, activate it, then deactivate and delete the other Wrensafe copies on the Plugins screen. Settings and backups are kept (Wrensafe 1.1.2 and later never remove shared data while another copy is installed; for older copies, check that **Settings → Advanced → Uninstall** is off before deleting them).
 
 ## Screenshots
 

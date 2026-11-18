@@ -23,6 +23,48 @@ class Notices {
 		// Plugins screen and Wrensafe's pages, until dismissed (a week at most).
 		add_action( 'admin_notices', array( $this, 'render_restore_integrity_notice' ) );
 		add_action( 'admin_init', array( $this, 'register_privacy_policy_content' ) );
+		add_action( 'admin_notices', array( $this, 'render_folder_notice' ) );
+		add_action( 'network_admin_notices', array( $this, 'render_folder_notice' ) );
+	}
+
+	/**
+	 * Wrensafe runs from a folder other than "wrensafe" — it was installed from
+	 * GitHub's "Source code" download (folder "wrensafe-plugin-1.1.0" and so
+	 * on) or the folder was renamed. WordPress recognises a plugin by its
+	 * folder, so a new version uploaded later would be added as a second
+	 * plugin instead of replacing this one. Explain the one-time fix, on the
+	 * Plugins screen and Wrensafe's pages only.
+	 */
+	public function render_folder_notice(): void {
+		$folder = dirname( WPBP_PLUGIN_BASENAME );
+
+		if ( 'wrensafe' === $folder || '.' === $folder || ! current_user_can( 'install_plugins' ) ) {
+			return;
+		}
+
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+
+		if ( ! $screen || ! ( in_array( $screen->id, array( 'plugins', 'plugins-network' ), true ) || false !== strpos( (string) $screen->id, 'wrensafe' ) ) ) {
+			return;
+		}
+
+		printf(
+			'<div class="notice notice-warning"><p><strong>%1$s</strong></p><p>%2$s</p></div>',
+			esc_html(
+				sprintf(
+					/* translators: %s: folder name */
+					__( 'Wrensafe is installed in the folder “%s” instead of “wrensafe”, so a new version you upload will be added as a second plugin instead of replacing this one.', 'wrensafe' ),
+					$folder
+				)
+			),
+			esc_html(
+				sprintf(
+					/* translators: %s: plugin zip file name */
+					__( 'This happens when Wrensafe is installed from GitHub’s “Source code” download. To fix it once: upload %s (the file under Assets on the release page), activate it, then deactivate and delete this copy. Your settings and backups are kept. After that, every new version you upload replaces the old one.', 'wrensafe' ),
+					'wrensafe-' . WPBP_VERSION . '.zip'
+				)
+			)
+		);
 	}
 
 	/**

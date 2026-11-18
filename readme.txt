@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.1
+Stable tag: 1.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -181,6 +181,11 @@ Wrensafe only contacts the services below, and only after a site administrator c
 
 == Changelog ==
 
+= 1.1.2 =
+* Fixed: a Wrensafe zip installed from a folder with another name (for example GitHub's "Source code" download, which unpacks to "wrensafe-plugin-1.1.0") was added as a second plugin when you uploaded a new version, instead of replacing the installed one. Wrensafe now says when it runs from such a folder and how to fix it once.
+* Fixed: when two copies are active, the notice now says which version is running and has a button to deactivate the older copy.
+* Fixed: deleting one copy of Wrensafe while another is still installed never removes the shared settings and backup records, even when Settings → Advanced → Uninstall is on.
+
 = 1.1.1 =
 * Changed: the new Wrensafe look (Cobalt Ice). The new logo in each page header and the welcome tour, the Wrensafe icon in the admin menu (it follows your admin colour scheme), the brand's cobalt, navy and ice-blue colours, a light frost background on Wrensafe's pages, and the Manrope typeface for headings. Manrope is bundled with the plugin; nothing is loaded from other sites.
 * Changed: new WordPress.org banner, icon and screenshots.
@@ -226,6 +231,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.2 =
+If uploading a new version added a second Wrensafe instead of replacing it, Wrensafe now shows why and how to fix it once; deleting a duplicate copy always keeps your data.
 
 = 1.1.1 =
 The new Wrensafe look: new logo and menu icon, Cobalt Ice colours and Manrope headings. The backup progress window also shows the check and the off-site copy steps.

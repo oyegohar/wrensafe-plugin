@@ -47,10 +47,20 @@ class Uninstaller {
 		'wpbp_manage_security',
 	);
 
+	/** Text domains this plugin has had (its current and earlier names). */
+	private const TEXT_DOMAINS = array( 'wrensafe', 'backuppilot', 'wp-backup-pilot' );
+
 	public static function uninstall(): void {
 		$settings = get_option( Settings::OPTION_NAME, array() );
 
 		if ( ! is_array( $settings ) || empty( $settings['delete_data_on_uninstall'] ) ) {
+			return;
+		}
+
+		// Deleting one of two copies (a second folder from a GitHub "Source
+		// code" download, or the plugin under an earlier name) must not remove
+		// the data the remaining copy uses.
+		if ( self::another_copy_installed() ) {
 			return;
 		}
 
@@ -70,6 +80,56 @@ class Uninstaller {
 		}
 
 		self::delete_user_data();
+	}
+
+	/**
+	 * Hooked to "pre_uninstall_plugin" by the running copy. When WordPress is
+	 * about to uninstall ANOTHER copy of this plugin (a second folder, or the
+	 * plugin under an earlier name), remove that copy's uninstall.php so it
+	 * isn't run: in the same request as this copy it would declare the same
+	 * classes again (a fatal error that stops the deletion), and versions
+	 * before 1.1.2 could remove the settings and backup records this copy
+	 * uses. WordPress then deletes that copy's files as usual.
+	 *
+	 * @param string $plugin Plugin file being uninstalled.
+	 */
+	public static function before_plugin_uninstall( $plugin ): void {
+		$plugin = (string) $plugin;
+		$folder = dirname( $plugin );
+
+		if ( ! defined( 'WPBP_PLUGIN_BASENAME' ) || WPBP_PLUGIN_BASENAME === $plugin || '.' === $folder || ! is_file( WP_PLUGIN_DIR . '/' . $plugin ) ) {
+			return;
+		}
+
+		if ( ! function_exists( 'get_plugin_data' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$data = get_plugin_data( WP_PLUGIN_DIR . '/' . $plugin, false, false );
+
+		if ( in_array( strtolower( (string) ( $data['TextDomain'] ?? '' ) ), self::TEXT_DOMAINS, true ) && is_file( WP_PLUGIN_DIR . '/' . $folder . '/uninstall.php' ) ) {
+			wp_delete_file( WP_PLUGIN_DIR . '/' . $folder . '/uninstall.php' );
+		}
+	}
+
+	/**
+	 * Whether another copy of this plugin is still installed besides the one
+	 * being deleted (WP_UNINSTALL_PLUGIN holds its plugin file).
+	 */
+	private static function another_copy_installed(): bool {
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$deleting = defined( 'WP_UNINSTALL_PLUGIN' ) ? (string) WP_UNINSTALL_PLUGIN : '';
+
+		foreach ( get_plugins() as $file => $data ) {
+			if ( $file !== $deleting && in_array( strtolower( (string) ( $data['TextDomain'] ?? '' ) ), self::TEXT_DOMAINS, true ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Wrensafe – WP Backup, Restore & Migration
  * Description:       Back up, restore and migrate WordPress with confidence: full or partial backups, encryption, schedules, staging, rollback, and restores of backups made by other plugins.
- * Version:           1.1.1
+ * Version:           1.1.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Husnain Gohar
@@ -16,14 +16,59 @@
 
 defined( 'ABSPATH' ) || exit;
 
-// An earlier version of this plugin, released under its previous name, is
-// still active: the two can't run together (they share their code and data),
-// so ask for the old one to be deactivated first. Settings and backups carry over.
+// Another copy of this plugin is already running: a second Wrensafe folder
+// (for example one installed from GitHub's "Source code" download, which
+// WordPress treats as a separate plugin) or an earlier version under the
+// plugin's previous name. Two copies can't run together (they share their code
+// and data), so this one stays idle and says which copy runs, with a link to
+// deactivate the older one. Settings and backups are shared and kept.
 if ( defined( 'WPBP_VERSION' ) ) {
+	$wpbp_idle_copy = plugin_basename( __FILE__ );
 	add_action(
 		'admin_notices',
-		static function (): void {
-			echo '<div class="notice notice-error"><p>' . esc_html__( 'An earlier version of this plugin, released under its previous name, is still active. Deactivate it to use Wrensafe. Your settings and backups are kept.', 'wrensafe' ) . '</p></div>';
+		static function () use ( $wpbp_idle_copy ): void {
+			if ( ! current_user_can( 'activate_plugins' ) ) {
+				return;
+			}
+
+			$running         = defined( 'WPBP_PLUGIN_BASENAME' ) ? (string) WPBP_PLUGIN_BASENAME : '';
+			$running_version = (string) WPBP_VERSION;
+			$idle_version    = (string) ( get_file_data( WP_PLUGIN_DIR . '/' . $wpbp_idle_copy, array( 'Version' => 'Version' ) )['Version'] ?? '' );
+
+			// Offer to deactivate the older copy. With the same version, keep the
+			// one in the "wrensafe" folder: uploads of new versions replace it.
+			$compare = version_compare( $running_version, $idle_version );
+			if ( '' === $running ) {
+				$older = $wpbp_idle_copy;
+			} elseif ( 0 !== $compare ) {
+				$older = $compare < 0 ? $running : $wpbp_idle_copy;
+			} else {
+				$older = 'wrensafe' === dirname( $running ) ? $wpbp_idle_copy : $running;
+			}
+			$link = wp_nonce_url( self_admin_url( 'plugins.php?action=deactivate&plugin=' . rawurlencode( $older ) ), 'deactivate-plugin_' . $older );
+
+			printf(
+				'<div class="notice notice-error"><p><strong>%1$s</strong> %2$s</p><p><a class="button" href="%3$s">%4$s</a></p></div>',
+				esc_html__( 'Two copies of Wrensafe are active, and only one can run.', 'wrensafe' ),
+				esc_html(
+					sprintf(
+						/* translators: 1: version, 2: folder name, 3: version, 4: folder name */
+						__( 'Version %1$s in the folder “%2$s” is running; version %3$s in the folder “%4$s” is not. Deactivate the extra copy with the button below, then delete it on this screen. Your settings and backups are kept.', 'wrensafe' ),
+						$running_version,
+						'' !== $running ? dirname( $running ) : '?',
+						$idle_version,
+						dirname( $wpbp_idle_copy )
+					)
+				),
+				esc_url( $link ),
+				esc_html(
+					sprintf(
+						/* translators: %s: folder name */
+						__( 'Deactivate the copy in “%s”', 'wrensafe' ),
+						dirname( $older )
+					)
+				)
+			);
 		}
 	);
 	return;
@@ -33,7 +78,7 @@ if ( defined( 'WPBP_VERSION' ) ) {
 // Core plugin constants.
 // ---------------------------------------------------------------------------
 
-define( 'WPBP_VERSION', '1.1.1' );
+define( 'WPBP_VERSION', '1.1.2' );
 define( 'WPBP_PLUGIN_FILE', __FILE__ );
 define( 'WPBP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPBP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

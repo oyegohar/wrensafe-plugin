@@ -1,6 +1,13 @@
-# GitHub's "Download ZIP" / source archives: plugin files only.
+# GitHub's "Source code" and "Code → Download ZIP" archives.
+#
+# WordPress recognises a plugin by its folder. Those archives unpack to
+# "wrensafe-plugin-<version>/", so installing one adds a second Wrensafe
+# instead of replacing the installed one. Leaving the main plugin file out
+# makes WordPress refuse them ("No valid plugins were found"); the README in
+# the archive says to use wrensafe-<version>.zip from the release's Assets,
+# whose folder is "wrensafe". Cloning the repository is not affected.
+/wrensafe.php export-ignore
 /.wordpress-org export-ignore
 /.github export-ignore
 /.gitattributes export-ignore
 /.gitignore export-ignore
-/README.md export-ignore
