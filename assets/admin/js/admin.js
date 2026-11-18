@@ -4262,12 +4262,14 @@
 
 		var $progress = $( '#wpbp-mig-progress' );
 		var $status = $progress.find( '.wpbp-progress-status' );
+		var $error = $( '#wpbp-mig-error' );
 
 		$send.on( 'click', function () {
 			$send.prop( 'disabled', true );
+			$error.prop( 'hidden', true ).text( '' );
 			$progress.prop( 'hidden', false );
 			wpbpSetProgress( $progress, 0 );
-			$status.text( wpbpAdmin.i18n.starting || 'Starting…' );
+			$status.text( wpbpT( 'Checking the receiving site and the key…' ) );
 
 			$.post( wpbpAdmin.ajaxUrl, {
 				action: 'wpbp_migration_start_transfer',
@@ -4280,9 +4282,13 @@
 					return failTransfer( response.data && response.data.message );
 				}
 
+				if ( response.data.preflight ) {
+					$status.text( response.data.preflight );
+				}
+
 				pollTransfer( response.data.id );
-			} ).fail( function () {
-				failTransfer();
+			} ).fail( function ( xhr ) {
+				failTransfer( wpbpXhrMessage( xhr ) );
 			} );
 		} );
 
@@ -4308,13 +4314,15 @@
 				} else {
 					pollTransfer( jobId );
 				}
-			} ).fail( function () {
-				failTransfer();
+			} ).fail( function ( xhr ) {
+				failTransfer( wpbpXhrMessage( xhr ) );
 			} );
 		}
 
+		// A problem is an error box with the reason, not a status line.
 		function failTransfer( message ) {
-			$status.text( message || wpbpAdmin.i18n.genericError || 'An error occurred.' );
+			$progress.prop( 'hidden', true );
+			$error.text( message || wpbpAdmin.i18n.genericError || 'An error occurred.' ).prop( 'hidden', false );
 			$send.prop( 'disabled', false );
 		}
 	}

@@ -241,6 +241,7 @@ class Assets {
 						'Checking…'                        => __( 'Checking…', 'wrensafe' ),
 						'Connecting…'                      => __( 'Connecting…', 'wrensafe' ),
 						'Checking the backup'              => __( 'Checking the backup', 'wrensafe' ),
+						'Checking the receiving site and the key…' => __( 'Checking the receiving site and the key…', 'wrensafe' ),
 						/* translators: %s: storage name, e.g. SFTP */
 						'Copying to %s'                    => __( 'Copying to %s', 'wrensafe' ),
 						'Start dry run'                    => __( 'Start dry run', 'wrensafe' ),

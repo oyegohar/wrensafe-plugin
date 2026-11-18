@@ -40,18 +40,21 @@ class AdminMenu {
 	 * its own pages. Printed via the Styles API on a file-less handle instead
 	 * of a raw <style> tag.
 	 *
-	 * The icon is the brand's menu icon used as a CSS mask filled with
-	 * currentColor, so it takes the admin colour scheme's colours (normal,
-	 * hover, current) exactly like a Dashicon, without a data URI.
+	 * The icon is the colour mark (Royal Cobalt over Ice Blue). When the item
+	 * is hovered, open or current, WordPress gives it the colour scheme's
+	 * highlight (often blue), so the mark then sits on a small white tile to
+	 * stay readable.
 	 */
 	public function enqueue_badge_styles(): void {
-		$icon = esc_url( WPBP_PLUGIN_URL . 'assets/admin/images/menu-icon.svg' );
+		$mark = esc_url( WPBP_PLUGIN_URL . 'assets/admin/images/wrensafe-mark.svg' );
+		$item = '#adminmenu #toplevel_page_' . self::TOP_SLUG;
 
 		wp_register_style( 'wpbp-admin-menu', false, array(), WPBP_VERSION );
 		wp_enqueue_style( 'wpbp-admin-menu' );
 		wp_add_inline_style(
 			'wpbp-admin-menu',
-			'#adminmenu #toplevel_page_' . self::TOP_SLUG . ' div.wp-menu-image::before{content:"";background-color:currentColor;-webkit-mask:url("' . $icon . '") center/20px 20px no-repeat;mask:url("' . $icon . '") center/20px 20px no-repeat}'
+			$item . ' div.wp-menu-image::before{content:"";width:20px;height:20px;margin-top:7px;padding:0;border-radius:5px;background:url("' . $mark . '") center/18px 18px no-repeat;transition:background-color .15s ease-in-out,background-size .15s ease-in-out}'
+			. $item . ':is(.current,.wp-has-current-submenu,.opensub,:hover) div.wp-menu-image::before,' . $item . ' > a:focus div.wp-menu-image::before{background-color:#fff;background-size:14px 14px}'
 			. '#adminmenu .wp-submenu a:has(> .wpbp-menu-badge){white-space:nowrap}'
 			. '#adminmenu .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:#2457f5;color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
 		);
@@ -109,8 +112,7 @@ class AdminMenu {
 			CapabilityManager::VIEW_DASHBOARD,
 			self::TOP_SLUG,
 			$this->page_callback( self::TOP_SLUG ),
-			// The Wrensafe icon is drawn by CSS (see enqueue_badge_styles()), so
-			// it recolours with the admin colour scheme like a Dashicon.
+			// The Wrensafe colour mark is drawn by CSS (see enqueue_badge_styles()).
 			'none',
 			80
 		);

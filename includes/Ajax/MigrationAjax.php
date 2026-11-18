@@ -76,16 +76,25 @@ class MigrationAjax {
 			wp_send_json_error( array( 'message' => __( 'Backup, destination URL, and migration key are all required.', 'wrensafe' ) ), 400 );
 		}
 
+		// Ask the receiving site first: is the key valid, and does it accept
+		// this connection (HTTP or HTTPS)? Explains a problem before anything is sent.
+		$preflight = ( new TransferClient() )->preflight( $destination_url, $token );
+
+		if ( ! $preflight['ok'] ) {
+			wp_send_json_error( array( 'message' => $preflight['message'] ), 400 );
+		}
+
 		$job = MigrationTransferJob::create(
 			array(
 				'backup_id'       => $backup_id,
 				'destination_url' => $destination_url,
 				'token'           => $token,
-				'verify_ssl'      => str_starts_with( $destination_url, 'https://' ),
+				'verify_ssl'      => str_starts_with( strtolower( $destination_url ), 'https://' ),
+				'rest_style'      => $preflight['rest_style'],
 			)
 		);
 
-		wp_send_json_success( $job->to_array() );
+		wp_send_json_success( array_merge( $job->to_array(), array( 'preflight' => $preflight['message'] ) ) );
 	}
 
 	public static function process_transfer(): void {

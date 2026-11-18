@@ -97,7 +97,10 @@ class DirectMigrationPage extends AbstractPage {
 					</tr>
 					<tr>
 						<th scope="row"><label for="wpbp-mig-dest-url"><?php esc_html_e( 'Destination site address', 'wrensafe' ); ?></label></th>
-						<td><input type="url" id="wpbp-mig-dest-url" class="regular-text" placeholder="https://destination-site.com" /></td>
+						<td>
+							<input type="url" id="wpbp-mig-dest-url" class="regular-text" placeholder="https://destination-site.com" />
+							<p class="description"><?php esc_html_e( 'As shown on the receiving site next to its key. Wrensafe checks the address and the key before it sends anything.', 'wrensafe' ); ?></p>
+						</td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wpbp-mig-token"><?php esc_html_e( 'Migration key', 'wrensafe' ); ?></label></th>
@@ -105,6 +108,8 @@ class DirectMigrationPage extends AbstractPage {
 					</tr>
 				</table>
 				<button type="button" id="wpbp-mig-send" class="button button-primary"><?php esc_html_e( 'Start transfer', 'wrensafe' ); ?></button>
+
+				<div class="wpbp-inline-notice is-error" id="wpbp-mig-error" role="alert" hidden></div>
 
 				<div class="wpbp-card wpbp-backup-progress" id="wpbp-mig-progress" hidden>
 					<div class="wpbp-progress-bar"><div class="wpbp-progress-bar-fill" style="width:0%"></div></div>

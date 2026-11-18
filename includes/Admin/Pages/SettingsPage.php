@@ -748,6 +748,7 @@ class SettingsPage extends AbstractPage {
 							<input type="checkbox" name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[migration_require_https]" value="1" <?php checked( ! empty( $s['migration_require_https'] ) ); ?>>
 							<?php esc_html_e( 'Only send or receive a direct migration over HTTPS.', 'wrensafe' ); ?>
 						</label>
+						<p class="description"><?php esc_html_e( 'Both sites check this: the sending site for the address it sends to, the receiving site for the connection it gets. For local or test sites without a trusted certificate, turn it off on both sites.', 'wrensafe' ); ?></p>
 					</td>
 				</tr>
 				<tr>

@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.2
+Stable tag: 1.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -181,6 +181,13 @@ Wrensafe only contacts the services below, and only after a site administrator c
 
 == Changelog ==
 
+= 1.1.3 =
+* Fixed: Direct Migration stopped with "Too many requests" partway through a larger backup, and new attempts were refused too. The receiving site no longer counts the parts of a transfer that uses a valid key, its limits no longer extend themselves while you retry, and the sending site waits and continues when asked to slow down (also with a receiving site on an older version).
+* Fixed: starting a transfer again with the same key now continues where it stopped instead of starting over, and short connection problems are retried automatically.
+* Changed: before sending, Wrensafe checks the receiving site: that it can be reached, the key is valid, and it accepts this connection (HTTP or HTTPS). Problems are shown as an error that names the site to change, for example which site's "Require HTTPS" setting blocks the transfer, an address that redirects to another one, or a local site's self-made HTTPS certificate.
+* Fixed: an error during Direct Migration was shown as a plain status line, and some lost their reason ("An error occurred").
+* Changed: the Wrensafe icon in the admin menu is now the colour logo (on a small white tile while the item is open or hovered, so it stays clear on any colour scheme).
+
 = 1.1.2 =
 * Fixed: a Wrensafe zip installed from a folder with another name (for example GitHub's "Source code" download, which unpacks to "wrensafe-plugin-1.1.0") was added as a second plugin when you uploaded a new version, instead of replacing the installed one. Wrensafe now says when it runs from such a folder and how to fix it once.
 * Fixed: when two copies are active, the notice now says which version is running and has a button to deactivate the older copy.
@@ -231,6 +238,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.3 =
+Direct Migration no longer stops with "Too many requests", continues an interrupted transfer, and explains HTTPS and key problems before sending. Update both sites.
 
 = 1.1.2 =
 If uploading a new version added a second Wrensafe instead of replacing it, Wrensafe now shows why and how to fix it once; deleting a duplicate copy always keeps your data.

@@ -40,7 +40,7 @@ class TransferServer {
 	private const SESSION_LIFETIME  = 7200; // 2 hours.
 	private const MAX_TOTAL_BYTES   = 20 * 1024 * 1024 * 1024; // 20GB.
 	private const RATE_LIMIT_WINDOW = 60;
-	private const RATE_LIMIT_MAX    = 30; // requests per minute per IP, across all three endpoints.
+	private const RATE_LIMIT_MAX    = 30; // check/init requests per minute per IP. Chunks of a session with a valid key aren't counted.
 	private const THROTTLE_WINDOW   = 900; // 15 minutes.
 	private const THROTTLE_MAX      = 5; // failed key verifications per IP.
 	private const LOCK_TRANSIENT    = 'wpbp_migration_lock';
@@ -50,6 +50,16 @@ class TransferServer {
 	}
 
 	public function register_routes(): void {
+		register_rest_route(
+			'wpbp/v1',
+			'/migration/check',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( $this, 'handle_check' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
 		register_rest_route(
 			'wpbp/v1',
 			'/migration/init',
@@ -104,29 +114,95 @@ class TransferServer {
 	}
 
 	// -- Rate limiting & failed-attempt throttling (per source IP) ----------
+	//
+	// Fixed windows: a window starts with its first request and ends
+	// $window seconds later, however many requests arrive meanwhile (an
+	// earlier version renewed the window on every request, so retries kept
+	// a sender locked out). Only "check" and "init" count towards the
+	// request limit; the chunks of a session whose key verifies don't (a fast
+	// link sends far more than 30 a minute). Failed key checks are limited
+	// on every endpoint.
+
+	/** @return array{count:int,reset:int} */
+	private function window( string $name, string $ip ): array {
+		$value = get_transient( 'wpbp_migration_' . $name . '_' . md5( $ip ) );
+
+		if ( ! is_array( $value ) || (int) ( $value['reset'] ?? 0 ) <= time() ) {
+			return array(
+				'count' => 0,
+				'reset' => 0,
+			);
+		}
+
+		return array(
+			'count' => (int) $value['count'],
+			'reset' => (int) $value['reset'],
+		);
+	}
+
+	private function hit( string $name, string $ip, int $length ): void {
+		$window = $this->window( $name, $ip );
+		$reset  = $window['reset'] > 0 ? $window['reset'] : time() + $length;
+
+		set_transient(
+			'wpbp_migration_' . $name . '_' . md5( $ip ),
+			array(
+				'count' => $window['count'] + 1,
+				'reset' => $reset,
+			),
+			max( 1, $reset - time() )
+		);
+	}
 
 	private function is_rate_limited( string $ip ): bool {
-		return (int) get_transient( 'wpbp_migration_rate_' . md5( $ip ) ) >= self::RATE_LIMIT_MAX;
+		return $this->window( 'rate', $ip )['count'] >= self::RATE_LIMIT_MAX;
 	}
 
 	private function record_request( string $ip ): void {
-		$key   = 'wpbp_migration_rate_' . md5( $ip );
-		$count = (int) get_transient( $key );
-		set_transient( $key, $count + 1, self::RATE_LIMIT_WINDOW );
+		$this->hit( 'rate', $ip, self::RATE_LIMIT_WINDOW );
 	}
 
 	private function is_throttled( string $ip ): bool {
-		return (int) get_transient( 'wpbp_migration_throttle_' . md5( $ip ) ) >= self::THROTTLE_MAX;
+		return $this->window( 'throttle', $ip )['count'] >= self::THROTTLE_MAX;
 	}
 
 	private function record_failed_attempt( string $ip ): void {
-		$key   = 'wpbp_migration_throttle_' . md5( $ip );
-		$count = (int) get_transient( $key );
-		set_transient( $key, $count + 1, self::THROTTLE_WINDOW );
+		$this->hit( 'throttle', $ip, self::THROTTLE_WINDOW );
 	}
 
 	private function clear_throttle( string $ip ): void {
 		delete_transient( 'wpbp_migration_throttle_' . md5( $ip ) );
+	}
+
+	/**
+	 * 429 with Retry-After (seconds until the window ends), so the sending
+	 * site waits and continues instead of failing.
+	 */
+	private function too_many_requests( string $ip ): \WP_REST_Response {
+		$reset = max( $this->window( 'rate', $ip )['reset'], $this->is_throttled( $ip ) ? $this->window( 'throttle', $ip )['reset'] : 0 );
+		$wait  = max( 1, $reset - time() );
+
+		$minutes = (int) ceil( $wait / 60 );
+		$when    = $wait < 120
+			/* translators: %d: number of seconds */
+			? sprintf( _n( '%d second', '%d seconds', $wait, 'wrensafe' ), $wait )
+			/* translators: %d: number of minutes */
+			: sprintf( _n( '%d minute', '%d minutes', $minutes, 'wrensafe' ), $minutes );
+		$response = new \WP_REST_Response(
+			array(
+				'message'     => sprintf(
+					/* translators: 1: site address, 2: time to wait, e.g. "15 minutes" */
+					__( 'The receiving site (%1$s) is limiting requests from this server, for example after several wrong migration keys. Try again in %2$s.', 'wrensafe' ),
+					home_url(),
+					$when
+				),
+				'retry_after' => $wait,
+			),
+			429
+		);
+		$response->header( 'Retry-After', (string) $wait );
+
+		return $response;
 	}
 
 	// -- Single-session binding ----------------------------------------------
@@ -202,21 +278,70 @@ class TransferServer {
 		$this->release_lock( $token );
 	}
 
+	private function accepts_this_connection(): bool {
+		return ! Settings::get( 'migration_require_https', true ) || is_ssl();
+	}
+
 	private function require_https_error(): ?\WP_REST_Response {
-		if ( Settings::get( 'migration_require_https', true ) && ! is_ssl() ) {
-			return new \WP_REST_Response( array( 'message' => __( 'This site accepts direct migrations only over HTTPS. Turn on HTTPS for this site, or turn off the HTTPS requirement in Wrensafe → Settings → Direct Migration.', 'wrensafe' ) ), 400 );
+		if ( ! $this->accepts_this_connection() ) {
+			return new \WP_REST_Response(
+				array(
+					'message' => sprintf(
+						/* translators: %s: site address */
+						__( 'The receiving site (%s) accepts direct migrations only over HTTPS. Use its https:// address, or, on that site, turn off “Require HTTPS” in Wrensafe → Settings → Direct Migration (for example for local or test sites).', 'wrensafe' ),
+						home_url()
+					),
+				),
+				400
+			);
 		}
 
 		return null;
 	}
 
-	public function handle_init( \WP_REST_Request $request ) {
+	/**
+	 * Before a transfer: confirm the key and say what this site accepts, so
+	 * the sending site can explain any problem before it sends anything.
+	 */
+	public function handle_check( \WP_REST_Request $request ) {
 		$ip = $this->remote_ip();
-		$this->record_request( $ip );
 
 		if ( $this->is_rate_limited( $ip ) || $this->is_throttled( $ip ) ) {
-			return new \WP_REST_Response( array( 'message' => __( 'Too many requests. Please try again later.', 'wrensafe' ) ), 429 );
+			return $this->too_many_requests( $ip );
 		}
+
+		$this->record_request( $ip );
+
+		if ( null === $this->verify_key( $request ) ) {
+			$this->record_failed_attempt( $ip );
+			/* translators: %s: site address */
+			return new \WP_REST_Response( array( 'message' => sprintf( __( 'The receiving site (%s) didn’t accept the migration key: it is wrong, expired or already used. Generate a new key on that site.', 'wrensafe' ), home_url() ) ), 403 );
+		}
+
+		$this->clear_throttle( $ip );
+
+		return new \WP_REST_Response(
+			array(
+				'success'        => true,
+				'version'        => WPBP_VERSION,
+				'site_url'       => home_url(),
+				'https'          => is_ssl(),
+				'require_https'  => (bool) Settings::get( 'migration_require_https', true ),
+				'accepts'        => $this->accepts_this_connection(),
+				'max_chunk_size' => $this->max_chunk_bytes(),
+			),
+			200
+		);
+	}
+
+	public function handle_init( \WP_REST_Request $request ) {
+		$ip = $this->remote_ip();
+
+		if ( $this->is_rate_limited( $ip ) || $this->is_throttled( $ip ) ) {
+			return $this->too_many_requests( $ip );
+		}
+
+		$this->record_request( $ip );
 
 		$https_error = $this->require_https_error();
 		if ( null !== $https_error ) {
@@ -246,8 +371,33 @@ class TransferServer {
 			return new \WP_REST_Response( array( 'message' => __( 'Invalid filename or declared size.', 'wrensafe' ) ), 400 );
 		}
 
+		// The same key starting again for the same backup: continue the
+		// unfinished session where it stopped instead of starting over.
+		$existing = $this->read_meta( $token );
+		$part     = $this->session_path( $token );
+
+		// Only for senders that continue from the returned position (1.1.3+
+		// send resume=1); an older sender always starts at the first chunk.
+		if ( '1' === (string) $request->get_param( 'resume' ) && null !== $existing && (string) $existing['filename'] === $filename && (int) $existing['total_size'] === $total_size && file_exists( $part ) ) {
+			clearstatcache( true, $part );
+
+			if ( (int) filesize( $part ) === (int) $existing['received_bytes'] ) {
+				Logger::info( 'Incoming direct migration resumed at ' . size_format( (int) $existing['received_bytes'] ) . '.' );
+
+				return new \WP_REST_Response(
+					array(
+						'success'          => true,
+						'max_chunk_size'   => $this->max_chunk_bytes(),
+						'received_bytes'   => (int) $existing['received_bytes'],
+						'next_chunk_index' => (int) $existing['next_chunk_index'],
+					),
+					200
+				);
+			}
+		}
+
 		FileSystem::ensure_protected_directory( FileSystem::uploads_dir() );
-		file_put_contents( $this->session_path( $token ), '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		file_put_contents( $part, '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 
 		$this->write_meta(
 			$token,
@@ -271,8 +421,10 @@ class TransferServer {
 
 		return new \WP_REST_Response(
 			array(
-				'success'        => true,
-				'max_chunk_size' => $this->max_chunk_bytes(),
+				'success'          => true,
+				'max_chunk_size'   => $this->max_chunk_bytes(),
+				'received_bytes'   => 0,
+				'next_chunk_index' => 0,
 			),
 			200
 		);
@@ -280,10 +432,10 @@ class TransferServer {
 
 	public function handle_chunk( \WP_REST_Request $request ) {
 		$ip = $this->remote_ip();
-		$this->record_request( $ip );
 
-		if ( $this->is_rate_limited( $ip ) || $this->is_throttled( $ip ) ) {
-			return new \WP_REST_Response( array( 'message' => __( 'Too many requests. Please try again later.', 'wrensafe' ) ), 429 );
+		// Only failed key checks are limited here (see the rate-limit note).
+		if ( $this->is_throttled( $ip ) ) {
+			return $this->too_many_requests( $ip );
 		}
 
 		$key = $this->verify_key( $request );
@@ -310,7 +462,14 @@ class TransferServer {
 		}
 
 		if ( $chunk_index !== (int) $meta['next_chunk_index'] ) {
-			return new \WP_REST_Response( array( 'message' => __( 'Chunk out of order. Please restart the migration.', 'wrensafe' ) ), 409 );
+			return new \WP_REST_Response(
+				array(
+					'message'          => __( 'Chunk out of order. Please restart the migration.', 'wrensafe' ),
+					'next_chunk_index' => (int) $meta['next_chunk_index'],
+					'received_bytes'   => (int) $meta['received_bytes'],
+				),
+				409
+			);
 		}
 
 		if ( (int) $meta['received_bytes'] + $chunk_len > (int) $meta['total_size'] ) {
@@ -343,10 +502,9 @@ class TransferServer {
 
 	public function handle_finalize( \WP_REST_Request $request ) {
 		$ip = $this->remote_ip();
-		$this->record_request( $ip );
 
-		if ( $this->is_rate_limited( $ip ) ) {
-			return new \WP_REST_Response( array( 'message' => __( 'Too many requests. Please try again later.', 'wrensafe' ) ), 429 );
+		if ( $this->is_throttled( $ip ) ) {
+			return $this->too_many_requests( $ip );
 		}
 
 		$key = $this->verify_key( $request );
