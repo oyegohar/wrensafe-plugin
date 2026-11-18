@@ -199,7 +199,7 @@ class Onboarding {
 	 */
 	public static function render_welcome_template(): void {
 		$slides = array(
-			array( 'shield', __( 'Welcome to Wrensafe', 'wrensafe' ), __( 'Back up, restore and move this WordPress site, with checks at every step. Nothing on the site changes until you have reviewed it.', 'wrensafe' ) ),
+			array( 'brand', __( 'Welcome to Wrensafe', 'wrensafe' ), __( 'Back up, restore and move this WordPress site, with checks at every step. Nothing on the site changes until you have reviewed it.', 'wrensafe' ) ),
 			array( 'archive', __( 'Back up', 'wrensafe' ), __( 'Back up the whole site, or only the database, files, media, plugins or themes. Each backup is one .wbp file with checksums, and can be encrypted with a password.', 'wrensafe' ) ),
 			array( 'restore', __( 'Restore safely', 'wrensafe' ), __( 'Before a restore you see what’s inside and what will change. A rollback point is saved first, so you can undo it. Backups made by other plugins can be restored too.', 'wrensafe' ) ),
 			array( 'globe', __( 'Move and test', 'wrensafe' ), __( 'Send a backup straight to another site with Direct Migration, let Migration Assistant check the server first, or try changes on a private staging copy.', 'wrensafe' ) ),
@@ -217,7 +217,11 @@ class Onboarding {
 			<div class="wpbp-welcome">
 				<?php foreach ( $slides as $i => list( $icon, $title, $text ) ) : ?>
 					<div class="wpbp-welcome-slide" data-title="<?php echo esc_attr( $title ); ?>"<?php echo 0 === $i ? '' : ' hidden'; ?>>
-						<span class="wpbp-welcome-icon" aria-hidden="true"><?php Icons::render( $icon, 28 ); ?></span>
+						<?php if ( 'brand' === $icon ) : ?>
+							<span class="wpbp-welcome-icon is-brand" aria-hidden="true"><?php echo \WPBP\Admin\Pages\AbstractPage::BRAND_MARK_SVG; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline SVG constant (the brand mark). ?></span>
+						<?php else : ?>
+							<span class="wpbp-welcome-icon" aria-hidden="true"><?php Icons::render( $icon, 28 ); ?></span>
+						<?php endif; ?>
 						<p><?php echo esc_html( $text ); ?></p>
 					</div>
 				<?php endforeach; ?>

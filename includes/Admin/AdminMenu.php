@@ -34,17 +34,26 @@ class AdminMenu {
 	}
 
 	/**
-	 * Tiny global stylesheet for the Backup Browser submenu badge. Added on
-	 * every admin screen (the badge is visible everywhere the menu is), since
-	 * the plugin's main stylesheet only loads on its own pages. Printed via
-	 * the Styles API on a file-less handle instead of a raw <style> tag.
+	 * Tiny global stylesheet for the admin menu: the Wrensafe icon and the
+	 * Backup Browser submenu badge. Added on every admin screen (the menu is
+	 * visible everywhere), since the plugin's main stylesheet only loads on
+	 * its own pages. Printed via the Styles API on a file-less handle instead
+	 * of a raw <style> tag.
+	 *
+	 * The icon is the brand's menu icon used as a CSS mask filled with
+	 * currentColor, so it takes the admin colour scheme's colours (normal,
+	 * hover, current) exactly like a Dashicon, without a data URI.
 	 */
 	public function enqueue_badge_styles(): void {
+		$icon = esc_url( WPBP_PLUGIN_URL . 'assets/admin/images/menu-icon.svg' );
+
 		wp_register_style( 'wpbp-admin-menu', false, array(), WPBP_VERSION );
 		wp_enqueue_style( 'wpbp-admin-menu' );
 		wp_add_inline_style(
 			'wpbp-admin-menu',
-			'#adminmenu .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:linear-gradient(135deg,#3056f5,#6c5ce7);color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
+			'#adminmenu #toplevel_page_' . self::TOP_SLUG . ' div.wp-menu-image::before{content:"";background-color:currentColor;-webkit-mask:url("' . $icon . '") center/20px 20px no-repeat;mask:url("' . $icon . '") center/20px 20px no-repeat}'
+			. '#adminmenu .wp-submenu a:has(> .wpbp-menu-badge){white-space:nowrap}'
+			. '#adminmenu .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:#2457f5;color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
 		);
 	}
 
@@ -100,10 +109,9 @@ class AdminMenu {
 			CapabilityManager::VIEW_DASHBOARD,
 			self::TOP_SLUG,
 			$this->page_callback( self::TOP_SLUG ),
-			// Data/backup-themed icon (database) rather than a security shield;
-			// a Dashicon recolours correctly with the admin colour scheme and in
-			// the collapsed menu.
-			'dashicons-database',
+			// The Wrensafe icon is drawn by CSS (see enqueue_badge_styles()), so
+			// it recolours with the admin colour scheme like a Dashicon.
+			'none',
 			80
 		);
 

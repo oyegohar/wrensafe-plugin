@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -56,6 +56,10 @@ Wrensafe backs up your WordPress site and restores it — on the same server or 
 * **Email notifications** when a backup or restore fails, and, if you like, when one completes.
 * **Site Health checks:** Tools → Site Health tells you when the newest backup is out of date, when backups are only on this server, and when the backup folder can be downloaded from the web.
 * **Dashboard widget:** the newest backup, the next scheduled one and the off-site copy status on the WordPress Dashboard, with a Back up now button.
+
+### Credits
+
+Wrensafe includes the Manrope typeface by The Manrope Project Authors (github.com/googlefonts/manrope), licensed under the SIL Open Font License 1.1; the licence is in `assets/admin/fonts/OFL.txt`.
 
 == Installation ==
 
@@ -177,6 +181,12 @@ Wrensafe only contacts the services below, and only after a site administrator c
 
 == Changelog ==
 
+= 1.1.1 =
+* Changed: the new Wrensafe look (Cobalt Ice). The new logo in each page header and the welcome tour, the Wrensafe icon in the admin menu (it follows your admin colour scheme), the brand's cobalt, navy and ice-blue colours, a light frost background on Wrensafe's pages, and the Manrope typeface for headings. Manrope is bundled with the plugin; nothing is loaded from other sites.
+* Changed: new WordPress.org banner, icon and screenshots.
+* Fixed: the backup progress window now lists "Checking the backup" and the off-site copy as their own steps when they're turned on, and its percentage no longer steps back during the check.
+* Fixed: the Backup Browser count in the admin menu no longer wraps onto a second line.
+
 = 1.1.0 =
 * New: off-site copies (Settings → Remote storage). Each backup can be copied to FTP/FTPS, SFTP or S3-compatible storage right after it's made, in parts that resume after an interruption, keeping only the newest copies there. Choose whether automatic backups, backups you make yourself, or both are copied. Passwords and keys are stored encrypted with the site's own security keys. The Backup Browser shows each backup's copy status, and a failed copy is emailed when failure emails are on.
 * New: a separate schedule for the database, next to the full-site schedule, on the Scheduled Backups page.
@@ -216,6 +226,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.1 =
+The new Wrensafe look: new logo and menu icon, Cobalt Ice colours and Manrope headings. The backup progress window also shows the check and the off-site copy steps.
 
 = 1.1.0 =
 Adds off-site copies to FTP, SFTP and S3-compatible storage, a separate database schedule, table and large-file exclusions, automatic backup checks, Search & Replace, Site Health checks and a Dashboard widget.

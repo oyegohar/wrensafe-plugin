@@ -784,7 +784,7 @@ class BackupManager {
 			$payload['verify_job_id'] = (string) $verify['job_id'];
 			$payload['phase']         = 'verify_backup';
 			$job->set_payload( $payload );
-			$job->update_progress( 95, __( 'Checking the backup…', 'wrensafe' ) );
+			$job->update_progress( 97, __( 'Checking the backup…', 'wrensafe' ) );
 			return;
 		}
 
@@ -806,7 +806,7 @@ class BackupManager {
 		}
 
 		if ( ! in_array( $state['status'], array( 'completed', 'failed' ), true ) ) {
-			$job->update_progress( 95, __( 'Checking the backup…', 'wrensafe' ) );
+			$job->update_progress( 97, __( 'Checking the backup…', 'wrensafe' ) );
 			return;
 		}
 
@@ -836,7 +836,7 @@ class BackupManager {
 			$payload['remote_state'] = array();
 			$job->set_payload( $payload );
 			/* translators: %s: storage name, e.g. FTP / FTPS */
-			$job->update_progress( 96, sprintf( __( 'Copying the backup to %s…', 'wrensafe' ), RemoteStorage::types()[ RemoteStorage::get()['type'] ] ?? '' ) );
+			$job->update_progress( 98, sprintf( __( 'Copying the backup to %s…', 'wrensafe' ), RemoteStorage::types()[ RemoteStorage::get()['type'] ] ?? '' ) );
 			return;
 		}
 
@@ -874,7 +874,7 @@ class BackupManager {
 			$job->set_payload( $payload );
 			$percent = ! empty( $state['size'] ) ? (int) floor( 100 * (int) $state['offset'] / (int) $state['size'] ) : 0;
 			/* translators: 1: storage name, 2: percentage */
-			$job->update_progress( 96 + (int) floor( $percent * 3 / 100 ), sprintf( __( 'Copying the backup to %1$s (%2$d%%)…', 'wrensafe' ), $label, $percent ) );
+			$job->update_progress( 98 + (int) floor( $percent / 100 ), sprintf( __( 'Copying the backup to %1$s (%2$d%%)…', 'wrensafe' ), $label, $percent ) );
 			return;
 		}
 

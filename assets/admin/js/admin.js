@@ -1651,11 +1651,13 @@
 
 		// The `done` thresholds mirror the backend phase progress map (Issue 09):
 		// scan ≤35/82, db export →82, archive batches 84–91, metadata 93,
-		// chunked checksum 93–96, record/encrypt 96–98, complete 100. Checksum
-		// is listed BEFORE encryption because that's the real execution order.
+		// chunked checksum 93–96, record 96, check after backup 97, off-site
+		// copy 98–99, complete 100. Checksum is listed BEFORE encryption because
+		// that's the real execution order.
 		function backupComponents( type, encrypt ) {
 			var hasDb = ( 'full' === type || 'database' === type );
 			var hasFiles = ( 'full' === type || 'files' === type );
+			var extra = ( window.wpbpAdmin && wpbpAdmin.backupSteps ) || {};
 			return [
 				{ key: 'prepare', label: wpbpT( 'Preparing backup' ), done: 5, on: true },
 				{ key: 'scan', label: wpbpT( 'Scanning files' ), done: 15, on: 'database' !== type },
@@ -1667,7 +1669,9 @@
 				{ key: 'archive', label: wpbpT( 'Building archive' ), done: 92, on: true },
 				{ key: 'checksum', label: wpbpT( 'Calculating checksum' ), done: 96, on: true },
 				{ key: 'encrypt', label: wpbpT( 'Encrypting backup' ), done: 98, on: !! encrypt },
-				{ key: 'save', label: wpbpT( 'Saving backup record' ), done: 99, on: true },
+				{ key: 'save', label: wpbpT( 'Saving backup record' ), done: 97, on: true },
+				{ key: 'verify', label: wpbpT( 'Checking the backup' ), done: 98, on: !! extra.verify },
+				{ key: 'remote', label: wpbpFormat( wpbpT( 'Copying to %s' ), extra.remoteName || '' ), done: 100, on: !! extra.remote },
 				{ key: 'cleanup', label: wpbpT( 'Cleaning up' ), done: 100, on: true },
 				{ key: 'done', label: wpbpT( 'Backup completed' ), done: 100, on: true }
 			];

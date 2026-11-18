@@ -52,6 +52,12 @@ class Assets {
 				'backupBrowserUrl'           => admin_url( 'admin.php?page=wrensafe-browser' ),
 				'createBackupUrl'            => admin_url( 'admin.php?page=wrensafe-backup' ),
 				'logsUrl'                    => admin_url( 'admin.php?page=wrensafe-logs' ),
+				// Extra steps a backup started here goes through (progress window).
+				'backupSteps'                => array(
+					'verify'     => (bool) Settings::get( 'verify_after_backup', false ),
+					'remote'     => \WPBP\Remote\RemoteStorage::is_enabled() && ! empty( \WPBP\Remote\RemoteStorage::get()['copy_manual'] ),
+					'remoteName' => (string) ( \WPBP\Remote\RemoteStorage::types()[ \WPBP\Remote\RemoteStorage::get()['type'] ] ?? '' ),
+				),
 				'i18n'                       => array(
 					'confirmDelete'             => __( 'Are you sure? This action cannot be undone.', 'wrensafe' ),
 					'confirmBulkDelete'         => __( 'Are you sure you want to delete the selected backups? This cannot be undone.', 'wrensafe' ),
@@ -234,6 +240,9 @@ class Assets {
 						'Start a new backup'               => __( 'Start a new backup', 'wrensafe' ),
 						'Checking…'                        => __( 'Checking…', 'wrensafe' ),
 						'Connecting…'                      => __( 'Connecting…', 'wrensafe' ),
+						'Checking the backup'              => __( 'Checking the backup', 'wrensafe' ),
+						/* translators: %s: storage name, e.g. SFTP */
+						'Copying to %s'                    => __( 'Copying to %s', 'wrensafe' ),
 						'Start dry run'                    => __( 'Start dry run', 'wrensafe' ),
 						'Replace now'                      => __( 'Replace now', 'wrensafe' ),
 						'Replace in the database?'         => __( 'Replace in the database?', 'wrensafe' ),
