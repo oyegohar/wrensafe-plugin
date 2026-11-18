@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="ws-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d2875"/>
+      <stop offset="0.55" stop-color="#3349f0"/>
+      <stop offset="1" stop-color="#6d4bff"/>
+    </linearGradient>
+    <radialGradient id="ws-glow" cx="0.72" cy="0.78" r="0.7">
+      <stop offset="0" stop-color="#8f84ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#8f84ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ws-shine" cx="0.2" cy="0.08" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="ws-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#0b1040" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" fill="url(#ws-bg)"/>
+  <rect width="256" height="256" fill="url(#ws-glow)"/>
+  <rect width="256" height="256" fill="url(#ws-shine)"/>
+  <circle cx="128" cy="132" r="88" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+  <g filter="url(#ws-shadow)">
+    <!-- Restore ring: clockwise from 10:30 round to 9 o'clock; the arrow at 10:30 points back (restore). -->
+    <path d="M79.5 83.5 A70 70 0 1 1 58 132" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round"/>
+    <path d="M59.7 103.3 L64.6 68.7 L94.4 98.3 Z" fill="#ffffff" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Wren: round body, cocked tail, short beak, facing right. -->
+    <g transform="translate(5 4)">
+      <path d="M101 139 L91 109 Q90 101 97 103 L120 128 Z" fill="#ffffff"/>
+      <ellipse cx="124" cy="140" rx="33" ry="24" fill="#ffffff"/>
+      <circle cx="151" cy="121" r="16" fill="#ffffff"/>
+      <path d="M164 116 L180 121 L164 126 Z" fill="#ffffff"/>
+      <path d="M104 134 Q124 124 142 138 Q126 152 104 134 Z" fill="#a9b7ff"/>
+      <circle cx="155" cy="118" r="3.4" fill="#1d2875"/>
+    </g>
+  </g>
+</svg>

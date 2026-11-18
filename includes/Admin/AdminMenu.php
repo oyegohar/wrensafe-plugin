@@ -1,0 +1,181 @@
+<?php
+/**
+ * Registers the Wrensafe admin menu and its submenu pages.
+ *
+ * @package WPBP\Admin
+ */
+
+namespace WPBP\Admin;
+
+use WPBP\Admin\Pages\BackupBrowserPage;
+use WPBP\Admin\Pages\BackupPage;
+use WPBP\Admin\Pages\DashboardPage;
+use WPBP\Admin\Pages\DirectMigrationPage;
+use WPBP\Admin\Pages\ImportRestorePage;
+use WPBP\Admin\Pages\LogsPage;
+use WPBP\Admin\Pages\MigrationAssistantPage;
+use WPBP\Admin\Pages\RollbackPage;
+use WPBP\Admin\Pages\SchedulePage;
+use WPBP\Admin\Pages\SettingsPage;
+use WPBP\Admin\Pages\StagingPage;
+use WPBP\Admin\Pages\SystemInfoPage;
+use WPBP\Security\CapabilityManager;
+
+defined( 'ABSPATH' ) || exit;
+
+class AdminMenu {
+
+	const TOP_SLUG = 'wrensafe';
+
+	public function register_hooks(): void {
+		add_action( 'admin_menu', array( $this, 'register_menu' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_badge_styles' ) );
+	}
+
+	/**
+	 * Tiny global stylesheet for the Backup Browser submenu badge. Added on
+	 * every admin screen (the badge is visible everywhere the menu is), since
+	 * the plugin's main stylesheet only loads on its own pages. Printed via
+	 * the Styles API on a file-less handle instead of a raw <style> tag.
+	 */
+	public function enqueue_badge_styles(): void {
+		wp_register_style( 'wpbp-admin-menu', false, array(), WPBP_VERSION );
+		wp_enqueue_style( 'wpbp-admin-menu' );
+		wp_add_inline_style(
+			'wpbp-admin-menu',
+			'#adminmenu .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:linear-gradient(135deg,#3056f5,#6c5ce7);color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
+		);
+	}
+
+	/**
+	 * Map of submenu slug => [ menu title, page class, required capability ].
+	 *
+	 * The capability is passed straight to add_menu_page()/add_submenu_page()
+	 * so WordPress itself hides menu items a Team Access user isn't granted,
+	 * rather than every item being visible to anyone who can reach wp-admin.
+	 */
+	private function pages(): array {
+		$pages = array(
+			self::TOP_SLUG                 => array( __( 'Dashboard', 'wrensafe' ), DashboardPage::class, CapabilityManager::VIEW_DASHBOARD ),
+			'wrensafe-backup'              => array( __( 'Create Backup', 'wrensafe' ), BackupPage::class, CapabilityManager::CREATE_BACKUPS ),
+			'wrensafe-import-restore'      => array( __( 'Import / Restore', 'wrensafe' ), ImportRestorePage::class, CapabilityManager::RESTORE_BACKUPS ),
+			'wrensafe-browser'             => array( __( 'Backup Browser', 'wrensafe' ), BackupBrowserPage::class, CapabilityManager::VIEW_BACKUPS ),
+			'wrensafe-migration-assistant' => array( __( 'Migration Assistant', 'wrensafe' ), MigrationAssistantPage::class, CapabilityManager::RESTORE_BACKUPS ),
+			'wrensafe-direct-migration'    => array( __( 'Direct Migration', 'wrensafe' ), DirectMigrationPage::class, CapabilityManager::MANAGE_DIRECT_MIGRATION ),
+			'wrensafe-schedule'            => array( __( 'Scheduled Backups', 'wrensafe' ), SchedulePage::class, CapabilityManager::MANAGE_SCHEDULES ),
+			'wrensafe-staging'             => array( __( 'Staging', 'wrensafe' ), StagingPage::class, CapabilityManager::MANAGE_STAGING ),
+			'wrensafe-rollback'            => array( __( 'Rollback', 'wrensafe' ), RollbackPage::class, CapabilityManager::RESTORE_BACKUPS ),
+			'wrensafe-logs'                => array( __( 'Activity Logs', 'wrensafe' ), LogsPage::class, CapabilityManager::VIEW_LOGS ),
+			'wrensafe-settings'            => array( __( 'Settings', 'wrensafe' ), SettingsPage::class, CapabilityManager::MANAGE_SETTINGS ),
+			'wrensafe-system-info'         => array( __( 'System Info', 'wrensafe' ), SystemInfoPage::class, CapabilityManager::VIEW_DASHBOARD ),
+		);
+
+		/**
+		 * Filters the Wrensafe admin pages: slug => array( menu label,
+		 * page class extending AbstractPage, capability ). Pages added by an
+		 * add-on are inserted before Activity Logs.
+		 *
+		 * @param array<string,array{0:string,1:string,2:string}> $pages
+		 */
+		$extra = (array) apply_filters( 'wpbp_admin_pages', array() );
+
+		if ( empty( $extra ) ) {
+			return $pages;
+		}
+
+		$position = array_search( 'wrensafe-logs', array_keys( $pages ), true );
+		$position = false === $position ? count( $pages ) : $position;
+
+		return array_slice( $pages, 0, $position, true ) + $extra + array_slice( $pages, $position, null, true );
+	}
+
+	public function register_menu(): void {
+		$pages = $this->pages();
+
+		add_menu_page(
+			__( 'Wrensafe', 'wrensafe' ),
+			__( 'Wrensafe', 'wrensafe' ),
+			CapabilityManager::VIEW_DASHBOARD,
+			self::TOP_SLUG,
+			$this->page_callback( self::TOP_SLUG ),
+			// Data/backup-themed icon (database) rather than a security shield;
+			// a Dashicon recolours correctly with the admin colour scheme and in
+			// the collapsed menu.
+			'dashicons-database',
+			80
+		);
+
+		// Numeric badge on the Backup Browser submenu: completed local backups
+		// only (failed/corrupted records and cancelled jobs are excluded).
+		$backup_count = \WPBP\Core\Database\BackupsRepository::count_completed();
+
+		foreach ( $pages as $slug => $page ) {
+			// The Dashboard (TOP_SLUG) is already registered by add_menu_page()
+			// above, and WordPress auto-adds it as the first submenu item.
+			// Re-adding a submenu with the same slug would bind a SECOND render
+			// callback to the same page hook, making the Dashboard render twice.
+			if ( self::TOP_SLUG === $slug ) {
+				continue;
+			}
+
+			list( $menu_title, , $capability ) = $page;
+			$page_title                        = $menu_title;
+
+			if ( 'wrensafe-browser' === $slug && $backup_count > 0 ) {
+				// Inline count pill (Issue 09) — styled globally by
+				// enqueue_badge_styles() so it renders correctly on every admin
+				// screen, vertically centered next to the menu text.
+				$menu_title .= sprintf(
+					' <span class="wpbp-menu-badge" aria-label="%s">%d</span>',
+					esc_attr(
+						sprintf(
+							/* translators: %d: number of completed backups */
+							_n( '%d completed backup', '%d completed backups', $backup_count, 'wrensafe' ),
+							$backup_count
+						)
+					),
+					$backup_count
+				);
+			}
+
+			add_submenu_page(
+				self::TOP_SLUG,
+				$page_title,
+				$menu_title,
+				$capability,
+				$slug,
+				$this->page_callback( $slug )
+			);
+		}
+
+		// The top-level menu duplicates the Dashboard entry by default; rename it explicitly.
+		global $submenu;
+		if ( isset( $submenu[ self::TOP_SLUG ][0] ) ) {
+			$submenu[ self::TOP_SLUG ][0][0] = __( 'Dashboard', 'wrensafe' ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- renames the auto-added first submenu item, the documented way to label it.
+		}
+	}
+
+	/**
+	 * Build a render callback for a given page slug.
+	 */
+	private function page_callback( string $slug ): callable {
+		return function () use ( $slug ): void {
+			$pages = $this->pages();
+
+			if ( ! isset( $pages[ $slug ] ) ) {
+				return;
+			}
+
+			list( , $page_class ) = $pages[ $slug ];
+
+			( new $page_class() )->render();
+		};
+	}
+
+	/**
+	 * Whether the given admin hook suffix belongs to a Wrensafe page.
+	 */
+	public static function is_plugin_screen( string $hook_suffix ): bool {
+		return false !== strpos( $hook_suffix, self::TOP_SLUG );
+	}
+}
