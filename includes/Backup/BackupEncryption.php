@@ -36,6 +36,7 @@
 namespace WPBP\Backup;
 
 use WPBP\Utils\ChunkSizeCalculator;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -44,10 +45,6 @@ defined( 'ABSPATH' ) || exit;
 // Every path is inside Wrensafe's protected storage directory, a PHP upload
 // temp file, or validated by WPBP\Security\PathValidator.
 // phpcs:disable WordPress.WP.AlternativeFunctions
-
-// Exception messages are stored as a job's error_message and logged; they
-// reach the browser only as JSON rendered with jQuery .text(), never as HTML.
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 class BackupEncryption {
 
@@ -97,6 +94,44 @@ class BackupEncryption {
 		return hash_hmac( 'sha256', 'wpbp-backup-pilot-hmac-key', $key, true );
 	}
 
+	/**
+	 * Why backups can't be encrypted or decrypted on this server, or '' when
+	 * they can. Encryption needs PHP's OpenSSL extension with AES-256 (GCM,
+	 * or CBC for the fallback format).
+	 *
+	 * Checked before a backup with encryption starts and at the start of
+	 * every encrypt/decrypt path, so a missing extension is reported in
+	 * words instead of as "Call to undefined function" halfway through.
+	 */
+	public static function unavailable_reason(): string {
+		foreach ( array( 'openssl_encrypt', 'openssl_decrypt', 'openssl_get_cipher_methods', 'openssl_cipher_iv_length' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				return __( 'Backup encryption needs the OpenSSL extension for PHP, which this server doesn’t have. Ask your host to enable OpenSSL, or make the backup without encryption.', 'wrensafe' );
+			}
+		}
+
+		$methods = array_map( 'strtolower', (array) openssl_get_cipher_methods() );
+
+		if ( ! in_array( self::GCM_CIPHER, $methods, true ) && ! in_array( self::CBC_CIPHER, $methods, true ) ) {
+			return __( 'Backup encryption needs AES-256, which this server’s OpenSSL doesn’t offer. Ask your host to update OpenSSL, or make the backup without encryption.', 'wrensafe' );
+		}
+
+		return '';
+	}
+
+	/**
+	 * Stop with a readable reason when encryption can't work here.
+	 *
+	 * @throws \RuntimeException When OpenSSL or AES-256 is missing.
+	 */
+	private static function require_available(): void {
+		$reason = self::unavailable_reason();
+
+		if ( '' !== $reason ) {
+			throw new \RuntimeException( esc_html( $reason ) );
+		}
+	}
+
 	private function gcm_available(): bool {
 		return in_array( self::GCM_CIPHER, openssl_get_cipher_methods(), true );
 	}
@@ -105,8 +140,12 @@ class BackupEncryption {
 	 * Encrypt a file in place: streams $file_path in chunks to a temp file,
 	 * then renames the temp file over the original only once the whole
 	 * archive has encrypted successfully.
+	 *
+	 * @throws \RuntimeException When this server can't encrypt (no OpenSSL).
 	 */
 	public function encrypt_file_in_place( string $file_path, string $password ): bool {
+		self::require_available();
+
 		$tmp_path = $file_path . '.encrypting.tmp';
 		$ok       = $this->encrypt_stream( $file_path, $tmp_path, $password );
 
@@ -134,9 +173,11 @@ class BackupEncryption {
 	 * @throws \RuntimeException When the files can't be read/written or encryption fails.
 	 */
 	public function encrypt_step( string $source_path, string $tmp_path, string $password, array &$state, float $deadline ): bool {
+		self::require_available();
+
 		if ( ! $this->gcm_available() ) {
 			if ( ! $this->encrypt_stream( $source_path, $tmp_path, $password ) ) {
-				throw new \RuntimeException( __( 'Backup encryption failed.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Backup encryption failed.', 'wrensafe' ) );
 			}
 
 			return true;
@@ -147,7 +188,7 @@ class BackupEncryption {
 			$out  = fopen( $tmp_path, 'wb' );
 
 			if ( false === $out ) {
-				throw new \RuntimeException( __( 'Backup encryption failed: the encrypted file could not be created.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Backup encryption failed: the encrypted file could not be created.', 'wrensafe' ) );
 			}
 
 			fwrite( $out, self::MAGIC_V2 . pack( 'C', 2 ) . pack( 'C', self::CIPHER_GCM ) . pack( 'N', self::ITERATIONS ) . $salt );
@@ -166,7 +207,7 @@ class BackupEncryption {
 		$out        = fopen( $tmp_path, 'c+b' );
 
 		if ( false === $in || false === $out ) {
-			throw new \RuntimeException( __( 'Backup encryption failed: the archive could not be opened.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'Backup encryption failed: the archive could not be opened.', 'wrensafe' ) );
 		}
 
 		fseek( $in, (int) $state['in'] );
@@ -182,7 +223,7 @@ class BackupEncryption {
 			if ( false === $plain ) {
 				fclose( $in );
 				fclose( $out );
-				throw new \RuntimeException( __( 'Backup encryption failed: a read error occurred.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Backup encryption failed: a read error occurred.', 'wrensafe' ) );
 			}
 
 			if ( '' === $plain ) {
@@ -197,7 +238,7 @@ class BackupEncryption {
 			if ( false === $cipher ) {
 				fclose( $in );
 				fclose( $out );
-				throw new \RuntimeException( __( 'Backup encryption failed.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Backup encryption failed.', 'wrensafe' ) );
 			}
 
 			$record = pack( 'N', strlen( $cipher ) ) . $nonce . $cipher . $tag;
@@ -205,7 +246,7 @@ class BackupEncryption {
 			if ( fwrite( $out, $record ) !== strlen( $record ) ) {
 				fclose( $in );
 				fclose( $out );
-				throw new \RuntimeException( __( 'Backup encryption failed: the disk may be full.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Backup encryption failed: the disk may be full.', 'wrensafe' ) );
 			}
 
 			$state['in']  = (int) $state['in'] + strlen( $plain );
@@ -234,13 +275,15 @@ class BackupEncryption {
 	 * @throws \RuntimeException On a wrong password or a damaged file.
 	 */
 	public function decrypt_step( string $source_path, string $password, string $tmp_path, array &$state, float $deadline ): bool {
+		self::require_available();
+
 		$wrong = __( 'Incorrect password, or the backup file is corrupted.', 'wrensafe' );
 
 		if ( empty( $state ) ) {
 			$handle = fopen( $source_path, 'rb' );
 
 			if ( false === $handle ) {
-				throw new \RuntimeException( __( 'The encrypted backup could not be opened.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The encrypted backup could not be opened.', 'wrensafe' ) );
 			}
 
 			$magic      = (string) fread( $handle, 8 );
@@ -253,7 +296,7 @@ class BackupEncryption {
 			if ( self::MAGIC_V2 !== $magic || 2 !== $version || self::CIPHER_GCM !== $cipher_id || self::SALT_LENGTH !== strlen( $salt ) ) {
 				// v1, CBC+HMAC, or unknown: one-shot path.
 				if ( ! $this->decrypt_file( $source_path, $password, $tmp_path ) ) {
-					throw new \RuntimeException( $wrong );
+					throw new \RuntimeException( esc_html( $wrong ) );
 				}
 
 				return true;
@@ -269,7 +312,7 @@ class BackupEncryption {
 			$out = fopen( $tmp_path, 'wb' );
 
 			if ( false === $out ) {
-				throw new \RuntimeException( __( 'The decrypted copy could not be created (check the storage folder permissions).', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The decrypted copy could not be created (check the storage folder permissions).', 'wrensafe' ) );
 			}
 
 			fclose( $out );
@@ -280,7 +323,7 @@ class BackupEncryption {
 		$out = fopen( $tmp_path, 'c+b' );
 
 		if ( false === $in || false === $out ) {
-			throw new \RuntimeException( __( 'The encrypted backup could not be opened.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The encrypted backup could not be opened.', 'wrensafe' ) );
 		}
 
 		fseek( $in, (int) $state['in'] );
@@ -308,7 +351,7 @@ class BackupEncryption {
 			if ( false === $plain ) {
 				fclose( $in );
 				fclose( $out );
-				throw new \RuntimeException( $wrong );
+				throw new \RuntimeException( esc_html( $wrong ) );
 			}
 
 			fwrite( $out, $plain );
@@ -340,15 +383,20 @@ class BackupEncryption {
 	 *
 	 * Falls back to a full decrypt for formats that can't be read from the
 	 * end (v1, CBC+HMAC) and for small archives.
+	 *
+	 * @throws \RuntimeException When this server can't decrypt (no OpenSSL).
 	 */
 	public function decrypt_tail_for_preview( string $source_path, string $password, string $destination_path ): bool {
-		$size = (int) @filesize( $source_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
-		$in   = fopen( $source_path, 'rb' );
+		self::require_available();
+
+		$in = fopen( $source_path, 'rb' );
 
 		if ( false === $in ) {
 			return false;
 		}
 
+		$stat       = fstat( $in );
+		$size       = false === $stat ? 0 : (int) $stat['size'];
 		$magic      = (string) fread( $in, 8 );
 		$version    = unpack( 'C', (string) fread( $in, 1 ) )[1] ?? 0;
 		$cipher_id  = unpack( 'C', (string) fread( $in, 1 ) )[1] ?? 0;
@@ -541,7 +589,7 @@ class BackupEncryption {
 				$local = $this->zip64_extra_offset( substr( $directory, $pos + 46 + $name_length, $extra_length ), substr( $directory, $pos, 46 ) );
 			}
 
-			if ( ! str_starts_with( $name, 'files/' ) && ! str_starts_with( $name, 'database/schema/' ) && ! str_starts_with( $name, 'database/data/' ) && null !== $local ) {
+			if ( ! Str::starts_with( $name, 'files/' ) && ! Str::starts_with( $name, 'database/schema/' ) && ! Str::starts_with( $name, 'database/data/' ) && null !== $local ) {
 				$lowest = min( $lowest, (int) $local );
 			}
 
@@ -659,8 +707,12 @@ class BackupEncryption {
 	 * decrypts in place, so the original encrypted backup is preserved).
 	 * Streams to a temp file and only renames it into place once every
 	 * chunk (GCM) or the whole-file HMAC (CBC) has been authenticated.
+	 *
+	 * @throws \RuntimeException When this server can't decrypt (no OpenSSL).
 	 */
 	public function decrypt_file( string $source_path, string $password, string $destination_path ): bool {
+		self::require_available();
+
 		$handle = fopen( $source_path, 'rb' );
 
 		if ( false === $handle ) {
@@ -870,7 +922,7 @@ class BackupEncryption {
 	private function decrypt_file_v1( string $source_path, string $password, string $destination_path ): bool {
 		$data = file_get_contents( $source_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_get_contents
 
-		if ( false === $data || ! str_starts_with( $data, self::MAGIC_V1 ) ) {
+		if ( false === $data || ! Str::starts_with( $data, self::MAGIC_V1 ) ) {
 			return false;
 		}
 
@@ -894,5 +946,3 @@ class BackupEncryption {
 }
 
 // phpcs:enable WordPress.WP.AlternativeFunctions
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

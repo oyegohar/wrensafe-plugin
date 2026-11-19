@@ -22,8 +22,7 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare().
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class RestoreHealthCheck {
@@ -38,6 +37,8 @@ class RestoreHealthCheck {
 		$nonce = wp_generate_password( 32, false );
 
 		set_transient( 'scrape_key_' . $key, $nonce, 2 * MINUTE_IN_SECONDS );
+		// Marks this request as the health check's own, for the boot guard.
+		set_transient( PluginSafety::SCRAPE_TRANSIENT, $key, 2 * MINUTE_IN_SECONDS );
 
 		$response = wp_remote_get(
 			add_query_arg(
@@ -56,6 +57,7 @@ class RestoreHealthCheck {
 		);
 
 		delete_transient( 'scrape_key_' . $key );
+		delete_transient( PluginSafety::SCRAPE_TRANSIENT );
 
 		if ( is_wp_error( $response ) ) {
 			return array( 'status' => 'unavailable' );
@@ -130,7 +132,7 @@ class RestoreHealthCheck {
 	private static function stored_option( string $name ): string {
 		global $wpdb;
 
-		return (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name = %s LIMIT 1", $name ) );
+		return (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", $name ) );
 	}
 
 	/** WordPress reports the file relative to the WordPress folder. */

@@ -50,7 +50,7 @@ class DashboardPage extends AbstractPage {
 	 * Relative time for a site-local MySQL datetime: "2 hours ago" / "in 9 hours".
 	 */
 	private static function relative( string $mysql ): string {
-		$ts = Time::mysql_to_timestamp( $mysql );
+		$ts = Time::to_timestamp( $mysql );
 
 		if ( 0 === $ts ) {
 			return '';
@@ -98,9 +98,9 @@ class DashboardPage extends AbstractPage {
 	 */
 	private function protection_state( int $completed, ?array $latest_full, ?array $latest_any, int $enabled, ?array $next_schedule ): array {
 		$next_run = $next_schedule['next_run_at'] ?? '';
-		$overdue  = '' !== $next_run && Time::mysql_to_timestamp( $next_run ) < time() - 10 * MINUTE_IN_SECONDS;
+		$overdue  = '' !== $next_run && Time::to_timestamp( $next_run ) < time() - 10 * MINUTE_IN_SECONDS;
 		$stale    = (int) apply_filters( 'wpbp_dashboard_stale_days', 7 ) * DAY_IN_SECONDS;
-		$full_age = $latest_full ? time() - Time::mysql_to_timestamp( $latest_full['created_at'] ) : null;
+		$full_age = $latest_full ? time() - Time::to_timestamp( $latest_full['created_at'] ) : null;
 
 		$last_full_fact = $latest_full
 			? sprintf(
@@ -275,7 +275,7 @@ class DashboardPage extends AbstractPage {
 						: esc_html__( 'None', 'wrensafe' );
 					?>
 				</p>
-				<?php if ( $next_schedule && Time::mysql_to_timestamp( $next_schedule['next_run_at'] ) < time() - 10 * MINUTE_IN_SECONDS ) : ?>
+				<?php if ( $next_schedule && Time::to_timestamp( $next_schedule['next_run_at'] ) < time() - 10 * MINUTE_IN_SECONDS ) : ?>
 					<p class="wpbp-stat-meta is-warning"><span class="dashicons dashicons-warning" aria-hidden="true"></span><?php /* translators: %s: relative time */ echo esc_html( sprintf( __( 'Overdue since %s', 'wrensafe' ), $schedules_due ) ); ?></p>
 				<?php elseif ( $next_schedule ) : ?>
 					<p class="wpbp-stat-meta"><?php /* translators: %s: relative time, e.g. "in 9 hours" */ echo esc_html( sprintf( __( 'Next run %s', 'wrensafe' ), $schedules_due ) ); ?></p>
@@ -359,7 +359,7 @@ class DashboardPage extends AbstractPage {
 								</p>
 								<p class="wpbp-list-meta">
 									<?php echo esc_html( self::type_label( $type ) . ' · ' . size_format( (int) $backup['size'] ) . ' · ' ); ?>
-									<?php echo Time::local_time_markup( (string) $backup['created_at'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapes internally; keeps the data-utc attribute. ?>
+									<?php echo wp_kses( Time::local_time_markup( (string) $backup['created_at'] ), \WPBP\Admin\Kses::allowed() ); ?>
 								</p>
 							</div>
 							<a class="button button-small wpbp-button-tonal<?php echo $locked ? ' disabled' : ''; ?>" <?php echo $locked ? 'aria-disabled="true"' : ''; ?> href="<?php echo esc_url( self::page_url( 'wrensafe-import-restore', array( 'backup_id' => (int) $backup['id'] ) ) ); ?>"><?php esc_html_e( 'Restore', 'wrensafe' ); ?></a>

@@ -84,8 +84,8 @@ class DashboardWidget {
 		$jobs    = JobsRepository::list_by_type( 'backup', 1 );
 		$last    = $jobs ? $jobs[0] : null;
 		$next    = SchedulesRepository::get_next_run_at();
-		$created = $latest ? Time::mysql_to_timestamp( (string) $latest['created_at'] ) : 0;
-		$failed  = $last && 'failed' === $last['status'] && ( ! $latest || Time::mysql_to_timestamp( (string) $last['created_at'] ) > $created );
+		$created = $latest ? Time::to_timestamp( (string) $latest['created_at'] ) : 0;
+		$failed  = $last && 'failed' === $last['status'] && ( ! $latest || Time::to_timestamp( (string) $last['created_at'] ) > $created );
 
 		echo '<ul class="wpbp-dw-list">';
 
@@ -119,10 +119,10 @@ class DashboardWidget {
 			if ( 0 === strpos( $destination, 'remote-failed:' ) ) {
 				$this->item( 'dashicons-cloud', 'error', __( 'Off-site copy', 'wrensafe' ), __( 'Copying the newest backup failed.', 'wrensafe' ), self::page( 'wrensafe-logs' ), __( 'See why', 'wrensafe' ) );
 			} elseif ( 0 === strpos( $destination, 'remote:' ) ) {
-				/* translators: %s: storage type, e.g. "SFTP" */
+				/* translators: %s: storage type, e.g. "FTP / FTPS" */
 				$this->item( 'dashicons-cloud-saved', 'good', __( 'Off-site copy', 'wrensafe' ), sprintf( __( 'The newest backup is copied to %s.', 'wrensafe' ), $types[ substr( $destination, 7 ) ] ?? substr( $destination, 7 ) ) );
 			} else {
-				/* translators: %s: storage type, e.g. "SFTP" */
+				/* translators: %s: storage type, e.g. "FTP / FTPS" */
 				$this->item( 'dashicons-cloud', 'neutral', __( 'Off-site copy', 'wrensafe' ), sprintf( __( 'Set up: %s.', 'wrensafe' ), $types[ RemoteStorage::get()['type'] ] ?? '' ) );
 			}
 		}

@@ -17,9 +17,6 @@ defined( 'ABSPATH' ) || exit;
 // streaming API. Paths are uploaded import files in protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class UpdraftPlus extends AbstractFormat {
 
 	private const PATTERN = '/^backup_(\d{4}-\d{2}-\d{2}-\d{4})_.*_([0-9a-f]{12})-(db|plugins|themes|uploads|others|mu-plugins)(\d*)\.(zip|gz|sql|crypt|gz\.crypt)$/i';
@@ -68,7 +65,7 @@ class UpdraftPlus extends AbstractFormat {
 
 			if ( 'db' === $part ) {
 				if ( false !== strpos( $ext, 'crypt' ) ) {
-					throw new \RuntimeException( __( 'This UpdraftPlus database backup is encrypted (.crypt). Decrypt it in UpdraftPlus first (Existing backups → database → Download), or create the backup without database encryption.', 'wrensafe' ) );
+					throw new \RuntimeException( esc_html__( 'This UpdraftPlus database backup is encrypted (.crypt). Decrypt it in UpdraftPlus first (Existing backups → database → Download), or create the backup without database encryption.', 'wrensafe' ) );
 				}
 
 				$gzip      = 'gz' === $ext;
@@ -105,7 +102,5 @@ class UpdraftPlus extends AbstractFormat {
 		);
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

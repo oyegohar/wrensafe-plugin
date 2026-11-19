@@ -204,8 +204,65 @@ abstract class AbstractFormat {
 		return array_keys( $names );
 	}
 
-	/** Contents of a small zip entry, or null. */
+	/**
+	 * Stop with a readable reason when PHP can't open .zip files.
+	 *
+	 * @throws \RuntimeException When the Zip extension (ZipArchive) is missing.
+	 */
+	public static function require_zip(): void {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			throw new \RuntimeException( esc_html__( 'This backup is a .zip file and this server\'s PHP has no Zip extension (ZipArchive). Ask your host to enable the PHP Zip extension, then try again.', 'wrensafe' ) );
+		}
+	}
+
+	/**
+	 * Stop with a readable reason when PHP can't read gzip/deflate data.
+	 *
+	 * @throws \RuntimeException When the Zlib extension is missing.
+	 */
+	public static function require_zlib(): void {
+		foreach ( array( 'gzopen', 'gzread', 'inflate_init', 'inflate_add' ) as $function ) {
+			if ( ! function_exists( $function ) ) {
+				throw new \RuntimeException( esc_html__( 'This backup is compressed (gzip) and this server\'s PHP has no Zlib extension. Ask your host to enable the PHP Zlib extension, then try again.', 'wrensafe' ) );
+			}
+		}
+	}
+
+	/**
+	 * Stop with a readable reason when PHP can't read .bz2 files.
+	 *
+	 * @throws \RuntimeException When the Bzip2 extension is missing.
+	 */
+	public static function require_bz2(): void {
+		if ( ! function_exists( 'bzopen' ) || ! in_array( 'compress.bzip2', stream_get_wrappers(), true ) ) {
+			throw new \RuntimeException( esc_html__( 'This backup is compressed with bzip2 and this server\'s PHP has no Bzip2 extension. Ask your host to enable the PHP Bz2 extension, or upload a .tar.gz or .zip copy of the backup.', 'wrensafe' ) );
+		}
+	}
+
+	/** Whether a zip has an entry (false when it can't be read, or PHP has no Zip extension). */
+	protected static function zip_has( string $zip_path, string $entry ): bool {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return false;
+		}
+
+		$zip = new \ZipArchive();
+
+		if ( true !== $zip->open( $zip_path ) ) {
+			return false;
+		}
+
+		$found = false !== $zip->locateName( $entry );
+		$zip->close();
+
+		return $found;
+	}
+
+	/** Contents of a small zip entry, or null (also when PHP has no Zip extension). */
 	protected static function zip_entry( string $zip_path, string $entry, int $max = 1048576 ): ?string {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return null;
+		}
+
 		$zip = new \ZipArchive();
 
 		if ( true !== $zip->open( $zip_path ) ) {
@@ -219,8 +276,15 @@ abstract class AbstractFormat {
 		return false === $data ? null : (string) $data;
 	}
 
-	/** First entry name of a zip matching $pattern (reads only the zip's index), or null. */
+	/**
+	 * First entry name of a zip matching $pattern (reads only the zip's
+	 * index), or null (also when PHP has no Zip extension).
+	 */
 	protected static function zip_find( string $zip_path, string $pattern ): ?string {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return null;
+		}
+
 		$zip = new \ZipArchive();
 
 		if ( true !== $zip->open( $zip_path ) ) {
@@ -298,9 +362,17 @@ abstract class AbstractFormat {
 		return $meta;
 	}
 
-	/** The first few KB of a (possibly gzipped) SQL file. */
+	/**
+	 * The first few KB of a (possibly gzipped) SQL file; '' when it can't be
+	 * read (a gzipped file without PHP's Zlib extension: the conversion
+	 * reports that, see ForeignConverter::describe()).
+	 */
 	public static function sql_head( string $file, bool $gzip ): string {
 		if ( $gzip ) {
+			if ( ! function_exists( 'gzopen' ) ) {
+				return '';
+			}
+
 			$handle = gzopen( $file, 'rb' );
 			$head   = false === $handle ? '' : (string) gzread( $handle, 8192 );
 			if ( false !== $handle ) {

@@ -24,16 +24,14 @@
 
 namespace WPBP\Backup;
 
+use WPBP\Utils\Errors;
+
 defined( 'ABSPATH' ) || exit;
 
 // Archives are streamed with native file handles (fopen/fread/fwrite/fseek):
 // WP_Filesystem has no streaming or random-access write API. Every path is
 // inside Wrensafe's protected storage directory.
 // phpcs:disable WordPress.WP.AlternativeFunctions
-
-// Exception messages are stored as a job's error_message and logged; they
-// reach the browser only as JSON rendered with jQuery .text(), never as HTML.
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 class ZipStreamWriter {
 
@@ -140,7 +138,7 @@ class ZipStreamWriter {
 			$handle = fopen( $path, 'wb' );
 
 			if ( false === $handle ) {
-				throw new \RuntimeException( __( 'The backup archive could not be created (check the storage folder permissions).', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The backup archive could not be created (check the storage folder permissions).', 'wrensafe' ) );
 			}
 
 			fclose( $handle );
@@ -188,17 +186,19 @@ class ZipStreamWriter {
 		$pending = $this->state['pending'];
 
 		if ( is_array( $pending ) && $pending['name'] !== $entry_name ) {
-			throw new \RuntimeException( 'Archive writer resumed with a different entry than the one in progress.' );
+			throw new \RuntimeException( esc_html__( 'The backup archive couldn’t be continued: a different file than the one in progress was added. Start the backup again.', 'wrensafe' ) );
 		}
 
 		$source = fopen( $source_path, 'rb' );
 
 		if ( false === $source ) {
 			throw new \RuntimeException(
-				sprintf(
-					/* translators: %s: file path inside the backup */
-					__( 'A file could not be read while building the backup: %s', 'wrensafe' ),
-					$entry_name
+				esc_html(
+					sprintf(
+						/* translators: %s: file path inside the backup */
+						__( 'A file could not be read while building the backup: %s', 'wrensafe' ),
+						Errors::utf8( $entry_name )
+					)
 				)
 			);
 		}
@@ -226,10 +226,12 @@ class ZipStreamWriter {
 			if ( false === $slice ) {
 				fclose( $source );
 				throw new \RuntimeException(
-					sprintf(
-						/* translators: %s: file path inside the backup */
-						__( 'A read error occurred while adding a file to the backup: %s', 'wrensafe' ),
-						$entry_name
+					esc_html(
+						sprintf(
+							/* translators: %s: file path inside the backup */
+							__( 'A read error occurred while adding a file to the backup: %s', 'wrensafe' ),
+							Errors::utf8( $entry_name )
+						)
 					)
 				);
 			}
@@ -291,7 +293,7 @@ class ZipStreamWriter {
 	 */
 	public function add_string( string $entry_name, string $data ): string {
 		if ( null !== $this->state['pending'] ) {
-			throw new \RuntimeException( 'Archive writer cannot add a new entry while another is in progress.' );
+			throw new \RuntimeException( esc_html__( 'The backup archive couldn’t be continued: a file was still being added. Start the backup again.', 'wrensafe' ) );
 		}
 
 		$use_deflate = function_exists( 'gzdeflate' ) && strlen( $data ) > 64;
@@ -313,7 +315,7 @@ class ZipStreamWriter {
 	 */
 	public function finish(): int {
 		if ( null !== $this->state['pending'] ) {
-			throw new \RuntimeException( 'Archive writer cannot finish while an entry is still in progress.' );
+			throw new \RuntimeException( esc_html__( 'The backup archive couldn’t be finished: a file was still being added. Start the backup again.', 'wrensafe' ) );
 		}
 
 		$this->open();
@@ -323,7 +325,7 @@ class ZipStreamWriter {
 		$central   = fopen( $this->state['central'], 'rb' );
 
 		if ( false === $central ) {
-			throw new \RuntimeException( __( 'The backup archive index could not be read back while finishing the archive.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive index could not be read back while finishing the archive.', 'wrensafe' ) );
 		}
 
 		while ( ! feof( $central ) ) {
@@ -497,10 +499,12 @@ class ZipStreamWriter {
 		if ( ! $zip64 && ( $usize >= self::MAX_32 || $csize >= self::MAX_32 ) ) {
 			// The file grew past 4 GB after its header was written.
 			throw new \RuntimeException(
-				sprintf(
-					/* translators: %s: file path inside the backup */
-					__( 'A file grew past 4 GB while it was being backed up: %s. Exclude it or try again when it is not being written to.', 'wrensafe' ),
-					$pending['name']
+				esc_html(
+					sprintf(
+						/* translators: %s: file path inside the backup */
+						__( 'A file grew past 4 GB while it was being backed up: %s. Exclude it or try again when it is not being written to.', 'wrensafe' ),
+						Errors::utf8( (string) $pending['name'] )
+					)
 				)
 			);
 		}
@@ -571,7 +575,7 @@ class ZipStreamWriter {
 		$handle = fopen( $this->state['central'], 'c+b' );
 
 		if ( false === $handle ) {
-			throw new \RuntimeException( __( 'The backup archive index could not be written (check the storage folder permissions).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive index could not be written (check the storage folder permissions).', 'wrensafe' ) );
 		}
 
 		ftruncate( $handle, (int) $this->state['cd_bytes'] );
@@ -580,7 +584,7 @@ class ZipStreamWriter {
 		fclose( $handle );
 
 		if ( strlen( $record ) !== $written ) {
-			throw new \RuntimeException( __( 'The backup archive index could not be written (the disk may be full).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive index could not be written (the disk may be full).', 'wrensafe' ) );
 		}
 	}
 
@@ -592,7 +596,7 @@ class ZipStreamWriter {
 				return $context;
 			}
 
-			throw new \RuntimeException( 'Archive writer could not resume a paused file (hash state unreadable).' );
+			throw new \RuntimeException( esc_html__( 'The backup archive couldn’t be continued: the saved progress of a large file is unreadable. Start the backup again.', 'wrensafe' ) );
 		}
 
 		return hash_init( $algorithm );
@@ -607,7 +611,7 @@ class ZipStreamWriter {
 		$handle = fopen( $this->state['path'], 'c+b' );
 
 		if ( false === $handle ) {
-			throw new \RuntimeException( __( 'The backup archive could not be opened for writing (check the storage folder permissions).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive could not be opened for writing (check the storage folder permissions).', 'wrensafe' ) );
 		}
 
 		$this->handle = $handle;
@@ -625,7 +629,7 @@ class ZipStreamWriter {
 			$result = fwrite( $this->handle, 0 === $written ? $bytes : substr( $bytes, $written ) );
 
 			if ( false === $result || 0 === $result ) {
-				throw new \RuntimeException( __( 'Writing to the backup archive failed. The disk may be full.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Writing to the backup archive failed. The disk may be full.', 'wrensafe' ) );
 			}
 
 			$written += $result;
@@ -656,7 +660,5 @@ class ZipStreamWriter {
 		return array( $time, $date );
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

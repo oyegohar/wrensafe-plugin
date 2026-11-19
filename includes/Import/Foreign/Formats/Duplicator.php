@@ -19,9 +19,6 @@ defined( 'ABSPATH' ) || exit;
 // streaming API. Paths are uploaded import files in protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class Duplicator extends AbstractFormat {
 
 	public function key(): string {
@@ -62,7 +59,7 @@ class Duplicator extends AbstractFormat {
 			}
 		}
 
-		throw new \RuntimeException( __( 'No Duplicator archive (…_archive.daf or …_archive.zip) was found.', 'wrensafe' ) );
+		throw new \RuntimeException( esc_html__( 'No Duplicator archive (…_archive.daf or …_archive.zip) was found.', 'wrensafe' ) );
 	}
 
 	public function classify( array $source, string $path ): array {
@@ -120,10 +117,12 @@ class Duplicator extends AbstractFormat {
 	}
 
 	private function zip_meta( string $path ): array {
+		self::require_zip();
+
 		$zip = new \ZipArchive();
 
 		if ( true !== $zip->open( $path ) ) {
-			throw new \RuntimeException( __( 'The Duplicator .zip archive could not be opened.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The Duplicator .zip archive could not be opened.', 'wrensafe' ) );
 		}
 
 		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
@@ -166,7 +165,5 @@ class Duplicator extends AbstractFormat {
 		return array();
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

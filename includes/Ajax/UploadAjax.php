@@ -20,6 +20,7 @@ use WPBP\Restore\ArchiveReader;
 use WPBP\Restore\RestoreJob;
 use WPBP\Security\CapabilityManager;
 use WPBP\Utils\ChunkSizeCalculator;
+use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 
@@ -236,16 +237,15 @@ class UploadAjax {
 		$upload_id = isset( $_POST['upload_id'] ) ? sanitize_text_field( wp_unslash( $_POST['upload_id'] ) ) : '';
 		$meta      = self::read_meta_or_die( $upload_id );
 
-		// tmp_name is a server-generated path; it is only used after
-		// is_uploaded_file() confirms PHP itself received this upload.
-		$chunk     = isset( $_FILES['chunk'] ) && is_array( $_FILES['chunk'] ) ? $_FILES['chunk'] : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated below.
-		$chunk_tmp = isset( $chunk['tmp_name'] ) ? (string) $chunk['tmp_name'] : '';
+		// tmp_name is a path PHP generated for this request; it is only used
+		// after is_uploaded_file() confirms PHP itself received this upload.
+		$chunk_tmp   = isset( $_FILES['chunk']['tmp_name'] ) && is_string( $_FILES['chunk']['tmp_name'] ) ? sanitize_text_field( $_FILES['chunk']['tmp_name'] ) : '';
+		$chunk_error = isset( $_FILES['chunk']['error'] ) && is_scalar( $_FILES['chunk']['error'] ) ? (int) $_FILES['chunk']['error'] : UPLOAD_ERR_NO_FILE;
+		$chunk_size  = isset( $_FILES['chunk']['size'] ) && is_scalar( $_FILES['chunk']['size'] ) ? absint( $_FILES['chunk']['size'] ) : 0;
 
-		if ( ! isset( $chunk['error'], $chunk['size'] ) || UPLOAD_ERR_OK !== (int) $chunk['error'] || '' === $chunk_tmp || ! is_uploaded_file( $chunk_tmp ) ) {
+		if ( UPLOAD_ERR_OK !== $chunk_error || '' === $chunk_tmp || ! is_uploaded_file( $chunk_tmp ) ) {
 			wp_send_json_error( array( 'message' => __( 'Chunk upload failed.', 'wrensafe' ) ), 400 );
 		}
-
-		$chunk_size = (int) $chunk['size'];
 
 		if ( $chunk_size <= 0 || $chunk_size > self::max_chunk_bytes() ) {
 			wp_send_json_error( array( 'message' => __( 'Chunk exceeds the maximum allowed size.', 'wrensafe' ) ), 400 );
@@ -474,8 +474,13 @@ class UploadAjax {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 		self::require_capability();
 
-		$job_id   = isset( $_POST['job_id'] ) ? absint( $_POST['job_id'] ) : 0;
-		$password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- passwords are used verbatim, never output or stored.
+		$job_id = isset( $_POST['job_id'] ) ? absint( $_POST['job_id'] ) : 0;
+
+		// The password is used exactly as typed: it only feeds the key
+		// derivation (PBKDF2) and is never stored, logged, output or used in
+		// a query. Any other filter would change some passwords and lock the
+		// owner out of their backup; FILTER_UNSAFE_RAW only rejects non-strings.
+		$password = isset( $_POST['encryption_password'] ) ? (string) filter_var( wp_unslash( $_POST['encryption_password'] ), FILTER_UNSAFE_RAW ) : '';
 		$job      = $job_id ? RestoreJob::get( $job_id ) : null;
 		$payload  = $job ? $job->payload() : array();
 		$path     = (string) ( $payload['uploaded_file'] ?? '' );
@@ -564,12 +569,19 @@ class UploadAjax {
 	 * set once every file has arrived.
 	 */
 	private static function finalize_into_set( string $set_id, string $upload_id, string $part_path, string $filename ): void {
+		$message = __( 'The uploaded file could not be moved into place (check file permissions).', 'wrensafe' );
+
 		try {
 			$name = ImportSet::add( $set_id, $part_path, $filename );
 		} catch ( \RuntimeException $e ) {
+			$name    = '';
+			$message = Errors::text( $e );
+		}
+
+		if ( '' === $name ) {
 			self::discard_session( $upload_id );
-			Logger::failed( 'upload_finalize_failed: ' . $filename . ' — ' . $e->getMessage() );
-			wp_send_json_error( array( 'message' => $e->getMessage() ), 500 );
+			Logger::failed( 'upload_finalize_failed: ' . $filename . ' — ' . $message );
+			wp_send_json_error( array( 'message' => $message ), 500 );
 		}
 
 		wp_delete_file( self::meta_path( $upload_id ) );

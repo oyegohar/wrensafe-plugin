@@ -21,6 +21,7 @@ use WPBP\Core\Database\JobsRepository;
 use WPBP\Core\Settings;
 use WPBP\Remote\RemoteStorage;
 use WPBP\Restore\ArchiveReader;
+use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 use WPBP\Utils\Sanitizer;
@@ -32,10 +33,6 @@ defined( 'ABSPATH' ) || exit;
 // Every path is inside Wrensafe's protected storage directory, a PHP upload
 // temp file, or validated by WPBP\Security\PathValidator.
 // phpcs:disable WordPress.WP.AlternativeFunctions
-
-// Exception messages here are stored as a job's error_message and logged; they
-// reach the browser only as JSON rendered with jQuery .text(), never as HTML.
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 class BackupManager {
 
@@ -184,8 +181,10 @@ class BackupManager {
 					$job->mark_failed( __( 'Unknown backup phase.', 'wrensafe' ) );
 			}
 		} catch ( \Throwable $e ) {
-			Logger::failed( 'backup_failed: ' . ( $payload['backup_type'] ?? 'full' ) . ' backup job #' . $job->id() . ' failed during ' . $phase . ': ' . $e->getMessage(), array(), $job->id() );
-			$job->mark_failed( $e->getMessage() );
+			$message = Errors::text( $e );
+
+			Logger::failed( 'backup_failed: ' . ( $payload['backup_type'] ?? 'full' ) . ' backup job #' . $job->id() . ' failed during ' . $phase . ': ' . $message, array(), $job->id() );
+			$job->mark_failed( $message );
 		}
 	}
 
@@ -255,19 +254,19 @@ class BackupManager {
 		);
 
 		foreach ( array(
-			'backups directory' => $backups_dir,
-			'temp directory'    => $tmp_dir,
-		) as $label => $dir ) {
+			array( $backups_dir, __( 'backups folder', 'wrensafe' ) ),
+			array( $tmp_dir, __( 'temporary folder', 'wrensafe' ) ),
+		) as list( $dir, $label ) ) {
 			if ( ! is_dir( $dir ) || ! wp_is_writable( $dir ) ) {
 				$message = sprintf(
-					/* translators: 1: directory role, 2: directory path */
+					/* translators: 1: folder role ("backups folder" or "temporary folder"), 2: folder path */
 					__( 'The %1$s is not writable (%2$s). Check file permissions/ownership or open_basedir restrictions on this server.', 'wrensafe' ),
 					$label,
-					basename( dirname( $dir ) ) . '/' . basename( $dir )
+					Errors::utf8( basename( dirname( $dir ) ) . '/' . basename( $dir ) )
 				);
 
 				Logger::failed( 'backup_preflight_failed: ' . $message, array(), $job->id() );
-				throw new \RuntimeException( $message );
+				throw new \RuntimeException( esc_html( $message ) );
 			}
 		}
 
@@ -277,6 +276,16 @@ class BackupManager {
 
 	private function step_init( BackupJob $job, array $payload ): void {
 		$type = $payload['backup_type'] ?? 'full';
+
+		// Encryption was asked for: fail now, with the reason, rather than
+		// after the whole site has been packed.
+		if ( ! empty( $payload['encrypt'] ) ) {
+			$reason = BackupEncryption::unavailable_reason();
+
+			if ( '' !== $reason ) {
+				throw new \RuntimeException( esc_html( $reason ) );
+			}
+		}
 
 		$tmp_dir = $this->tmp_dir_for_job( $job->id() );
 		FileSystem::ensure_protected_directory( $tmp_dir );
@@ -612,14 +621,14 @@ class BackupManager {
 		clearstatcache( true, $path );
 
 		if ( ! file_exists( $path ) || ! is_readable( $path ) ) {
-			throw new \RuntimeException( __( 'The backup archive disappeared before its checksum could be calculated.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive disappeared before its checksum could be calculated.', 'wrensafe' ) );
 		}
 
 		// Restore the rolling hash state from the previous request, or start fresh.
 		$context = null;
 		if ( $offset > 0 && file_exists( $state_file ) ) {
 			try {
-				$context = unserialize( (string) file_get_contents( $state_file ), array( 'allowed_classes' => array( \HashContext::class ) ) ); // phpcs:ignore
+				$context = unserialize( (string) file_get_contents( $state_file ), array( 'allowed_classes' => array( \HashContext::class ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- only HashContext may be instantiated.
 			} catch ( \Throwable $e ) {
 				$context = null;
 			}
@@ -633,7 +642,7 @@ class BackupManager {
 		$handle = fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 
 		if ( false === $handle ) {
-			throw new \RuntimeException( __( 'The backup archive could not be opened for its checksum.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive could not be opened for its checksum.', 'wrensafe' ) );
 		}
 
 		if ( $offset > 0 ) {
@@ -645,7 +654,7 @@ class BackupManager {
 
 			if ( false === $buffer ) {
 				fclose( $handle );
-				throw new \RuntimeException( __( 'A read error occurred while calculating the backup checksum.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'A read error occurred while calculating the backup checksum.', 'wrensafe' ) );
 			}
 
 			hash_update( $context, $buffer );
@@ -664,7 +673,7 @@ class BackupManager {
 					$whole = IntegrityChecker::streaming_sha256( $path );
 
 					if ( is_wp_error( $whole ) ) {
-						throw new \RuntimeException( $whole->get_error_message() );
+						throw new \RuntimeException( esc_html( $whole->get_error_message() ) );
 					}
 
 					return $whole;
@@ -681,7 +690,7 @@ class BackupManager {
 		$digest = hash_final( $context );
 
 		if ( '' === $digest ) {
-			throw new \RuntimeException( __( 'The backup checksum could not be calculated.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup checksum could not be calculated.', 'wrensafe' ) );
 		}
 
 		return $digest;
@@ -708,7 +717,7 @@ class BackupManager {
 			$done = ( new BackupEncryption() )->encrypt_step( $archive, $tmp, $encryption_password, $state, self::request_deadline() );
 		} catch ( \Throwable $e ) {
 			$this->discard_unrecorded_archive( $archive, $tmp, $job );
-			$job->mark_failed( $e->getMessage() );
+			$job->mark_failed( Errors::text( $e ) );
 			return;
 		}
 
@@ -716,7 +725,7 @@ class BackupManager {
 			$payload['enc_state'] = $state;
 			$job->set_payload( $payload );
 
-			$size = max( 1, (int) @filesize( $archive ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			$size = file_exists( $archive ) ? max( 1, (int) filesize( $archive ) ) : 1;
 			$job->update_progress(
 				92,
 				sprintf(
@@ -964,7 +973,5 @@ class BackupManager {
 		$job->mark_completed( $completed );
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

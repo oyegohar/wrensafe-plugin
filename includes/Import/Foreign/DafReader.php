@@ -14,9 +14,6 @@ defined( 'ABSPATH' ) || exit;
 // Wrensafe's protected storage directory.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages are stored as a job's error and shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 /**
  * Duplicator DupArchive (.daf): "<A>…</A>" archive header, then "<D>"
  * directory and "<F>" file headers; file content follows as "<G>" globs
@@ -35,7 +32,7 @@ class DafReader extends StreamContainer {
 		fseek( $this->handle, 0 );
 
 		if ( '<A>' !== fread( $this->handle, 3 ) ) {
-			throw new \RuntimeException( __( 'This is not a valid Duplicator archive (.daf).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This is not a valid Duplicator archive (.daf).', 'wrensafe' ) );
 		}
 
 		$this->version = $this->field( 'V' );
@@ -45,7 +42,7 @@ class DafReader extends StreamContainer {
 			$hash  = $this->field( 'P' );
 
 			if ( ( $flags & self::FLAG_CRYPT ) || '' !== $hash ) {
-				throw new \RuntimeException( __( 'This Duplicator archive is password-protected. Create the backup again without archive encryption, then import it.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'This Duplicator archive is password-protected. Create the backup again without archive encryption, then import it.', 'wrensafe' ) );
 			}
 		}
 
@@ -61,13 +58,13 @@ class DafReader extends StreamContainer {
 		$open = '<' . $name . '>';
 
 		if ( fread( $this->handle, strlen( $open ) ) !== $open ) {
-			throw new \RuntimeException( __( 'The Duplicator archive is damaged (unexpected header).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The Duplicator archive is damaged (unexpected header).', 'wrensafe' ) );
 		}
 
 		$value = stream_get_line( $this->handle, 65536, '</' . $name . '>' );
 
 		if ( false === $value ) {
-			throw new \RuntimeException( __( 'The Duplicator archive is damaged (unreadable header).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The Duplicator archive is damaged (unreadable header).', 'wrensafe' ) );
 		}
 
 		return $value;
@@ -107,7 +104,7 @@ class DafReader extends StreamContainer {
 			$this->read_exact( 9 );
 
 			if ( $this->file_flags & self::FLAG_CRYPT ) {
-				throw new \RuntimeException( __( 'This Duplicator archive is password-protected. Create the backup again without archive encryption, then import it.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'This Duplicator archive is password-protected. Create the backup again without archive encryption, then import it.', 'wrensafe' ) );
 			}
 
 			$this->remaining = $size;
@@ -134,7 +131,7 @@ class DafReader extends StreamContainer {
 
 		while ( $done < $this->remaining ) {
 			if ( '<G>' !== fread( $this->handle, 3 ) ) {
-				throw new \RuntimeException( __( 'The Duplicator archive is damaged (missing data block).', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The Duplicator archive is damaged (missing data block).', 'wrensafe' ) );
 			}
 
 			$original = (int) $this->field( 'OS' );
@@ -148,12 +145,14 @@ class DafReader extends StreamContainer {
 				$data = $stored > 0 ? $this->read_exact( $stored ) : '';
 
 				if ( ( $this->file_flags & self::FLAG_COMPRESS ) && '' !== $data ) {
-					// Raw DEFLATE block (same as gzinflate()).
+					// A raw DEFLATE block (no zlib or gzip header).
+					AbstractFormat::require_zlib();
+
 					$inflate = inflate_init( ZLIB_ENCODING_RAW );
 					$data    = false === $inflate ? false : @inflate_add( $inflate, $data, ZLIB_FINISH ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a damaged block is reported below.
 
 					if ( false === $data ) {
-						throw new \RuntimeException( __( 'The Duplicator archive is damaged (a data block could not be decompressed).', 'wrensafe' ) );
+						throw new \RuntimeException( esc_html__( 'The Duplicator archive is damaged (a data block could not be decompressed).', 'wrensafe' ) );
 					}
 				}
 
@@ -171,7 +170,5 @@ class DafReader extends StreamContainer {
 		$this->next_cursor = (int) ftell( $this->handle );
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

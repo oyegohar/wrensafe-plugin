@@ -43,9 +43,9 @@ class NonceManager {
 	 * Intended for AJAX/admin-post handlers added in later phases.
 	 */
 	public static function verify_request_or_die( string $action, string $request_key = '_wpbp_nonce' ): void {
-		$nonce = isset( $_REQUEST[ $request_key ] ) ? sanitize_text_field( wp_unslash( $_REQUEST[ $request_key ] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification -- this IS the nonce check.
+		$valid = isset( $_REQUEST[ $request_key ] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST[ $request_key ] ) ), self::prefixed_action( $action ) );
 
-		if ( ! self::verify( $action, $nonce ) ) {
+		if ( ! $valid ) {
 			wp_die( esc_html__( 'Security check failed. Please refresh the page and try again.', 'wrensafe' ), 403 );
 		}
 	}

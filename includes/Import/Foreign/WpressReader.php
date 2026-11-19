@@ -14,9 +14,6 @@ defined( 'ABSPATH' ) || exit;
 // Wrensafe's protected storage directory.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages are stored as a job's error and shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 /**
  * All-in-One WP Migration .wpress: per entry a 4377-byte header
  * (name 255, size 14, mtime 12, path 4096; NUL padded) followed by the raw
@@ -71,7 +68,5 @@ class WpressReader extends StreamContainer {
 		$this->remaining = 0;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

@@ -100,7 +100,7 @@ class SiteHealth {
 			);
 		}
 
-		$created = Time::mysql_to_timestamp( (string) $latest['created_at'] );
+		$created = Time::to_timestamp( (string) $latest['created_at'] );
 		$age     = $created > 0 ? time() - $created : 0;
 		/* translators: %s: how long ago, e.g. "3 days" */
 		$when = sprintf( __( '%s ago', 'wrensafe' ), human_time_diff( $created ) );
@@ -145,7 +145,7 @@ class SiteHealth {
 				'wrensafe_offsite_copy',
 				'recommended',
 				__( 'Backups are kept only on this server', 'wrensafe' ),
-				__( 'If the server fails or is hacked, backups stored on it can be lost with the site. Copy them to FTP, SFTP or S3-compatible storage as well.', 'wrensafe' ),
+				__( 'If the server fails or is hacked, backups stored on it can be lost with the site. Copy them to FTP/FTPS or S3-compatible storage as well.', 'wrensafe' ),
 				self::page( 'wrensafe-settings', array( 'tab' => 'remote' ) ),
 				__( 'Set up remote storage', 'wrensafe' )
 			);

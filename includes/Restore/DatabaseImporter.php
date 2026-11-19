@@ -12,6 +12,11 @@
  * touched, so row data is never altered even if it happens to contain text
  * that looks like a table name.
  *
+ * Only statements that write to that one table are run (see
+ * statement_for_table()): a backup's SQL file can't drop, create or change
+ * any other table, and anything that isn't a table statement stops the
+ * restore before the live database is touched.
+ *
  * Foreign keys: a CREATE TABLE's REFERENCES are pointed at the staging
  * tables of this restore (see foreign_key_map()), and explicit constraint
  * names are dropped so the staging table can't clash with the live table's
@@ -26,6 +31,7 @@
 namespace WPBP\Restore;
 
 use WPBP\Utils\ChunkSizeCalculator;
+use WPBP\Utils\Errors;
 use WPBP\Utils\SqlStatementReader;
 
 defined( 'ABSPATH' ) || exit;
@@ -33,8 +39,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. The statements of a backup's SQL file can't be prepared (they
+// are complete SQL); each one is checked by statement_for_table() first.
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class DatabaseImporter {
@@ -48,16 +54,22 @@ class DatabaseImporter {
 	}
 
 	/**
+	 * Session statements a dump may carry (mysqldump, phpMyAdmin, other
+	 * backup plugins). They are skipped: the import sets up its own session
+	 * (foreign key checks off, NO_AUTO_VALUE_ON_ZERO), and table locks or
+	 * transactions add nothing to one table's import.
+	 */
+	private const SKIPPED_STATEMENT = '/^(?:SET\s|LOCK\s+TABLES\s|UNLOCK\s+TABLES$|START\s+TRANSACTION|BEGIN$|COMMIT$|ROLLBACK$)/i';
+
+	/**
 	 * Execute one chunk of statements from a schema or data SQL file,
 	 * starting at a byte offset, rewriting the source table's identifier to
 	 * the destination table name.
 	 *
-	 * @return array{offset:int,done:bool,statements_run:int,error:?string}
-	 */
-	/**
 	 * @param array{exact:array<string,string>,suffix:array<string,string>} $table_map
 	 *        Foreign-key targets: table name in the backup (or name without
 	 *        prefix) → staging table. See foreign_key_map().
+	 * @return array{offset:int,done:bool,statements_run:int,error:?string}
 	 */
 	public function import_chunk( string $sql_file, int $offset, string $source_table, string $dest_table, bool $repair_legacy_escapes = false, array $table_map = array() ): array {
 		$reader = new SqlStatementReader();
@@ -96,31 +108,35 @@ class DatabaseImporter {
 				break;
 			}
 
-			$statement = $this->rewrite_table_identifier( $statement, $source_table, $dest_table );
+			++$count;
 
-			if ( ! empty( $table_map ) && 0 === stripos( $statement, 'CREATE TABLE' ) && false !== stripos( $statement, 'REFERENCES' ) ) {
-				$statement = self::rewrite_foreign_keys( $statement, $table_map );
+			$checked = self::statement_for_table( $statement, $source_table, $dest_table );
+
+			if ( null === $checked ) {
+				continue; // A session statement (see SKIPPED_STATEMENT).
+			}
+
+			if ( '' === $checked ) {
+				$error = sprintf(
+					/* translators: %s: the start of an SQL statement */
+					__( 'its SQL file in the backup contains a statement a restore doesn’t run (%s…). The restore stopped before the live database was changed.', 'wrensafe' ),
+					Errors::utf8( substr( (string) preg_replace( '/\s+/', ' ', $statement ), 0, 60 ) )
+				);
+				break;
+			}
+
+			if ( ! empty( $table_map ) && 0 === stripos( $checked, 'CREATE TABLE' ) && false !== stripos( $checked, 'REFERENCES' ) ) {
+				$checked = self::rewrite_foreign_keys( $checked, $table_map );
 			}
 
 			if ( $repair_legacy_escapes ) {
-				$statement = self::repair_placeholder_escapes( $statement );
+				$checked = self::repair_placeholder_escapes( $checked );
 			}
 
-			$wpdb->query( $statement ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- runs the SQL statements of a checksum-verified backup during a restore an administrator started; that is what a database restore is.
+			$failed = self::run_statement( $checked );
 
-			// wpdb refuses a query whose text doesn't fit the TABLE's default
-			// charset, even when the column is utf8mb4 (emoji in a utf8 table's
-			// utf8mb4 column: "contains invalid data"). Retry once with the
-			// non-ASCII strings as _utf8mb4 hex literals: the same text for
-			// MySQL, but nothing for wpdb to strip.
-			if ( '' !== (string) $wpdb->last_error && 1 === preg_match( '/[\x80-\xFF]/', $statement ) ) {
-				$wpdb->query( self::ascii_literals( $statement ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- runs the SQL statements of a checksum-verified backup during a restore an administrator started; that is what a database restore is.
-			}
-
-			++$count;
-
-			if ( '' !== (string) $wpdb->last_error ) {
-				$error = $wpdb->last_error;
+			if ( '' !== $failed ) {
+				$error = $failed;
 				break;
 			}
 		}
@@ -135,6 +151,88 @@ class DatabaseImporter {
 			'statements_run' => $count,
 			'error'          => $error,
 		);
+	}
+
+	/**
+	 * Run one statement of a backup's SQL file, already checked and
+	 * rewritten by statement_for_table(). Returns the database error, or ''.
+	 */
+	private static function run_statement( string $sql ): string {
+		global $wpdb;
+
+		// wpdb refuses a query whose text doesn't fit the TABLE's default
+		// charset, even when the column is utf8mb4 (emoji in a utf8 table's
+		// utf8mb4 column: "contains invalid data"). The second attempt sends
+		// the non-ASCII strings as _utf8mb4 hex literals: the same text for
+		// MySQL, but nothing for wpdb to strip.
+		$attempts = 1 === preg_match( '/[\x80-\xFF]/', $sql ) ? 2 : 1;
+
+		for ( $attempt = 1; $attempt <= $attempts; $attempt++ ) {
+			if ( 2 === $attempt ) {
+				$sql = self::ascii_literals( $sql );
+			}
+
+			// The only query Wrensafe runs without $wpdb->prepare(): a
+			// complete statement from the SQL file of the backup an
+			// administrator chose to restore (checksum-verified before the
+			// restore started), which can't be written with placeholders.
+			// statement_for_table() only lets through DROP TABLE IF EXISTS,
+			// CREATE TABLE, INSERT, REPLACE, UPDATE and DELETE statements on
+			// the one table being restored, renamed to this restore's own
+			// staging table, so no other table can be read into it or changed.
+			$wpdb->query( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- see above: a restored backup's own SQL, limited to its staging table.
+
+			if ( '' === (string) $wpdb->last_error ) {
+				return '';
+			}
+		}
+
+		return (string) $wpdb->last_error;
+	}
+
+	/**
+	 * What to run for one statement of a table's SQL file:
+	 *  - the statement with the table renamed to $dest_table, when it is one
+	 *    of the statements DatabaseExporter, SqlSplitter and ForeignConverter
+	 *    write, on the table this file belongs to: DROP TABLE IF EXISTS,
+	 *    CREATE TABLE, INSERT [IGNORE] INTO, REPLACE INTO, UPDATE … SET and
+	 *    DELETE FROM (Jetpack's incremental "-updates" files);
+	 *  - null for a session statement, which is skipped (SKIPPED_STATEMENT,
+	 *    and ALTER TABLE … DISABLE/ENABLE KEYS: MyISAM load hints);
+	 *  - '' for anything else (another table, several tables, any other
+	 *    kind of statement), which stops the restore.
+	 *
+	 * Comments, including mysqldump's /*!40101 … *\/ ones, never get here:
+	 * SqlStatementReader drops them.
+	 */
+	public static function statement_for_table( string $statement, string $source_table, string $dest_table ): ?string {
+		$statement = ltrim( $statement );
+		$name      = '`' . preg_quote( str_replace( '`', '``', $source_table ), '/' ) . '`';
+
+		if ( 1 === preg_match( self::SKIPPED_STATEMENT, $statement ) || 1 === preg_match( '/^ALTER\s+TABLE\s+' . $name . '\s+(?:DISABLE|ENABLE)\s+KEYS$/i', $statement ) ) {
+			return null;
+		}
+
+		// What may follow the table name, per statement: one table only
+		// ("DROP TABLE IF EXISTS `a`, `b`" and multi-table UPDATE / DELETE
+		// are refused).
+		$forms = array(
+			'DROP\s+TABLE\s+IF\s+EXISTS'              => '$',
+			'CREATE\s+TABLE'                          => '(?:\s|\(|$)',
+			'(?:INSERT(?:\s+IGNORE)?|REPLACE)\s+INTO' => '(?:\s|\()',
+			'UPDATE'                                  => '\s+SET\b',
+			'DELETE\s+FROM'                           => '(?:$|\s+(?:WHERE|ORDER\s+BY|LIMIT)\b)',
+		);
+
+		foreach ( $forms as $verb => $after ) {
+			if ( 1 !== preg_match( '/^(' . $verb . ')\s+' . $name . '(?=' . $after . ')/i', $statement, $m ) ) {
+				continue;
+			}
+
+			return preg_replace( '/\s+/', ' ', strtoupper( $m[1] ) ) . ' `' . str_replace( '`', '``', $dest_table ) . '`' . substr( $statement, strlen( $m[0] ) );
+		}
+
+		return '';
 	}
 
 	/**
@@ -299,22 +397,5 @@ class DatabaseImporter {
 		}
 
 		return (string) preg_replace( '/\{[0-9a-f]{64}\}/', '%', $statement );
-	}
-
-	/**
-	 * Replace the backtick-quoted table name immediately following
-	 * DROP TABLE IF EXISTS / CREATE TABLE / INSERT INTO with the
-	 * destination table name. Anchored to the start of the statement so
-	 * key/index names sharing the source prefix, or row data that happens
-	 * to mention it, are left untouched.
-	 */
-	private function rewrite_table_identifier( string $statement, string $source_table, string $dest_table ): string {
-		if ( $source_table === $dest_table ) {
-			return $statement;
-		}
-
-		$pattern = '/^(DROP TABLE IF EXISTS|CREATE TABLE|INSERT(?:\s+IGNORE)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`' . preg_quote( $source_table, '/' ) . '`/i';
-
-		return preg_replace( $pattern, '$1 `' . $dest_table . '`', $statement, 1 );
 	}
 }

@@ -13,6 +13,8 @@
 
 namespace WPBP\Remote;
 
+use WPBP\Utils\Str;
+
 defined( 'ABSPATH' ) || exit;
 
 // Backup archives are read part by part with native file handles
@@ -296,7 +298,7 @@ final class S3Target implements RemoteTarget {
 				$key  = (string) $object->Key;  // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- S3 XML element.
 				$name = substr( $key, strlen( $prefix ) );
 
-				if ( '' === $name || false !== strpos( $name, '/' ) || ! str_ends_with( $name, '.wbp' ) ) {
+				if ( '' === $name || false !== strpos( $name, '/' ) || ! Str::ends_with( $name, '.wbp' ) ) {
 					continue;
 				}
 

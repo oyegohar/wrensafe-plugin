@@ -96,7 +96,7 @@ class IntegrityChecker {
 
 		// Preferred path: the hash extension's own file hasher (also streams).
 		if ( function_exists( 'hash_file' ) ) {
-			$hash = @hash_file( self::ALGORITHM, $path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			$hash = is_readable( $path ) ? hash_file( self::ALGORITHM, $path ) : false;
 
 			if ( is_string( $hash ) && '' !== $hash ) {
 				return $hash;
@@ -109,7 +109,7 @@ class IntegrityChecker {
 			return new \WP_Error( 'wpbp_checksum_no_hash_ext', __( 'The PHP hash extension is unavailable, so the backup checksum could not be calculated.', 'wrensafe' ) );
 		}
 
-		$handle = @fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.PHP.NoSilencedErrors.Discouraged
+		$handle = is_readable( $path ) ? fopen( $path, 'rb' ) : false; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 
 		if ( false === $handle ) {
 			return new \WP_Error( 'wpbp_checksum_open_failed', __( 'The backup file could not be opened for reading while calculating its checksum.', 'wrensafe' ) );

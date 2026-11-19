@@ -13,6 +13,7 @@
 namespace WPBP\Remote;
 
 use WPBP\Utils\FileSystem;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -242,7 +243,7 @@ final class FtpTarget implements RemoteTarget {
 		foreach ( is_array( $names ) ? $names : array() as $name ) {
 			$base = basename( (string) $name );
 
-			if ( ! str_ends_with( $base, '.wbp' ) ) {
+			if ( ! Str::ends_with( $base, '.wbp' ) ) {
 				continue;
 			}
 

@@ -1,7 +1,8 @@
 <?php
 /**
- * Ensures Wrensafe's storage directory is protected from direct
- * web access by writing an .htaccess deny-all rule and an index.php stub.
+ * Ensures Wrensafe's storage directory is protected from direct web
+ * access: an .htaccess deny-all rule (Apache, LiteSpeed), a web.config
+ * (IIS) and an index.php stub.
  *
  * FileSystem::ensure_protected_directory() already calls these writes at
  * directory-creation time. FileGuard::status() lets the admin UI verify
@@ -18,9 +19,6 @@ defined( 'ABSPATH' ) || exit;
 
 class FileGuard {
 
-	private const HTACCESS_CONTENT = "Options -Indexes\nDeny from all\n";
-	private const INDEX_CONTENT    = "<?php // Silence is golden.\n";
-
 	/**
 	 * (Re-)write protection files in the storage directory.
 	 */
@@ -29,39 +27,30 @@ class FileGuard {
 	}
 
 	/**
-	 * Write .htaccess and index.php into an arbitrary directory.
+	 * Write index.php, .htaccess and web.config into a directory (the same
+	 * files as FileSystem::ensure_protected_directory()).
 	 */
 	public static function protect_directory( string $dir ): void {
-		if ( ! is_dir( $dir ) ) {
-			return;
-		}
-
-		$htaccess = $dir . '.htaccess';
-		$index    = $dir . 'index.php';
-
-		if ( ! file_exists( $htaccess ) ) {
-			file_put_contents( $htaccess, self::HTACCESS_CONTENT ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-		}
-
-		if ( ! file_exists( $index ) ) {
-			file_put_contents( $index, self::INDEX_CONTENT ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-		}
+		FileSystem::write_protection_files( $dir );
 	}
 
 	/**
-	 * Whether the storage directory's protection files are present.
+	 * Whether the storage directory's protection files are present (an
+	 * .htaccess from before 1.1.4 counts as missing: it is replaced).
 	 *
-	 * @return array{htaccess:bool, index_php:bool, protected:bool}
+	 * @return array{htaccess:bool, index_php:bool, web_config:bool, protected:bool}
 	 */
 	public static function status(): array {
 		$dir      = FileSystem::storage_dir();
-		$htaccess = file_exists( $dir . '.htaccess' );
+		$htaccess = file_exists( $dir . '.htaccess' ) && ! FileSystem::has_old_htaccess( $dir );
 		$index    = file_exists( $dir . 'index.php' );
+		$config   = file_exists( $dir . 'web.config' );
 
 		return array(
-			'htaccess'  => $htaccess,
-			'index_php' => $index,
-			'protected' => $htaccess && $index,
+			'htaccess'   => $htaccess,
+			'index_php'  => $index,
+			'web_config' => $config,
+			'protected'  => $htaccess && $index && $config,
 		);
 	}
 

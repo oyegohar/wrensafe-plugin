@@ -14,10 +14,6 @@ defined( 'ABSPATH' ) || exit;
 // Wrensafe's protected storage directory.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages are stored as a job's error and shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
-
 /** Zip archives through ZipArchive; the cursor is the entry index. */
 class ZipReader implements ContainerReader {
 
@@ -28,14 +24,12 @@ class ZipReader implements ContainerReader {
 	private int $current = -1;
 
 	public function open( string $file, int $cursor ): void {
-		if ( ! class_exists( '\ZipArchive' ) ) {
-			throw new \RuntimeException( __( 'Reading .zip backups needs the PHP Zip extension, which this server does not have.', 'wrensafe' ) );
-		}
+		AbstractFormat::require_zip();
 
 		$zip = new \ZipArchive();
 
 		if ( true !== $zip->open( $file ) ) {
-			throw new \RuntimeException( __( 'The .zip backup could not be opened (it may be incomplete or damaged).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The .zip backup could not be opened (it may be incomplete or damaged).', 'wrensafe' ) );
 		}
 
 		$this->zip   = $zip;
@@ -65,7 +59,7 @@ class ZipReader implements ContainerReader {
 		$stream = $this->zip->getStream( (string) $this->zip->getNameIndex( $this->current ) );
 
 		if ( false === $stream ) {
-			throw new \RuntimeException( __( 'A file inside the .zip backup could not be read.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'A file inside the .zip backup could not be read.', 'wrensafe' ) );
 		}
 
 		stream_copy_to_stream( $stream, $out );
@@ -88,7 +82,5 @@ class ZipReader implements ContainerReader {
 		$this->zip = null;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

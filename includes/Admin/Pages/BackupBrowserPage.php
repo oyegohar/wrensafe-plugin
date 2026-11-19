@@ -158,7 +158,7 @@ class BackupBrowserPage extends AbstractPage {
 				<?php endif; ?>
 			</td>
 			<td><?php echo esc_html( size_format( (int) $backup['size'] ) ); ?></td>
-			<td><?php echo \WPBP\Utils\Time::local_time_markup( $backup['created_at'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
+			<td><?php echo wp_kses( \WPBP\Utils\Time::local_time_markup( (string) $backup['created_at'] ), \WPBP\Admin\Kses::allowed() ); ?></td>
 			<td>
 				<span class="wpbp-backup-status wpbp-backup-status-<?php echo esc_attr( $backup['status'] ); ?>"><?php echo esc_html( \WPBP\Admin\Labels::status( (string) $backup['status'] ) ); ?></span>
 				<span class="dashicons dashicons-lock wpbp-lock-icon<?php echo ! empty( $backup['is_locked'] ) ? '' : ' wpbp-is-hidden'; ?>" title="<?php esc_attr_e( 'Locked backup', 'wrensafe' ); ?>"></span>
@@ -198,6 +198,8 @@ class BackupBrowserPage extends AbstractPage {
 	private function render_note_tags( array $backup ): void {
 		$note = (string) ( $backup['note'] ?? '' );
 		$tags = array_values( array_filter( array_map( 'trim', explode( ',', (string) ( $backup['tags'] ?? '' ) ) ) ) );
+		// Same capability as BackupBrowserAjax::update_meta().
+		$can_edit = CapabilityManager::current_user_can( CapabilityManager::DELETE_BACKUPS ) || CapabilityManager::current_user_can( CapabilityManager::MANAGE_SETTINGS );
 		?>
 		<div class="wpbp-meta" data-note="<?php echo esc_attr( $note ); ?>" data-tags="<?php echo esc_attr( implode( ', ', $tags ) ); ?>">
 			<div class="wpbp-meta-display">
@@ -206,9 +208,11 @@ class BackupBrowserPage extends AbstractPage {
 					<span class="wpbp-meta-note-text<?php echo '' === $note ? ' is-empty' : ''; ?>">
 						<?php echo '' === $note ? esc_html__( 'No note', 'wrensafe' ) : esc_html( $note ); ?>
 					</span>
-					<button type="button" class="button-link wpbp-meta-edit" aria-label="<?php esc_attr_e( 'Edit note and tags', 'wrensafe' ); ?>" title="<?php esc_attr_e( 'Edit note and tags', 'wrensafe' ); ?>">
-						<span class="dashicons dashicons-edit"></span>
-					</button>
+					<?php if ( $can_edit ) : ?>
+						<button type="button" class="button-link wpbp-meta-edit" aria-label="<?php esc_attr_e( 'Edit note and tags', 'wrensafe' ); ?>" title="<?php esc_attr_e( 'Edit note and tags', 'wrensafe' ); ?>">
+							<span class="dashicons dashicons-edit"></span>
+						</button>
+					<?php endif; ?>
 				</div>
 				<div class="wpbp-meta-tags">
 					<?php if ( empty( $tags ) ) : ?>
@@ -247,7 +251,7 @@ class BackupBrowserPage extends AbstractPage {
 			return;
 		}
 
-		$label  = \WPBP\Remote\RemoteStorage::types()[ $m[2] ] ?? $m[2];
+		$label  = \WPBP\Remote\RemoteStorage::types()[ $m[2] ] ?? strtoupper( $m[2] );
 		$failed = 'remote-failed' === $m[1];
 		/* translators: %s: storage name, e.g. FTP / FTPS */
 		$text = $failed ? __( 'Off-site copy failed', 'wrensafe' ) : sprintf( __( 'Copy on %s', 'wrensafe' ), $label );

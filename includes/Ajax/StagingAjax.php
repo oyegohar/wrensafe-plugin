@@ -15,15 +15,17 @@ use WPBP\Staging\PushToLive;
 use WPBP\Staging\StagingJob;
 use WPBP\Staging\StagingManager;
 use WPBP\Utils\FileSystem;
+use WPBP\Utils\Paths;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
-// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+// object-cached. Every query goes through $wpdb->prepare(), with table names as
+// identifier placeholders (%i).
+// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
 class StagingAjax {
 
@@ -81,7 +83,7 @@ class StagingAjax {
 
 		$phase = $job->payload()['phase'] ?? '';
 
-		if ( str_starts_with( $phase, 'push_' ) ) {
+		if ( Str::starts_with( (string) $phase, 'push_' ) ) {
 			( new PushToLive() )->process_step( $job );
 		} else {
 			( new StagingManager() )->process_step( $job );
@@ -127,17 +129,66 @@ class StagingAjax {
 			wp_send_json_error( array( 'message' => __( 'Staging site not found.', 'wrensafe' ) ), 404 );
 		}
 
-		$tables = $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $staging['table_prefix'] ) . '%' ) );
-		foreach ( $tables as $table ) {
-			$wpdb->query( 'DROP TABLE IF EXISTS `' . esc_sql( $table ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange -- drops the deleted staging site's own tables (name from the staging prefix, escaped).
+		$folder = self::staging_folder( $staging );
+		$prefix = self::staging_prefix( $staging );
+
+		// Only the tables of this staging site ({prefix}stg_{slug}_…) are
+		// dropped, never this site's own.
+		if ( '' !== $prefix ) {
+			$tables = (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $prefix ) . '%' ) );
+
+			foreach ( $tables as $table ) {
+				$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $table ) );
+			}
 		}
 
-		if ( is_dir( $staging['path'] ) ) {
-			FileSystem::delete_directory( $staging['path'] );
+		if ( '' !== $folder && is_dir( $folder ) && ! is_link( $folder ) ) {
+			FileSystem::delete_directory( $folder );
 		}
 
 		StagingSitesRepository::delete( $id );
 
 		wp_send_json_success();
+	}
+
+	/**
+	 * The staging site's folder, or '' when the stored path isn't exactly
+	 * {WordPress folder}/staging-{slug}: nothing else is ever deleted.
+	 *
+	 * @param array<string,mixed> $staging Staging site row.
+	 */
+	public static function staging_folder( array $staging ): string {
+		$slug = self::valid_slug( $staging );
+
+		if ( '' === $slug ) {
+			return '';
+		}
+
+		$expected = Paths::root() . '/staging-' . $slug;
+		$stored   = untrailingslashit( wp_normalize_path( (string) ( $staging['path'] ?? '' ) ) );
+
+		return $stored === $expected ? $expected : '';
+	}
+
+	/**
+	 * The staging site's table prefix, or '' when the stored prefix isn't
+	 * exactly {this site's prefix}stg_{slug}_.
+	 *
+	 * @param array<string,mixed> $staging Staging site row.
+	 */
+	public static function staging_prefix( array $staging ): string {
+		global $wpdb;
+
+		$slug     = self::valid_slug( $staging );
+		$expected = $wpdb->prefix . 'stg_' . $slug . '_';
+
+		return '' !== $slug && (string) ( $staging['table_prefix'] ?? '' ) === $expected ? $expected : '';
+	}
+
+	/** @param array<string,mixed> $staging Staging site row. */
+	private static function valid_slug( array $staging ): string {
+		$slug = (string) ( $staging['slug'] ?? '' );
+
+		return 1 === preg_match( '/^[a-z0-9]{1,32}$/', $slug ) ? $slug : '';
 	}
 }

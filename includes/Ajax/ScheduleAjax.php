@@ -107,7 +107,7 @@ class ScheduleAjax {
 			wp_send_json_error( array( 'message' => sprintf( /* translators: %d: maximum number of active schedules */ __( 'This site allows at most %d active schedules. Disable another schedule first.', 'wrensafe' ), \WPBP\Core\LimitsManager::get_limit( 'scheduled_backups_count' ) ) ), 400 );
 		}
 
-		SchedulesRepository::update( $id, array( 'enabled' => $enabled ) );
+		$manager->set_enabled( $id, (bool) $enabled );
 
 		wp_send_json_success( array( 'enabled' => (bool) $enabled ) );
 	}

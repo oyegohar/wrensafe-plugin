@@ -14,9 +14,6 @@ use WPBP\Import\Foreign\AbstractFormat;
 
 defined( 'ABSPATH' ) || exit;
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class SolidBackups extends AbstractFormat {
 
 	private const DAT_PATTERN = '#(?:^|/)backupbuddy_temp/[^/]+/backupbuddy_dat\.php$#';
@@ -37,7 +34,7 @@ class SolidBackups extends AbstractFormat {
 		$found = $this->archive( $files );
 
 		if ( null === $found ) {
-			throw new \RuntimeException( __( 'No Solid Backups (BackupBuddy) archive was found.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No Solid Backups (BackupBuddy) archive was found.', 'wrensafe' ) );
 		}
 
 		list( $path, $dat ) = $found;
@@ -123,5 +120,3 @@ class SolidBackups extends AbstractFormat {
 		return null;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

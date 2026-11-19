@@ -8,7 +8,7 @@
 namespace WPBP\Admin\Pages;
 
 use WPBP\Admin\Icons;
-
+use WPBP\Admin\Kses;
 use WPBP\Security\CapabilityManager;
 
 defined( 'ABSPATH' ) || exit;
@@ -130,7 +130,7 @@ abstract class AbstractPage {
 		?>
 		<header class="wpbp-header">
 			<div class="wpbp-header-main">
-				<span class="wpbp-brand-mark" aria-hidden="true"><?php echo self::BRAND_MARK_SVG; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline SVG constant (the brand mark). ?></span>
+				<span class="wpbp-brand-mark" aria-hidden="true"><?php echo wp_kses( self::BRAND_MARK_SVG, Kses::allowed() ); ?></span>
 				<div class="wpbp-header-text">
 					<p class="wpbp-eyebrow">
 						<span class="wpbp-eyebrow-name"><?php esc_html_e( 'Wrensafe', 'wrensafe' ); ?></span>

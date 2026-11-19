@@ -12,8 +12,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with the table
+// name as an identifier placeholder (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class StagingSitesRepository {
@@ -38,7 +38,7 @@ class StagingSitesRepository {
 		global $wpdb;
 
 		$row = $wpdb->get_row(
-			$wpdb->prepare( 'SELECT * FROM ' . esc_sql( self::table() ) . ' WHERE id = %d', $id ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+			$wpdb->prepare( 'SELECT * FROM %i WHERE id = %d', self::table(), $id ),
 			ARRAY_A
 		);
 
@@ -60,12 +60,12 @@ class StagingSitesRepository {
 	public static function list_all(): array {
 		global $wpdb;
 
-		return $wpdb->get_results( 'SELECT * FROM ' . esc_sql( self::table() ) . ' ORDER BY id DESC', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+		return $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM %i ORDER BY id DESC', self::table() ), ARRAY_A );
 	}
 
 	public static function count_active(): int {
 		global $wpdb;
 
-		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . esc_sql( self::table() ) . " WHERE status != 'deleted'" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE status != %s', self::table(), 'deleted' ) );
 	}
 }

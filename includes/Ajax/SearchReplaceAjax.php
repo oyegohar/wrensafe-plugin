@@ -14,6 +14,7 @@ namespace WPBP\Ajax;
 use WPBP\Backup\DatabaseExporter;
 use WPBP\Restore\SearchReplaceEngine;
 use WPBP\Security\CapabilityManager;
+use WPBP\Utils\Errors;
 use WPBP\Utils\Logger;
 
 defined( 'ABSPATH' ) || exit;
@@ -54,23 +55,40 @@ class SearchReplaceAjax {
 		return self::TRANSIENT . get_current_user_id();
 	}
 
-	/** A checkbox sent by admin.js as "1" / "0". */
-	private static function flag( string $key ): bool {
-		// phpcs:disable WordPress.Security.NonceVerification.Missing -- only called by handlers after check_ajax_referer().
-		return isset( $_POST[ $key ] ) && '1' === sanitize_key( wp_unslash( $_POST[ $key ] ) );
-		// phpcs:enable WordPress.Security.NonceVerification.Missing
+	/**
+	 * The search or replace text exactly as typed, or null when it isn't
+	 * valid UTF-8 text of at most 10,000 characters.
+	 *
+	 * It is validated, not sanitized: the text is compared byte for byte
+	 * with the database (URL-encoded "%2F", "<a href=", quotes, "&amp;" and
+	 * repeated spaces all have to match exactly), and every sanitizing
+	 * function changes some of those. It is only ever used as a value in
+	 * $wpdb->update() (prepared) and in strtr() on row values, and is never
+	 * printed as HTML; the run state stores it hex-encoded.
+	 *
+	 * @param mixed $value The unslashed request value.
+	 */
+	private static function exact_text( $value ): ?string {
+		if ( ! is_string( $value ) || wp_check_invalid_utf8( $value ) !== $value || mb_strlen( $value, 'UTF-8' ) > 10000 ) {
+			return null;
+		}
+
+		return $value;
 	}
 
 	public static function start(): void {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 		self::check_capability();
 
-		// The search and replace text are used exactly as typed (they are
-		// compared byte for byte with the database, never output as HTML).
-		$search  = isset( $_POST['search'] ) && is_string( $_POST['search'] ) ? wp_unslash( $_POST['search'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- kept exactly as typed; see above.
-		$replace = isset( $_POST['replace'] ) && is_string( $_POST['replace'] ) ? wp_unslash( $_POST['replace'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- kept exactly as typed; see above.
+		// Validated, not sanitized: see exact_text().
+		$search  = isset( $_POST['search'] ) ? self::exact_text( filter_var( wp_unslash( $_POST['search'] ), FILTER_UNSAFE_RAW ) ) : '';
+		$replace = isset( $_POST['replace'] ) ? self::exact_text( filter_var( wp_unslash( $_POST['replace'] ), FILTER_UNSAFE_RAW ) ) : '';
 		$posted  = isset( $_POST['tables'] ) && is_array( $_POST['tables'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['tables'] ) ) : array();
 		$tables  = array_values( array_intersect( self::tables(), $posted ) );
+
+		if ( null === $search || null === $replace ) {
+			wp_send_json_error( array( 'message' => __( 'The search or replace text is not valid UTF-8 text, or is longer than 10,000 characters.', 'wrensafe' ) ) );
+		}
 
 		if ( '' === $search ) {
 			wp_send_json_error( array( 'message' => __( 'Enter the text to search for.', 'wrensafe' ) ) );
@@ -91,8 +109,8 @@ class SearchReplaceAjax {
 			'search'    => bin2hex( $search ),
 			'replace'   => bin2hex( $replace ),
 			'tables'    => $tables,
-			'dry_run'   => self::flag( 'dry_run' ),
-			'skip_guid' => self::flag( 'skip_guid' ),
+			'dry_run'   => isset( $_POST['dry_run'] ) && '1' === sanitize_key( wp_unslash( $_POST['dry_run'] ) ),
+			'skip_guid' => isset( $_POST['skip_guid'] ) && '1' === sanitize_key( wp_unslash( $_POST['skip_guid'] ) ),
 			'index'     => 0,
 			'cursor'    => null,
 			'seen'      => 0,
@@ -145,9 +163,9 @@ class SearchReplaceAjax {
 				$batch = $engine->process_table_after( $table, $state['cursor'], $pairs, (bool) $state['dry_run'], $skip );
 			} catch ( \Throwable $e ) {
 				delete_transient( self::key() );
-				Logger::error( sprintf( 'search_replace_failed: stopped in %s: %s', $table, $e->getMessage() ) );
+				Logger::error( sprintf( 'search_replace_failed: stopped in %s: %s', $table, Errors::text( $e ) ) );
 				/* translators: 1: table name, 2: error message */
-				wp_send_json_error( array( 'message' => sprintf( __( 'Stopped in %1$s: %2$s', 'wrensafe' ), $table, $e->getMessage() ) ) );
+				wp_send_json_error( array( 'message' => sprintf( __( 'Stopped in %1$s: %2$s', 'wrensafe' ), $table, Errors::text( $e ) ) ) );
 			}
 
 			$state['seen'] += (int) ( $batch['rows_seen'] ?? 0 );
@@ -248,7 +266,7 @@ class SearchReplaceAjax {
 	private static function has_text_columns( string $table ): bool {
 		global $wpdb;
 
-		$types = $wpdb->get_col( 'SHOW COLUMNS FROM `' . str_replace( '`', '``', $table ) . '`', 1 ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- identifier quoted; no WordPress API for a table's columns.
+		$types = $wpdb->get_col( $wpdb->prepare( 'SHOW COLUMNS FROM %i', $table ), 1 ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- no WordPress API for a table's columns.
 
 		foreach ( (array) $types as $type ) {
 			if ( preg_match( '/char|text|blob|json|enum|set|binary/i', (string) $type ) ) {

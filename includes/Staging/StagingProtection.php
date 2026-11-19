@@ -16,8 +16,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with the table
+// name as an identifier placeholder (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class StagingProtection {
@@ -56,11 +56,10 @@ class StagingProtection {
 	public function disable_indexing( string $staging_prefix ): void {
 		global $wpdb;
 
-		$table = $staging_prefix . 'options';
-
 		$wpdb->query(
 			$wpdb->prepare(
-				'UPDATE `' . esc_sql( $table ) . '` SET option_value = %s WHERE option_name = %s', // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				'UPDATE %i SET option_value = %s WHERE option_name = %s',
+				$staging_prefix . 'options',
 				'0',
 				'blog_public'
 			)

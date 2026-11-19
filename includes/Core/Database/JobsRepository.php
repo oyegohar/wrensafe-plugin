@@ -14,8 +14,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with the table
+// name as an identifier placeholder (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class JobsRepository {
@@ -57,7 +57,7 @@ class JobsRepository {
 		global $wpdb;
 
 		$row = $wpdb->get_row(
-			$wpdb->prepare( 'SELECT * FROM ' . esc_sql( self::table() ) . ' WHERE id = %d', $id ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+			$wpdb->prepare( 'SELECT * FROM %i WHERE id = %d', self::table(), $id ),
 			ARRAY_A
 		);
 
@@ -83,7 +83,8 @@ class JobsRepository {
 
 		return $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . ' WHERE job_type = %s ORDER BY id DESC LIMIT %d', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT * FROM %i WHERE job_type = %s ORDER BY id DESC LIMIT %d',
+				self::table(),
 				$job_type,
 				$limit
 			),
@@ -104,18 +105,17 @@ class JobsRepository {
 
 		return (array) $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE job_type = %s AND status IN ('running','pending') AND updated_at < %s ORDER BY id ASC LIMIT 20", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT * FROM %i WHERE job_type = %s AND status IN (%s, %s) AND updated_at < %s ORDER BY id ASC LIMIT 20',
+				self::table(),
 				$job_type,
+				'running',
+				'pending',
 				$cutoff
 			),
 			ARRAY_A
 		);
 	}
 
-	/**
-	 * Count completed jobs of a given type created since a given datetime —
-	 * used to enforce monthly fair-use limits.
-	 */
 	/**
 	 * Backup, restore, staging or transfer jobs still running (updated in
 	 * the last $minutes minutes; a running job updates every few seconds, so older ones were stopped).
@@ -127,19 +127,28 @@ class JobsRepository {
 
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
-				'SELECT COUNT(*) FROM ' . esc_sql( self::table() ) . " WHERE status IN ('running','pending') AND updated_at >= %s", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT COUNT(*) FROM %i WHERE status IN (%s, %s) AND updated_at >= %s',
+				self::table(),
+				'running',
+				'pending',
 				$since
 			)
 		);
 	}
 
+	/**
+	 * Count completed jobs of a given type created since a given datetime —
+	 * used to enforce monthly fair-use limits.
+	 */
 	public static function count_completed_since( string $job_type, string $since_mysql_datetime ): int {
 		global $wpdb;
 
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
-				'SELECT COUNT(*) FROM ' . esc_sql( self::table() ) . " WHERE job_type = %s AND status = 'completed' AND created_at >= %s", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT COUNT(*) FROM %i WHERE job_type = %s AND status = %s AND created_at >= %s',
+				self::table(),
 				$job_type,
+				'completed',
 				$since_mysql_datetime
 			)
 		);
@@ -155,7 +164,8 @@ class JobsRepository {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT job_type, status, COUNT(*) AS total FROM ' . esc_sql( self::table() ) . ' WHERE created_at >= %s GROUP BY job_type, status', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT job_type, status, COUNT(*) AS total FROM %i WHERE created_at >= %s GROUP BY job_type, status',
+				self::table(),
 				$since_mysql_datetime
 			),
 			ARRAY_A

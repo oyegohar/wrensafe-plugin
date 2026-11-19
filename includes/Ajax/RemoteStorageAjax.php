@@ -26,7 +26,13 @@ class RemoteStorageAjax {
 			wp_send_json_error( array( 'message' => __( 'You do not have permission to change settings.', 'wrensafe' ) ), 403 );
 		}
 
-		$posted   = isset( $_POST[ Settings::OPTION_NAME ]['remote'] ) && is_array( $_POST[ Settings::OPTION_NAME ]['remote'] ) ? $_POST[ Settings::OPTION_NAME ]['remote'] : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized,WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- every field is sanitized by RemoteStorage::sanitize() (passwords kept exactly as typed).
+		// The form's fields as sent (filter_input() reads them before
+		// WordPress adds slashes), less control characters. Passwords must
+		// stay exactly as typed, so the fields aren't run through
+		// sanitize_text_field() here: RemoteStorage::sanitize() cleans each
+		// one for its type, as when the form is saved.
+		$form     = filter_input( INPUT_POST, Settings::OPTION_NAME, FILTER_UNSAFE_RAW, FILTER_REQUIRE_ARRAY | FILTER_FLAG_STRIP_LOW );
+		$posted   = is_array( $form ) && isset( $form['remote'] ) && is_array( $form['remote'] ) ? $form['remote'] : array();
 		$settings = RemoteStorage::sanitize( $posted );
 
 		if ( '' === $settings['type'] ) {

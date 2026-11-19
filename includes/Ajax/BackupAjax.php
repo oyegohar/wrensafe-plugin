@@ -11,6 +11,7 @@
 
 namespace WPBP\Ajax;
 
+use WPBP\Backup\BackupEncryption;
 use WPBP\Backup\BackupJob;
 use WPBP\Backup\BackupManager;
 use WPBP\Core\Database\BackupsRepository;
@@ -37,6 +38,15 @@ class BackupAjax {
 
 		if ( ! in_array( $type, self::ALLOWED_TYPES, true ) ) {
 			wp_send_json_error( array( 'message' => __( 'Invalid backup type.', 'wrensafe' ) ), 400 );
+		}
+
+		$encrypt = ! empty( $_POST['encrypt'] );
+
+		// Say so now, before anything is packed, when this server can't encrypt.
+		$no_encryption = $encrypt ? BackupEncryption::unavailable_reason() : '';
+
+		if ( '' !== $no_encryption ) {
+			wp_send_json_error( array( 'message' => $no_encryption ), 400 );
 		}
 
 		$note       = isset( $_POST['note'] ) ? sanitize_text_field( wp_unslash( $_POST['note'] ) ) : '';
@@ -66,7 +76,7 @@ class BackupAjax {
 				'note'        => $note,
 				'tag'         => $tag,
 				'chain_mode'  => $chain_mode,
-				'encrypt'     => ! empty( $_POST['encrypt'] ),
+				'encrypt'     => $encrypt,
 			)
 		);
 
@@ -127,7 +137,11 @@ class BackupAjax {
 
 		// Only used transiently if this step happens to be the archive step
 		// of an encryption-enabled backup — never stored.
-		$encryption_password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- password used verbatim; never stored, logged or output.
+		// It is used exactly as typed: it only feeds the key derivation
+		// (PBKDF2) and is never stored, logged, output or used in a query. Any
+		// other filter would change some passwords and lock the owner out of
+		// their backup; FILTER_UNSAFE_RAW only rejects non-strings.
+		$encryption_password = isset( $_POST['encryption_password'] ) ? (string) filter_var( wp_unslash( $_POST['encryption_password'] ), FILTER_UNSAFE_RAW ) : '';
 		$was_running         = ! in_array( $job->status(), array( BackupJob::STATUS_COMPLETED, BackupJob::STATUS_FAILED, BackupJob::STATUS_CANCELLED ), true );
 
 		( new BackupManager() )->process_step( $job, $encryption_password );

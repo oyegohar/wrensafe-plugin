@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name:       Wrensafe – WP Backup, Restore & Migration
+ * Plugin Name:       Wrensafe – Backup, Restore & Migration
  * Description:       Back up, restore and migrate WordPress with confidence: full or partial backups, encryption, schedules, staging, rollback, and restores of backups made by other plugins.
- * Version:           1.1.3
- * Requires at least: 6.0
+ * Version:           1.1.4
+ * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Husnain Gohar
  * Author URI:        https://profiles.wordpress.org/oyegohar/
@@ -16,6 +16,46 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// This file must parse on any PHP version WordPress can run on (5.6+), so it
+// shows a notice instead of a fatal error when the site's PHP or WordPress is
+// older than Wrensafe needs (for example after a site was moved to an older
+// server while the plugin stayed active). No PHP 7 syntax until the check
+// below has passed, and no class file is loaded before it.
+$wpbp_wp_version = isset( $GLOBALS['wp_version'] ) ? (string) $GLOBALS['wp_version'] : '';
+
+if ( version_compare( PHP_VERSION, '7.4', '<' ) || ( '' !== $wpbp_wp_version && version_compare( $wpbp_wp_version, '6.2', '<' ) ) ) {
+	// One notice, also when a second copy of the plugin is active.
+	if ( ! defined( 'WPBP_REQUIREMENTS_NOT_MET' ) ) {
+		define( 'WPBP_REQUIREMENTS_NOT_MET', true );
+
+		add_action(
+			'admin_notices',
+			static function () use ( $wpbp_wp_version ) {
+				if ( ! current_user_can( 'activate_plugins' ) ) {
+					return;
+				}
+
+				printf(
+					'<div class="notice notice-error wpbp-notice"><p><strong>%1$s</strong> %2$s</p></div>',
+					esc_html__( 'Wrensafe is not running.', 'wrensafe' ),
+					esc_html(
+						sprintf(
+							/* translators: 1: PHP version on this server, 2: WordPress version of this site */
+							__( 'It needs PHP 7.4 or newer and WordPress 6.2 or newer; this site has PHP %1$s and WordPress %2$s. Update WordPress, or ask your host to switch the site to a newer PHP version, and Wrensafe starts again by itself. Your settings and backups are kept.', 'wrensafe' ),
+							PHP_VERSION,
+							$wpbp_wp_version
+						)
+					)
+				);
+			}
+		);
+	}
+
+	return;
+}
+
+unset( $wpbp_wp_version );
+
 // Another copy of this plugin is already running: a second Wrensafe folder
 // (for example one installed from GitHub's "Source code" download, which
 // WordPress treats as a separate plugin) or an earlier version under the
@@ -26,14 +66,15 @@ if ( defined( 'WPBP_VERSION' ) ) {
 	$wpbp_idle_copy = plugin_basename( __FILE__ );
 	add_action(
 		'admin_notices',
-		static function () use ( $wpbp_idle_copy ): void {
+		static function () use ( $wpbp_idle_copy ) {
 			if ( ! current_user_can( 'activate_plugins' ) ) {
 				return;
 			}
 
 			$running         = defined( 'WPBP_PLUGIN_BASENAME' ) ? (string) WPBP_PLUGIN_BASENAME : '';
 			$running_version = (string) WPBP_VERSION;
-			$idle_version    = (string) ( get_file_data( WP_PLUGIN_DIR . '/' . $wpbp_idle_copy, array( 'Version' => 'Version' ) )['Version'] ?? '' );
+			$idle_data       = get_file_data( WP_PLUGIN_DIR . '/' . $wpbp_idle_copy, array( 'Version' => 'Version' ) );
+			$idle_version    = isset( $idle_data['Version'] ) ? (string) $idle_data['Version'] : '';
 
 			// Offer to deactivate the older copy. With the same version, keep the
 			// one in the "wrensafe" folder: uploads of new versions replace it.
@@ -48,7 +89,7 @@ if ( defined( 'WPBP_VERSION' ) ) {
 			$link = wp_nonce_url( self_admin_url( 'plugins.php?action=deactivate&plugin=' . rawurlencode( $older ) ), 'deactivate-plugin_' . $older );
 
 			printf(
-				'<div class="notice notice-error"><p><strong>%1$s</strong> %2$s</p><p><a class="button" href="%3$s">%4$s</a></p></div>',
+				'<div class="notice notice-error wpbp-notice"><p><strong>%1$s</strong> %2$s</p><p><a class="button" href="%3$s">%4$s</a></p></div>',
 				esc_html__( 'Two copies of Wrensafe are active, and only one can run.', 'wrensafe' ),
 				esc_html(
 					sprintf(
@@ -78,7 +119,7 @@ if ( defined( 'WPBP_VERSION' ) ) {
 // Core plugin constants.
 // ---------------------------------------------------------------------------
 
-define( 'WPBP_VERSION', '1.1.3' );
+define( 'WPBP_VERSION', '1.1.4' );
 define( 'WPBP_PLUGIN_FILE', __FILE__ );
 define( 'WPBP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPBP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -101,10 +142,11 @@ defined( 'WPBP_COMMUNITY_URL' ) || define( 'WPBP_COMMUNITY_URL', '' );
 // ---------------------------------------------------------------------------
 
 spl_autoload_register(
-	static function ( string $class_name ): void {
+	static function ( $class_name ) {
 		$prefix = 'WPBP\\';
 
-		if ( ! str_starts_with( $class_name, $prefix ) ) {
+		// Not Str::starts_with(): the autoloader can't load its own helpers.
+		if ( 0 !== strncmp( $class_name, $prefix, strlen( $prefix ) ) ) {
 			return;
 		}
 
@@ -130,7 +172,7 @@ register_deactivation_hook( __FILE__, array( \WPBP\Core\Deactivator::class, 'dea
 
 add_action(
 	'plugins_loaded',
-	static function (): void {
+	static function () {
 		\WPBP\Core\Plugin::instance()->boot();
 	}
 );

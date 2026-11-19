@@ -11,6 +11,15 @@
  * of failing, and starting again with the same key continues where the
  * last attempt stopped.
  *
+ * Requests use wp_remote_post(), not wp_safe_remote_post(): the receiving
+ * site is the administrator's own other site, which can legitimately be on
+ * the local network or this server (a staging copy, a site moving between
+ * two machines in one office), and wp_safe_remote_post() refuses such
+ * addresses. Only users who may manage migrations start a transfer (nonce
+ * and capability checked in MigrationAjax), redirects are not followed,
+ * and nothing from the response is used but the receiving site's JSON
+ * answer.
+ *
  * @package WPBP\Migration
  */
 
@@ -18,6 +27,7 @@ namespace WPBP\Migration;
 
 use WPBP\Core\Database\BackupsRepository;
 use WPBP\Core\Settings;
+use WPBP\Utils\Errors;
 use WPBP\Utils\Logger;
 
 defined( 'ABSPATH' ) || exit;
@@ -69,8 +79,9 @@ class TransferClient {
 					$job->mark_failed( __( 'Unknown migration phase.', 'wrensafe' ) );
 			}
 		} catch ( \Throwable $e ) {
-			Logger::error( 'Migration transfer #' . $job->id() . ' failed: ' . $e->getMessage(), array(), $job->id() );
-			$job->mark_failed( $e->getMessage() );
+			$message = Errors::text( $e );
+			Logger::error( 'Migration transfer #' . $job->id() . ' failed: ' . $message, array(), $job->id() );
+			$job->mark_failed( $message );
 		}
 	}
 
@@ -359,7 +370,7 @@ class TransferClient {
 		}
 
 		$init = array(
-			'body'      => array(
+			'body'        => array(
 				'token'       => $payload['token'],
 				'filename'    => $backup['file_name'],
 				'total_size'  => (string) $backup['size'],
@@ -370,8 +381,9 @@ class TransferClient {
 				// Continue an unfinished transfer of this backup with this key.
 				'resume'      => '1',
 			),
-			'timeout'   => 30,
-			'sslverify' => ! empty( $payload['verify_ssl'] ),
+			'timeout'     => 30,
+			'sslverify'   => ! empty( $payload['verify_ssl'] ),
+			'redirection' => 0,
 		);
 
 		$response = wp_remote_post( $this->endpoint( $payload, 'init' ), $init );
@@ -426,24 +438,35 @@ class TransferClient {
 		$chunk_size  = max( 1, (int) ( $payload['chunk_size'] ?? self::DEFAULT_CHUNK_SIZE ) );
 		$chunk_index = isset( $payload['chunk_index'] ) ? (int) $payload['chunk_index'] : (int) ( $payload['offset'] / $chunk_size );
 
-		$handle = fopen( $payload['file_path'], 'rb' );
-		fseek( $handle, $payload['offset'] );
-		$chunk = (string) fread( $handle, $chunk_size );
-		fclose( $handle );
+		$handle = file_exists( (string) $payload['file_path'] ) ? fopen( (string) $payload['file_path'], 'rb' ) : false;
+		$chunk  = '';
+
+		if ( false !== $handle ) {
+			fseek( $handle, (int) $payload['offset'] );
+			$chunk = (string) fread( $handle, $chunk_size );
+			fclose( $handle );
+		}
+
+		if ( '' === $chunk ) {
+			$job->mark_failed( __( 'The backup file couldn’t be read any more (was it deleted or moved?). Start the transfer again.', 'wrensafe' ) );
+			return;
+		}
 
 		$signature = ( new MigrationKey() )->sign_chunk( $payload['token'], $chunk_index, $chunk );
 
 		$response = wp_remote_post(
 			$this->endpoint( $payload, 'chunk' ),
 			array(
-				'body'      => array(
+				'body'        => array(
 					'token'       => $payload['token'],
 					'chunk_index' => (string) $chunk_index,
 					'signature'   => $signature,
-					'chunk'       => base64_encode( $chunk ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+					// Binary backup data in a form field (the 1.1.3 protocol).
+					'chunk'       => base64_encode( $chunk ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- encodes a transfer chunk, not code.
 				),
-				'timeout'   => 60,
-				'sslverify' => ! empty( $payload['verify_ssl'] ),
+				'timeout'     => 60,
+				'sslverify'   => ! empty( $payload['verify_ssl'] ),
+				'redirection' => 0,
 			)
 		);
 
@@ -488,13 +511,14 @@ class TransferClient {
 		$response = wp_remote_post(
 			$this->endpoint( $payload, 'finalize' ),
 			array(
-				'body'      => array(
+				'body'        => array(
 					'token'    => $payload['token'],
 					'checksum' => $payload['checksum'],
 				),
 				// The receiving site checks the whole archive before answering.
-				'timeout'   => 300,
-				'sslverify' => ! empty( $payload['verify_ssl'] ),
+				'timeout'     => 300,
+				'sslverify'   => ! empty( $payload['verify_ssl'] ),
+				'redirection' => 0,
 			)
 		);
 

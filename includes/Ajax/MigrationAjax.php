@@ -14,6 +14,7 @@ use WPBP\Migration\MigrationKey;
 use WPBP\Migration\MigrationTransferJob;
 use WPBP\Migration\TransferClient;
 use WPBP\Security\CapabilityManager;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -36,12 +37,19 @@ class MigrationAjax {
 			wp_send_json_error( array( 'message' => __( 'This site accepts direct migrations only over HTTPS. Turn on HTTPS for this site, or turn off the HTTPS requirement in Wrensafe → Settings → Direct Migration.', 'wrensafe' ) ), 400 );
 		}
 
-		$minutes     = isset( $_POST['expiry_minutes'] ) ? max( 5, absint( $_POST['expiry_minutes'] ) ) : 30;
-		$restrict_ip = empty( $_POST['restrict_ip'] ) ? '' : ( isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '' );
+		// The page offers 15, 30 and 60 minutes; anything else is kept between
+		// 5 minutes and 7 days.
+		$minutes = isset( $_POST['expiry_minutes'] ) ? min( MigrationKey::MAX_EXPIRY_MINUTES, max( MigrationKey::MIN_EXPIRY_MINUTES, absint( $_POST['expiry_minutes'] ) ) ) : 30;
+
+		// "Only accept this key from the IP address that uses it first": the
+		// receiving site records the sending server's address on the key's
+		// first accepted request (MigrationKey::verify()). The browser's
+		// address here is not the sending server's.
+		$restrict_ip = empty( $_POST['restrict_ip'] ) ? '' : MigrationKey::FIRST_SENDER;
 
 		$result = ( new MigrationKey() )->generate( $minutes, $restrict_ip );
 
-		\WPBP\Utils\Logger::info( 'Direct migration key generated (expires in ' . $minutes . ' min' . ( $restrict_ip ? ', IP-restricted' : '' ) . ') by user #' . get_current_user_id() . '.' );
+		\WPBP\Utils\Logger::info( 'Direct migration key generated (expires in ' . $minutes . ' min' . ( $restrict_ip ? ', locked to the first sending server' : '' ) . ') by user #' . get_current_user_id() . '.' );
 
 		wp_send_json_success(
 			array(
@@ -70,7 +78,8 @@ class MigrationAjax {
 
 		$backup_id       = isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0;
 		$destination_url = isset( $_POST['destination_url'] ) ? sanitize_url( wp_unslash( $_POST['destination_url'] ) ) : '';
-		$token           = isset( $_POST['token'] ) ? sanitize_text_field( wp_unslash( $_POST['token'] ) ) : '';
+		// Keys are lower-case hex; a key pasted in capitals still works.
+		$token = isset( $_POST['token'] ) ? strtolower( sanitize_text_field( wp_unslash( $_POST['token'] ) ) ) : '';
 
 		if ( ! $backup_id || '' === $destination_url || '' === $token ) {
 			wp_send_json_error( array( 'message' => __( 'Backup, destination URL, and migration key are all required.', 'wrensafe' ) ), 400 );
@@ -89,7 +98,7 @@ class MigrationAjax {
 				'backup_id'       => $backup_id,
 				'destination_url' => $destination_url,
 				'token'           => $token,
-				'verify_ssl'      => str_starts_with( strtolower( $destination_url ), 'https://' ),
+				'verify_ssl'      => Str::starts_with( strtolower( $destination_url ), 'https://' ),
 				'rest_style'      => $preflight['rest_style'],
 			)
 		);

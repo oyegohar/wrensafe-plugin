@@ -177,12 +177,16 @@ class LogsExport {
 		return substr( $value, 0, 4 ) . '********' . substr( $value, -4 );
 	}
 
+	/**
+	 * Send $data as a downloadable JSON file. wp_send_json() sets the JSON
+	 * content type, prints the encoded data and ends the request.
+	 *
+	 * @return never
+	 */
 	private function stream_json( string $filename, array $data ): void {
 		nocache_headers();
-		header( 'Content-Type: application/json; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="' . sanitize_file_name( $filename ) . '"' );
 
-		echo wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-		exit;
+		wp_send_json( $data, null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
 	}
 }

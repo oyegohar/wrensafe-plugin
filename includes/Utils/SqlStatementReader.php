@@ -94,7 +94,13 @@ class SqlStatementReader {
 		$stmt  = '';
 		$state = 'normal';
 
-		while ( null !== ( $ch = $this->read_char() ) ) {
+		while ( true ) {
+			$ch = $this->read_char();
+
+			if ( null === $ch ) {
+				break;
+			}
+
 			switch ( $state ) {
 				case 'normal':
 					if ( "'" === $ch ) {

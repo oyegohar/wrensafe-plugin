@@ -24,6 +24,7 @@ namespace WPBP\Backup;
 
 use WPBP\Core\Database\BackupsRepository;
 use WPBP\Restore\ArchiveReader;
+use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 
@@ -201,6 +202,19 @@ class VerifyManager {
 
 		$state['encrypted'] = ( new BackupEncryption() )->is_encrypted( $state['file_path'] );
 
+		$no_encryption = $state['encrypted'] && '' !== $password ? BackupEncryption::unavailable_reason() : '';
+
+		if ( '' !== $no_encryption ) {
+			// This server can't decrypt (no OpenSSL): say so, and leave the
+			// backup's status alone; the archive itself may be fine.
+			self::set_check( $state, 'archive_container', self::STATUS_FAILED, $no_encryption );
+			self::set_check( $state, 'final_result', self::STATUS_FAILED, $no_encryption );
+			$state['skip_status_update'] = true;
+			self::finalize( $state, self::STATUS_FAILED, $no_encryption );
+			self::save( $state );
+			return $state;
+		}
+
 		if ( $state['encrypted'] ) {
 			if ( '' === $password ) {
 				// No password supplied — we can confirm the file exists and its
@@ -247,8 +261,13 @@ class VerifyManager {
 	 * Advance a verification job by one bounded step and return its updated
 	 * state. Safe to call after the job has finished — it just returns the
 	 * stored final state.
+	 *
+	 * @param string $password Not needed any more: start() decrypts an
+	 *                         encrypted backup once. Kept for callers.
 	 */
 	public static function step( string $job_id, string $password = '' ): ?array {
+		unset( $password );
+
 		$state = self::get( $job_id );
 
 		if ( null === $state ) {
@@ -262,28 +281,28 @@ class VerifyManager {
 		try {
 			switch ( $state['phase'] ) {
 				case 'archive_container':
-					self::step_archive_container( $state, $password );
+					self::step_archive_container( $state );
 					break;
 				case 'manifest_json':
-					self::step_manifest_json( $state, $password );
+					self::step_manifest_json( $state );
 					break;
 				case 'metadata_json':
-					self::step_metadata_json( $state, $password );
+					self::step_metadata_json( $state );
 					break;
 				case 'archive_version':
 					self::step_archive_version( $state );
 					break;
 				case 'database_manifest':
-					self::step_database_manifest( $state, $password );
+					self::step_database_manifest( $state );
 					break;
 				case 'database_files':
-					self::step_database_files( $state, $password );
+					self::step_database_files( $state );
 					break;
 				case 'checksums_json':
-					self::step_checksums_json( $state, $password );
+					self::step_checksums_json( $state );
 					break;
 				case 'backup_files':
-					self::step_backup_files( $state, $password );
+					self::step_backup_files( $state );
 					break;
 				case 'whole_archive':
 					self::step_whole_archive( $state );
@@ -294,9 +313,11 @@ class VerifyManager {
 					break;
 			}
 		} catch ( \Throwable $e ) {
-			self::set_check( $state, 'final_result', self::STATUS_FAILED, $e->getMessage() );
-			$state['errors'][] = $e->getMessage();
-			self::finalize( $state, self::STATUS_FAILED, $e->getMessage() );
+			$message = Errors::text( $e );
+
+			self::set_check( $state, 'final_result', self::STATUS_FAILED, $message );
+			$state['errors'][] = $message;
+			self::finalize( $state, self::STATUS_FAILED, $message );
 		}
 
 		self::save( $state );
@@ -314,7 +335,7 @@ class VerifyManager {
 	// Step implementations.
 	// ---------------------------------------------------------------------
 
-	private static function step_archive_container( array &$state, string $password ): void {
+	private static function step_archive_container( array &$state ): void {
 		if ( ! empty( $state['needs_password'] ) ) {
 			// Encrypted backup, no password supplied: the contents can't be
 			// inspected. Skip the content checks AND the whole-file checksum
@@ -347,7 +368,7 @@ class VerifyManager {
 		$state['current_step'] = __( 'Checking manifest.json…', 'wrensafe' );
 	}
 
-	private static function step_manifest_json( array &$state, string $password ): void {
+	private static function step_manifest_json( array &$state ): void {
 		$reader   = new ArchiveReader( $state['work_path'] );
 		$manifest = $reader->read_json( 'manifest.json' );
 
@@ -365,7 +386,7 @@ class VerifyManager {
 		$state['current_step']      = __( 'Checking metadata.json…', 'wrensafe' );
 	}
 
-	private static function step_metadata_json( array &$state, string $password ): void {
+	private static function step_metadata_json( array &$state ): void {
 		$reader   = new ArchiveReader( $state['work_path'] );
 		$metadata = $reader->read_json( 'metadata.json' );
 
@@ -411,7 +432,7 @@ class VerifyManager {
 		$state['current_step'] = __( 'Checking database manifest…', 'wrensafe' );
 	}
 
-	private static function step_database_manifest( array &$state, string $password ): void {
+	private static function step_database_manifest( array &$state ): void {
 		if ( empty( $state['contains_database'] ) ) {
 			foreach ( array( 'database_manifest', 'database_schema_files', 'database_data_files' ) as $key ) {
 				self::set_check( $state, $key, self::STATUS_SKIPPED, __( 'Skipped — this backup does not include a database.', 'wrensafe' ) );
@@ -438,7 +459,7 @@ class VerifyManager {
 		$state['current_step'] = __( 'Verifying database files…', 'wrensafe' );
 	}
 
-	private static function step_database_files( array &$state, string $password ): void {
+	private static function step_database_files( array &$state ): void {
 		$entries = $state['db_entries'];
 		$total   = count( $entries );
 
@@ -505,7 +526,7 @@ class VerifyManager {
 		}
 	}
 
-	private static function step_checksums_json( array &$state, string $password ): void {
+	private static function step_checksums_json( array &$state ): void {
 		$reader    = new ArchiveReader( $state['work_path'] );
 		$checksums = $reader->read_json( 'checksums.json' );
 
@@ -534,7 +555,7 @@ class VerifyManager {
 		}
 	}
 
-	private static function step_backup_files( array &$state, string $password ): void {
+	private static function step_backup_files( array &$state ): void {
 		$reader    = new ArchiveReader( $state['work_path'] );
 		$checksums = $reader->read_json( 'checksums.json' );
 		$files_map = is_array( $checksums['files'] ?? null ) ? $checksums['files'] : array();
@@ -549,7 +570,11 @@ class VerifyManager {
 		// large media files can take longer than a 30-second host allows.
 		$processed = 0;
 
-		for ( ; $state['file_index'] < $end && ( 0 === $processed || microtime( true ) < $deadline ); $state['file_index']++, $processed++ ) {
+		while ( $state['file_index'] < $end ) {
+			if ( $processed > 0 && microtime( true ) >= $deadline ) {
+				break;
+			}
+
 			$entry_name = (string) $names[ $state['file_index'] ];
 			$problem    = self::check_entry( $reader, $entry_name, (string) $files_map[ $entry_name ] );
 
@@ -564,6 +589,8 @@ class VerifyManager {
 			}
 
 			++$state['checked_files'];
+			++$state['file_index'];
+			++$processed;
 		}
 
 		$state['progress']     = 78 + (int) ( ( $state['file_index'] / max( 1, $total ) ) * 12 );

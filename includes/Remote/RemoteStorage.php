@@ -2,7 +2,7 @@
 /**
  * Off-site copies of backups (Settings → Remote storage).
  *
- * One destination (FTP/FTPS, SFTP or S3-compatible storage). Right after a
+ * One destination (FTP/FTPS or S3-compatible storage). Right after a
  * backup is made, the backup job copies it there in short steps (see
  * BackupManager::step_remote_copy()) and then keeps only the newest copies
  * there. Passwords and secret keys are stored encrypted (SecretBox).
@@ -25,9 +25,8 @@ final class RemoteStorage {
 
 	/** Fields stored encrypted, per type. */
 	private const SECRETS = array(
-		'ftp'  => array( 'password' ),
-		'sftp' => array( 'password' ),
-		's3'   => array( 'secret_key' ),
+		'ftp' => array( 'password' ),
+		's3'  => array( 'secret_key' ),
 	);
 
 	/** @return array<string,mixed> */
@@ -46,13 +45,6 @@ final class RemoteStorage {
 				'ftps'     => true,
 				'passive'  => true,
 			),
-			'sftp'           => array(
-				'host'     => '',
-				'port'     => 22,
-				'username' => '',
-				'password' => '',
-				'folder'   => 'wrensafe',
-			),
 			's3'             => array(
 				'endpoint'   => '',
 				'region'     => 'us-east-1',
@@ -68,10 +60,21 @@ final class RemoteStorage {
 	/** Display names. */
 	public static function types(): array {
 		return array(
-			'ftp'  => __( 'FTP / FTPS', 'wrensafe' ),
-			'sftp' => __( 'SFTP', 'wrensafe' ),
-			's3'   => __( 'S3-compatible storage', 'wrensafe' ),
+			'ftp' => __( 'FTP / FTPS', 'wrensafe' ),
+			's3'  => __( 'S3-compatible storage', 'wrensafe' ),
 		);
+	}
+
+	/**
+	 * Whether the saved destination is SFTP, which Wrensafe 1.1.4 no longer
+	 * offers (its connection needed PHP's ssh2 stream wrapper, which many
+	 * hosts block). The settings are kept; copies stop until another
+	 * destination is chosen.
+	 */
+	public static function has_retired_sftp(): bool {
+		$saved = get_option( self::OPTION, array() );
+
+		return is_array( $saved ) && 'sftp' === ( $saved['type'] ?? '' );
 	}
 
 	/** Saved settings (secrets still sealed). */
@@ -101,7 +104,9 @@ final class RemoteStorage {
 	 * Settings from the Remote storage form, cleaned. A blank secret keeps
 	 * the saved one.
 	 *
-	 * @param array<string,mixed> $posted
+	 * @param array<string,mixed> $posted Unslashed values: from options.php
+	 *                                    (Settings::sanitize()), which unslashes
+	 *                                    them, or from RemoteStorageAjax::test().
 	 * @return array<string,mixed> Settings with secrets sealed.
 	 */
 	public static function sanitize( array $posted ): array {
@@ -123,7 +128,8 @@ final class RemoteStorage {
 
 			foreach ( self::defaults()[ $kind ] as $field => $default ) {
 				if ( in_array( $field, self::SECRETS[ $kind ], true ) ) {
-					$value = (string) wp_unslash( $in[ $field ] ?? '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- a password is kept exactly as typed and stored encrypted.
+					// Kept exactly as typed (and stored encrypted), less control characters.
+					$value = (string) preg_replace( '/[\x00-\x1F\x7F]/', '', is_scalar( $in[ $field ] ?? '' ) ? (string) $in[ $field ] : '' );
 
 					if ( '' !== $value ) {
 						$settings[ $kind ][ $field ] = SecretBox::seal( $value );
@@ -136,9 +142,9 @@ final class RemoteStorage {
 				} elseif ( is_int( $default ) ) {
 					$settings[ $kind ][ $field ] = max( 1, min( 65535, absint( $in[ $field ] ?? $default ) ) );
 				} elseif ( 'endpoint' === $field ) {
-					$settings[ $kind ][ $field ] = esc_url_raw( trim( (string) wp_unslash( $in[ $field ] ?? '' ) ), array( 'https', 'http' ) );
+					$settings[ $kind ][ $field ] = esc_url_raw( trim( (string) ( $in[ $field ] ?? '' ) ), array( 'https', 'http' ) );
 				} else {
-					$settings[ $kind ][ $field ] = trim( sanitize_text_field( (string) wp_unslash( $in[ $field ] ?? '' ) ) );
+					$settings[ $kind ][ $field ] = trim( sanitize_text_field( (string) ( $in[ $field ] ?? '' ) ) );
 				}
 			}
 		}
@@ -165,8 +171,6 @@ final class RemoteStorage {
 		switch ( $type ) {
 			case 'ftp':
 				return new FtpTarget( $config );
-			case 'sftp':
-				return new SftpTarget( $config );
 			case 's3':
 				return new S3Target( $config );
 		}
@@ -180,15 +184,14 @@ final class RemoteStorage {
 	 * text, so an apostrophe from the server would otherwise read "&#039;".
 	 */
 	public static function error_text( \Throwable $e ): string {
-		return wp_specialchars_decode( $e->getMessage(), ENT_QUOTES );
+		return \WPBP\Utils\Errors::text( $e );
 	}
 
 	/** Why a type can't be used on this server ('' when it can). */
 	public static function unavailable_reason( string $type ): string {
 		$classes = array(
-			'ftp'  => FtpTarget::class,
-			'sftp' => SftpTarget::class,
-			's3'   => S3Target::class,
+			'ftp' => FtpTarget::class,
+			's3'  => S3Target::class,
 		);
 
 		return isset( $classes[ $type ] ) ? $classes[ $type ]::unavailable_reason() : '';
@@ -216,6 +219,15 @@ final class RemoteStorage {
 	 * @param array<string,mixed> $state Upload state kept by the caller ([] to start).
 	 */
 	public static function copy_step( array &$state, string $local_path, string $name, float $deadline ): bool {
+		// A scheduled copy runs without the Settings page that explains this:
+		// a missing PHP extension would otherwise end in "Call to undefined
+		// function".
+		$reason = self::unavailable_reason( (string) self::get()['type'] );
+
+		if ( '' !== $reason ) {
+			throw new \RuntimeException( esc_html( $reason ) );
+		}
+
 		$target = self::target();
 
 		if ( empty( $state ) ) {
@@ -235,10 +247,10 @@ final class RemoteStorage {
 
 	/** Drop an unfinished upload after a failure. */
 	public static function abort( array $state ): void {
-		if ( ! empty( $state ) && self::is_enabled() ) {
+		if ( ! empty( $state ) && self::is_enabled() && '' === self::unavailable_reason( (string) self::get()['type'] ) ) {
 			try {
 				self::target()->abort( $state );
-			} catch ( \RuntimeException $e ) {
+			} catch ( \Throwable $e ) {
 				unset( $e ); // Best effort.
 			}
 		}

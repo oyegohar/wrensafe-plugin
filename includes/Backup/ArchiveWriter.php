@@ -38,10 +38,6 @@ defined( 'ABSPATH' ) || exit;
 // temp file, or validated by WPBP\Security\PathValidator.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages here are stored as a job's error_message and logged; they
-// reach the browser only as JSON rendered with jQuery .text(), never as HTML.
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class ArchiveWriter {
 
 	/**
@@ -67,7 +63,7 @@ class ArchiveWriter {
 		$container_format = class_exists( '\ZipArchive' ) ? 'zip' : ( class_exists( '\PharData' ) ? 'tar' : '' );
 
 		if ( '' === $container_format ) {
-			throw new \RuntimeException( __( 'No archive backend available on this server (ZipArchive or Phar is required).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No archive backend available on this server (ZipArchive or Phar is required).', 'wrensafe' ) );
 		}
 
 		// Fail fast when the disk clearly can't hold the archive. total_size is
@@ -79,11 +75,13 @@ class ArchiveWriter {
 
 		if ( false !== $disk_free && $disk_free < $estimated_need ) {
 			throw new \RuntimeException(
-				sprintf(
-					/* translators: 1: free disk space, 2: estimated space needed */
-					__( 'Not enough free disk space to build the backup archive (free: %1$s, estimated need: %2$s). Free up space on the server and try again.', 'wrensafe' ),
-					size_format( (int) $disk_free ),
-					size_format( $estimated_need )
+				esc_html(
+					sprintf(
+						/* translators: 1: free disk space, 2: estimated space needed */
+						__( 'Not enough free disk space to build the backup archive (free: %1$s, estimated need: %2$s). Free up space on the server and try again.', 'wrensafe' ),
+						size_format( (int) $disk_free ),
+						size_format( $estimated_need )
+					)
 				)
 			);
 		}
@@ -152,7 +150,7 @@ class ArchiveWriter {
 
 			if ( true !== $opened ) {
 				/* translators: %d: ZipArchive error code */
-				throw new \RuntimeException( sprintf( __( 'The backup archive could not be opened for writing (zip error %d). Check that the backup folder is writable and the disk has free space.', 'wrensafe' ), (int) $opened ) );
+				throw new \RuntimeException( esc_html( sprintf( __( 'The backup archive could not be opened for writing (zip error %d). Check that the backup folder is writable and the disk has free space.', 'wrensafe' ), (int) $opened ) ) );
 			}
 
 			return $zip;
@@ -167,7 +165,7 @@ class ArchiveWriter {
 	private function close_container( $container ): void {
 		if ( $container instanceof \ZipArchive ) {
 			if ( ! $container->close() ) {
-				throw new \RuntimeException( __( 'The server failed to flush the backup archive to disk (zip close failed). The disk may be full or the file blocked.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The server failed to flush the backup archive to disk (zip close failed). The disk may be full or the file blocked.', 'wrensafe' ) );
 			}
 			return;
 		}
@@ -249,7 +247,7 @@ class ArchiveWriter {
 		$handle = fopen( $manifest_path, 'r' );
 
 		if ( false === $handle ) {
-			throw new \RuntimeException( __( 'The backup file manifest could not be reopened while building the archive.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup file manifest could not be reopened while building the archive.', 'wrensafe' ) );
 		}
 
 		if ( $payload['aw_file_offset'] > 0 ) {
@@ -368,7 +366,7 @@ class ArchiveWriter {
 		$handle = fopen( $manifest_path, 'r' );
 
 		if ( false === $handle ) {
-			throw new \RuntimeException( __( 'The backup file manifest could not be reopened while building the archive.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup file manifest could not be reopened while building the archive.', 'wrensafe' ) );
 		}
 
 		if ( $payload['aw_file_offset'] > 0 ) {
@@ -468,16 +466,21 @@ class ArchiveWriter {
 
 		if ( file_exists( $payload['aw_checksums_file'] ) ) {
 			$handle = fopen( $payload['aw_checksums_file'], 'r' );
+			$line   = false === $handle ? false : fgets( $handle );
 
-			while ( false !== ( $line = fgets( $handle ) ) ) {
+			while ( false !== $line ) {
 				$parts = explode( "\t", rtrim( $line, "\n" ), 2 );
 
 				if ( 2 === count( $parts ) && '' !== $parts[0] ) {
 					$checksums['files'][ $parts[0] ] = $parts[1];
 				}
+
+				$line = fgets( $handle );
 			}
 
-			fclose( $handle );
+			if ( false !== $handle ) {
+				fclose( $handle );
+			}
 		}
 
 		$chain_mode  = $payload['chain_mode'] ?? 'full';
@@ -512,7 +515,7 @@ class ArchiveWriter {
 		clearstatcache( true, $payload['aw_dest'] );
 
 		if ( ! file_exists( $payload['aw_dest'] ) || (int) filesize( $payload['aw_dest'] ) <= 0 ) {
-			throw new \RuntimeException( __( 'The backup archive was not written to disk (empty or missing after packing). The server may have blocked the write or run out of space.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup archive was not written to disk (empty or missing after packing). The server may have blocked the write or run out of space.', 'wrensafe' ) );
 		}
 
 		Logger::info( 'backup_archive_writer_completed: archive written (' . size_format( (int) filesize( $payload['aw_dest'] ) ) . ', ' . (int) $payload['aw_files_added'] . ' files packed).', array(), $job->id() );
@@ -618,7 +621,5 @@ class ArchiveWriter {
 		}
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

@@ -12,8 +12,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with the table
+// name as an identifier placeholder (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class BackupsRepository {
@@ -38,7 +38,7 @@ class BackupsRepository {
 		global $wpdb;
 
 		$row = $wpdb->get_row(
-			$wpdb->prepare( 'SELECT * FROM ' . esc_sql( self::table() ) . ' WHERE id = %d', $id ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+			$wpdb->prepare( 'SELECT * FROM %i WHERE id = %d', self::table(), $id ),
 			ARRAY_A
 		);
 
@@ -64,7 +64,7 @@ class BackupsRepository {
 		global $wpdb;
 
 		return $wpdb->get_results(
-			$wpdb->prepare( 'SELECT * FROM ' . esc_sql( self::table() ) . ' ORDER BY id DESC LIMIT %d', $limit ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+			$wpdb->prepare( 'SELECT * FROM %i ORDER BY id DESC LIMIT %d', self::table(), $limit ),
 			ARRAY_A
 		);
 	}
@@ -72,7 +72,7 @@ class BackupsRepository {
 	public static function count_all(): int {
 		global $wpdb;
 
-		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . esc_sql( self::table() ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', self::table() ) );
 	}
 
 	/**
@@ -84,13 +84,13 @@ class BackupsRepository {
 	public static function count_completed(): int {
 		global $wpdb;
 
-		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . esc_sql( self::table() ) . " WHERE status = 'completed'" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE status = %s', self::table(), 'completed' ) );
 	}
 
 	public static function sum_size(): int {
 		global $wpdb;
 
-		return (int) $wpdb->get_var( 'SELECT SUM(size) FROM ' . esc_sql( self::table() ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT SUM(size) FROM %i', self::table() ) );
 	}
 
 	/**
@@ -103,8 +103,10 @@ class BackupsRepository {
 
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE backup_type = %s AND status = 'completed' ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
-				$backup_type
+				'SELECT * FROM %i WHERE backup_type = %s AND status = %s ORDER BY id DESC LIMIT 1',
+				self::table(),
+				$backup_type,
+				'completed'
 			),
 			ARRAY_A
 		);
@@ -117,7 +119,7 @@ class BackupsRepository {
 		global $wpdb;
 
 		$row = $wpdb->get_row(
-			'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE status = 'completed' ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix.
+			$wpdb->prepare( 'SELECT * FROM %i WHERE status = %s ORDER BY id DESC LIMIT 1', self::table(), 'completed' ),
 			ARRAY_A
 		);
 
@@ -132,7 +134,7 @@ class BackupsRepository {
 		global $wpdb;
 
 		$row = $wpdb->get_row(
-			'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE chain_mode = 'full' AND status = 'completed' ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+			$wpdb->prepare( 'SELECT * FROM %i WHERE chain_mode = %s AND status = %s ORDER BY id DESC LIMIT 1', self::table(), 'full', 'completed' ),
 			ARRAY_A
 		);
 
@@ -149,7 +151,11 @@ class BackupsRepository {
 
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE chain_mode = 'full' AND status = 'completed' AND is_encrypted = 0 AND backup_type = %s ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix.
+				'SELECT * FROM %i WHERE chain_mode = %s AND status = %s AND is_encrypted = %d AND backup_type = %s ORDER BY id DESC LIMIT 1',
+				self::table(),
+				'full',
+				'completed',
+				0,
 				$backup_type
 			),
 			ARRAY_A
@@ -168,9 +174,11 @@ class BackupsRepository {
 
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE (id = %d OR baseline_backup_id = %d) AND status = 'completed' ORDER BY id DESC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT * FROM %i WHERE (id = %d OR baseline_backup_id = %d) AND status = %s ORDER BY id DESC LIMIT 1',
+				self::table(),
 				$baseline_id,
-				$baseline_id
+				$baseline_id,
+				'completed'
 			),
 			ARRAY_A
 		);
@@ -220,9 +228,14 @@ class BackupsRepository {
 
 		return $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE chain_mode IN ('incremental','differential') AND is_locked = 0 AND created_at < %s AND ( baseline_backup_id IS NULL OR baseline_backup_id != %d )", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
-				gmdate( 'Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS ),
-				$current_baseline['id']
+				'SELECT * FROM %i WHERE chain_mode IN (%s, %s) AND is_locked = %d AND created_at < %s AND ( baseline_backup_id IS NULL OR baseline_backup_id != %d )',
+				self::table(),
+				'incremental',
+				'differential',
+				0,
+				// created_at is written in site time (current_time( 'mysql' )).
+				wp_date( 'Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS ),
+				(int) $current_baseline['id']
 			),
 			ARRAY_A
 		);
@@ -235,7 +248,7 @@ class BackupsRepository {
 		global $wpdb;
 
 		return $wpdb->get_results(
-			$wpdb->prepare( 'SELECT * FROM ' . esc_sql( self::table() ) . ' WHERE schedule_id = %d ORDER BY id DESC', $schedule_id ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+			$wpdb->prepare( 'SELECT * FROM %i WHERE schedule_id = %d ORDER BY id DESC', self::table(), $schedule_id ),
 			ARRAY_A
 		);
 	}

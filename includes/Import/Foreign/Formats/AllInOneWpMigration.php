@@ -18,9 +18,6 @@ defined( 'ABSPATH' ) || exit;
 // streaming API. Paths are uploaded import files in protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class AllInOneWpMigration extends AbstractFormat {
 
 	public function key(): string {
@@ -81,15 +78,15 @@ class AllInOneWpMigration extends AbstractFormat {
 		$reader->close();
 
 		if ( ! is_array( $package ) ) {
-			throw new \RuntimeException( __( 'This .wpress file has no package.json, so it is not a complete All-in-One WP Migration backup.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This .wpress file has no package.json, so it is not a complete All-in-One WP Migration backup.', 'wrensafe' ) );
 		}
 
 		if ( ! empty( $package['Encrypted'] ) ) {
-			throw new \RuntimeException( __( 'This .wpress backup is password-protected. Export it again in All-in-One WP Migration without a password, then import it here.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This .wpress backup is password-protected. Export it again in All-in-One WP Migration without a password, then import it here.', 'wrensafe' ) );
 		}
 
 		if ( ! empty( $package['Compression']['Enabled'] ) || ( isset( $package['Compression'] ) && true === $package['Compression'] ) ) {
-			throw new \RuntimeException( __( 'This .wpress backup is compressed, which Wrensafe cannot read yet. Export it again in All-in-One WP Migration without compression, then import it here.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This .wpress backup is compressed, which Wrensafe cannot read yet. Export it again in All-in-One WP Migration without compression, then import it here.', 'wrensafe' ) );
 		}
 
 		$uploads = (string) ( $package['Uploads'] ?? '' );
@@ -158,7 +155,5 @@ class AllInOneWpMigration extends AbstractFormat {
 		return $this->content_target( $path );
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

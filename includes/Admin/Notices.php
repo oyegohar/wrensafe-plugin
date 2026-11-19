@@ -49,7 +49,7 @@ class Notices {
 		}
 
 		printf(
-			'<div class="notice notice-warning"><p><strong>%1$s</strong></p><p>%2$s</p></div>',
+			'<div class="notice notice-warning wpbp-notice"><p><strong>%1$s</strong></p><p>%2$s</p></div>',
 			esc_html(
 				sprintf(
 					/* translators: %s: folder name */
@@ -130,11 +130,15 @@ class Notices {
 			return;
 		}
 
+		$paragraphs = array(
+			__( 'This site uses Wrensafe to make backups. A backup is a copy of the whole site: its database and its files, including any personal data they hold, such as user accounts, comments, orders and form entries. Backups are kept on this site\'s server, in a storage folder that is protected from web access, and are deleted when an administrator deletes them or when a schedule\'s retention limit removes older ones.', 'wrensafe' ),
+			__( 'Wrensafe sends data away from this server only in these cases. If an administrator sets up remote storage (FTP/FTPS or S3-compatible storage), a copy of each backup is sent to that server. If an administrator moves the site with Direct Migration, a backup is sent to the other site they choose. The security scan asks WordPress.org (api.wordpress.org) for the checksums of the WordPress core files; like every request WordPress makes, it includes this site\'s address. If email notifications are turned on, emails about backups and restores are sent to the addresses set in Wrensafe\'s settings.', 'wrensafe' ),
+			__( 'Wrensafe sends no data to its developers. An administrator can also download a backup or import a backup from another address; importing only downloads the file to this site.', 'wrensafe' ),
+		);
+
 		wp_add_privacy_policy_content(
 			__( 'Wrensafe', 'wrensafe' ),
-			wp_kses_post(
-				__( 'Wrensafe keeps backups on this website\'s own server. A backup contains this site\'s database and files, which can include personal data of users, customers and commenters. Wrensafe sends no data to its developers or to other services. A backup leaves this server only when an administrator downloads it, sends it to another site with Direct Migration, or imports a backup from a URL they enter.', 'wrensafe' )
-			)
+			'<p>' . implode( '</p><p>', array_map( 'esc_html', $paragraphs ) ) . '</p>'
 		);
 	}
 
@@ -142,9 +146,16 @@ class Notices {
 		// The dismiss links are built with NonceManager's "wpbp_"-prefixed
 		// actions, so verify against those same prefixed actions.
 		// Post-restore plugin-integrity notice: clear the shared transient so it
-		// stops showing for everyone once acknowledged.
-		if ( isset( $_GET['wpbp_dismiss_restore_notice'], $_GET['_wpbp_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpbp_nonce'] ) ), 'wpbp_' . self::RESTORE_NOTICE_DISMISS_ACTION ) ) {
-			delete_transient( PostRestoreIntegrityChecker::NOTICE_TRANSIENT );
+		// stops showing for everyone once acknowledged. Only someone who is
+		// shown the notice (it needs the restore capability) can dismiss it.
+		if ( ! isset( $_GET['wpbp_dismiss_restore_notice'], $_GET['_wpbp_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpbp_nonce'] ) ), 'wpbp_' . self::RESTORE_NOTICE_DISMISS_ACTION ) ) {
+			return;
 		}
+
+		if ( ! CapabilityManager::current_user_can( CapabilityManager::RESTORE_BACKUPS ) ) {
+			return;
+		}
+
+		delete_transient( PostRestoreIntegrityChecker::NOTICE_TRANSIENT );
 	}
 }

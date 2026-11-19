@@ -28,20 +28,82 @@ namespace WPBP\Restore;
 
 use WPBP\Utils\Logger;
 use WPBP\Utils\Paths;
+use WPBP\Utils\Serializer;
 
 defined( 'ABSPATH' ) || exit;
 
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare() or $wpdb->update() /
+// $wpdb->insert().
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class PluginSafety {
 
 	/** File name of the temporary MU-plugin boot guard. */
 	const GUARD_FILE_NAME = 'wpbp-restore-plugin-guard.php';
+
+	/**
+	 * Transient naming the key of the health check's own request (see
+	 * RestoreHealthCheck::probe()): the only request the boot guard lets
+	 * load the restored site's plugins and theme.
+	 */
+	const SCRAPE_TRANSIENT = 'wpbp_restore_scrape_key';
+
+	/**
+	 * The active_plugins option as stored in the database (null when the
+	 * row doesn't exist). Read directly: right after the table swap the
+	 * option cache is stale, and while a restore runs get_option() returns
+	 * the boot guard's filtered list.
+	 */
+	private static function raw_active_plugins(): ?string {
+		global $wpdb;
+
+		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", 'active_plugins' ) );
+
+		return null === $raw ? null : (string) $raw;
+	}
+
+	/**
+	 * The stored active_plugins list (never creates PHP objects: the row may
+	 * come from a backup).
+	 *
+	 * @return array<int|string,mixed>|null Null when the value isn't a list.
+	 */
+	private static function decode_plugins( ?string $raw ): ?array {
+		if ( null === $raw ) {
+			return array();
+		}
+
+		$plugins = Serializer::safe_unserialize( $raw );
+
+		return is_array( $plugins ) ? $plugins : null;
+	}
+
+	/** Write the active_plugins option directly, then clear its caches. */
+	private static function save_active_plugins( array $plugins, bool $exists ): void {
+		global $wpdb;
+
+		$value = maybe_serialize( array_values( $plugins ) );
+
+		if ( $exists ) {
+			$wpdb->update( $wpdb->options, array( 'option_value' => $value ), array( 'option_name' => 'active_plugins' ) );
+		} else {
+			$wpdb->insert(
+				$wpdb->options,
+				array(
+					'option_name'  => 'active_plugins',
+					'option_value' => $value,
+					'autoload'     => 'yes',
+				)
+			);
+		}
+
+		wp_cache_delete( 'alloptions', 'options' );
+		wp_cache_delete( 'active_plugins', 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+	}
 
 	/**
 	 * Whether an active_plugins entry can be loaded without fataling.
@@ -74,10 +136,7 @@ class PluginSafety {
 	 * @return string[]
 	 */
 	public static function stored_active_plugins(): array {
-		global $wpdb;
-
-		$raw     = $wpdb->get_var( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name = 'active_plugins' LIMIT 1" );
-		$plugins = is_string( $raw ) ? @unserialize( $raw, array( 'allowed_classes' => false ) ) : array(); // phpcs:ignore
+		$plugins = self::decode_plugins( self::raw_active_plugins() );
 
 		return array_values( array_filter( is_array( $plugins ) ? $plugins : array(), 'is_string' ) );
 	}
@@ -123,10 +182,8 @@ class PluginSafety {
 	 * @return string[] The plugin entries that were removed.
 	 */
 	public static function filter_active_plugins( ?int $job_id = null ): array {
-		global $wpdb;
-
-		$raw     = $wpdb->get_var( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name = 'active_plugins' LIMIT 1" );
-		$plugins = null === $raw ? array() : @unserialize( (string) $raw, array( 'allowed_classes' => false ) ); // phpcs:ignore
+		$raw     = self::raw_active_plugins();
+		$plugins = self::decode_plugins( $raw );
 		$plugins = is_array( $plugins ) ? $plugins : array();
 		$always  = self::always_active();
 		$kept    = array();
@@ -153,17 +210,7 @@ class PluginSafety {
 		$kept  = array_merge( $kept, $added );
 
 		if ( ! empty( $removed ) || ! empty( $added ) ) {
-			$value = serialize( array_values( $kept ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize
-
-			if ( null === $raw ) {
-				$wpdb->query( $wpdb->prepare( "INSERT INTO `{$wpdb->options}` (option_name, option_value, autoload) VALUES ('active_plugins', %s, 'yes')", $value ) );
-			} else {
-				$wpdb->query( $wpdb->prepare( "UPDATE `{$wpdb->options}` SET option_value = %s WHERE option_name = 'active_plugins'", $value ) );
-			}
-
-			wp_cache_delete( 'alloptions', 'options' );
-			wp_cache_delete( 'active_plugins', 'options' );
-			wp_cache_delete( 'notoptions', 'options' );
+			self::save_active_plugins( $kept, null !== $raw );
 		}
 
 		if ( ! empty( $added ) ) {
@@ -193,8 +240,6 @@ class PluginSafety {
 	 * @return string[] The plugins deactivated.
 	 */
 	public static function deactivate_host_plugins( array $site_plugins, ?int $job_id = null ): array {
-		global $wpdb;
-
 		/**
 		 * Filters the pattern of hosting-company plugins (matched against the
 		 * plugin's folder name) deactivated when a site moves elsewhere.
@@ -202,8 +247,7 @@ class PluginSafety {
 		 * @param string $pattern Regular expression.
 		 */
 		$pattern = (string) apply_filters( 'wpbp_host_plugins_pattern', '/^(?:bluehost-wordpress-plugin|wp-plugin-bluehost|mojo-marketplace-wp-plugin|wp-plugin-hostgator|wp-plugin-web|wp-plugin-crazy-domains|hostinger|hostinger-tools)$/i' );
-		$raw     = $wpdb->get_var( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name = 'active_plugins' LIMIT 1" );
-		$active  = is_string( $raw ) ? @unserialize( $raw, array( 'allowed_classes' => false ) ) : array(); // phpcs:ignore
+		$active  = self::decode_plugins( self::raw_active_plugins() );
 		$host    = array();
 
 		foreach ( is_array( $active ) ? $active : array() as $plugin ) {
@@ -235,8 +279,6 @@ class PluginSafety {
 	 * @return string[]
 	 */
 	public static function deactivate( array $plugins, ?int $job_id = null ): array {
-		global $wpdb;
-
 		$to_remove = array();
 		foreach ( $plugins as $plugin ) {
 			$plugin = (string) $plugin;
@@ -249,10 +291,10 @@ class PluginSafety {
 			return array();
 		}
 
-		$raw     = $wpdb->get_var( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name = 'active_plugins' LIMIT 1" );
-		$current = is_string( $raw ) ? @unserialize( $raw, array( 'allowed_classes' => false ) ) : array(); // phpcs:ignore
+		$raw     = self::raw_active_plugins();
+		$current = self::decode_plugins( $raw );
 
-		if ( ! is_array( $current ) ) {
+		if ( null === $raw || ! is_array( $current ) ) {
 			return array();
 		}
 
@@ -269,15 +311,8 @@ class PluginSafety {
 		}
 
 		if ( ! empty( $removed ) ) {
-			$wpdb->query(
-				$wpdb->prepare(
-					"UPDATE `{$wpdb->options}` SET option_value = %s WHERE option_name = 'active_plugins'",
-					serialize( array_values( $kept ) ) // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize
-				)
-			);
-
-			wp_cache_delete( 'alloptions', 'options' );
-			wp_cache_delete( 'active_plugins', 'options' );
+			self::save_active_plugins( $kept, true );
+			Logger::info( 'restore_plugins_deactivated: ' . implode( ', ', $removed ) . '.', array(), $job_id );
 		}
 
 		return $removed;
@@ -329,10 +364,22 @@ class PluginSafety {
  * Safe to delete manually if found after a crash.
  */
 
+defined( 'ABSPATH' ) || exit;
+
 // The restore's last step loads the site once as visitors will see it
 // (RestoreHealthCheck, through WordPress's own fatal-error check request).
+// Only that request is let through: its key must be the one the health check
+// stored, and its nonce the one WordPress's scrape transient holds.
 if ( isset( $_GET['wp_scrape_key'], $_GET['wp_scrape_nonce'] ) ) {
-	return;
+	$wpbp_scrape_key   = sanitize_key( wp_unslash( $_GET['wp_scrape_key'] ) );
+	$wpbp_scrape_nonce = sanitize_text_field( wp_unslash( $_GET['wp_scrape_nonce'] ) );
+	$wpbp_scrape_ours  = get_transient( /*WPBP_SCRAPE_TRANSIENT*/ );
+	$wpbp_scrape_saved = '' !== $wpbp_scrape_key ? get_transient( 'scrape_key_' . $wpbp_scrape_key ) : false;
+
+	if ( is_string( $wpbp_scrape_ours ) && '' !== $wpbp_scrape_ours && hash_equals( $wpbp_scrape_ours, $wpbp_scrape_key )
+		&& is_string( $wpbp_scrape_saved ) && '' !== $wpbp_scrape_nonce && hash_equals( $wpbp_scrape_saved, $wpbp_scrape_nonce ) ) {
+		return;
+	}
 }
 
 // No scheduled tasks run while the restore is in progress: the restored
@@ -354,7 +401,9 @@ add_filter(
 // Wrensafe's maintenance page meanwhile.
 // Not on Appearance > Themes or in the Customizer: they would "repair" the
 // missing theme by switching the site to a default one for good.
-if ( ! in_array( basename( (string) ( $_SERVER['SCRIPT_NAME'] ?? '' ) ), array( 'themes.php', 'customize.php' ), true ) ) {
+$wpbp_script = isset( $_SERVER['SCRIPT_NAME'] ) ? basename( sanitize_text_field( wp_unslash( $_SERVER['SCRIPT_NAME'] ) ) ) : '';
+
+if ( ! in_array( $wpbp_script, array( 'themes.php', 'customize.php' ), true ) ) {
 	$wpbp_no_theme = static function () {
 		return 'wpbp-restore-no-theme';
 	};
@@ -396,8 +445,14 @@ add_filter(
 );
 PHP;
 
-		$code    = str_replace( '/*WPBP_STEP_PLUGINS*/', var_export( $step_plugins, true ), $code ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- writes a PHP array literal.
-		$written = (bool) file_put_contents( $path, $code ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		// var_export() writes the values as PHP literals (strings and an
+		// array of strings only): nothing from them can become code.
+		$code    = str_replace(
+			array( '/*WPBP_STEP_PLUGINS*/', '/*WPBP_SCRAPE_TRANSIENT*/' ),
+			array( var_export( $step_plugins, true ), var_export( self::SCRAPE_TRANSIENT, true ) ), // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- writes PHP literals, see above.
+			$code
+		);
+		$written = self::write_file( $path, $code );
 
 		if ( $written ) {
 			Logger::info( 'Restore plugin boot guard installed (temporary mu-plugin; auto-removed when the restore finishes).', array(), $job_id );
@@ -409,8 +464,38 @@ PHP;
 	}
 
 	/**
-	 * Remove the boot guard. Called on finalize, failure, cancel, and by the
-	 * admin "Clear Restore Lock" recovery action — idempotent.
+	 * Write the guard file: with WP_Filesystem where WordPress writes files
+	 * itself (the "direct" method), otherwise as the rest of the restore
+	 * writes files (a restore can't ask for FTP credentials mid-way).
+	 */
+	private static function write_file( string $path, string $code ): bool {
+		if ( ! function_exists( 'get_filesystem_method' ) ) {
+			require_once Paths::admin_dir() . '/includes/file.php';
+		}
+
+		if ( 'direct' === get_filesystem_method( array(), dirname( $path ) ) && WP_Filesystem( false, dirname( $path ) ) ) {
+			global $wp_filesystem;
+
+			if ( $wp_filesystem instanceof \WP_Filesystem_Base ) {
+				return (bool) $wp_filesystem->put_contents( $path, $code, defined( 'FS_CHMOD_FILE' ) ? FS_CHMOD_FILE : 0644 );
+			}
+		}
+
+		return false !== file_put_contents( $path, $code ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+	}
+
+	/** Whether the boot guard is in place. */
+	public static function has_boot_guard(): bool {
+		return file_exists( self::guard_path() );
+	}
+
+	/**
+	 * Remove the boot guard. Called on finalize, failure, cancel, by the
+	 * admin "Clear Restore Lock" recovery action, on deactivation and on
+	 * uninstall — idempotent. The guard changes nothing it would need to
+	 * undo: it only filters the active plugins and the theme at run time
+	 * and pauses cron while the file exists, so removing the file restores
+	 * the site's own plugins, theme and scheduled tasks.
 	 */
 	public static function remove_boot_guard(): void {
 		$path = self::guard_path();
@@ -418,5 +503,7 @@ PHP;
 		if ( file_exists( $path ) ) {
 			wp_delete_file( $path );
 		}
+
+		delete_transient( self::SCRAPE_TRANSIENT );
 	}
 }

@@ -75,7 +75,10 @@ class RestoreAjax {
 	 * Read and sanitize the selective-restore params shared by start() and set_mode().
 	 */
 	private static function read_mode_params(): array {
-		// phpcs:disable WordPress.Security.NonceVerification.Missing -- only called by handlers after check_ajax_referer().
+		// The calling handler checked it already; checked here as well so this
+		// function never reads a request that wasn't verified.
+		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
+
 		$mode = isset( $_POST['restore_mode'] ) ? sanitize_key( wp_unslash( $_POST['restore_mode'] ) ) : 'full';
 
 		if ( ! in_array( $mode, self::ALLOWED_MODES, true ) ) {
@@ -95,7 +98,6 @@ class RestoreAjax {
 			'selected_tables' => $tables,
 			'woo_safe_mode'   => ! isset( $_POST['woo_safe_mode'] ) || ! empty( $_POST['woo_safe_mode'] ),
 		);
-		// phpcs:enable WordPress.Security.NonceVerification.Missing
 	}
 
 	/**
@@ -115,7 +117,9 @@ class RestoreAjax {
 
 		self::assert_not_locked( $backup );
 
-		$password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- password used verbatim; never stored, logged or output.
+		// The password is used verbatim (sanitizing would change it): only to
+		// decrypt the archive, never stored, logged or output.
+		$password = isset( $_POST['encryption_password'] ) ? (string) filter_var( wp_unslash( $_POST['encryption_password'] ), FILTER_UNSAFE_RAW ) : '';
 		$reader   = ( new ArchiveReader( $backup['file_path'], $password ) )->preview_only();
 		$result   = $reader->validate();
 
@@ -270,8 +274,9 @@ class RestoreAjax {
 	 * usual nonce + capability.
 	 */
 	public static function process(): void {
-		$job_id     = isset( $_POST['job_id'] ) ? absint( $_POST['job_id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- authorized below by nonce+capability or by the job's resume key.
-		$resume_key = isset( $_POST['resume_key'] ) ? sanitize_text_field( wp_unslash( $_POST['resume_key'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- see above.
+		// Authorized below: by nonce + capability, or by the job's resume key.
+		$job_id     = isset( $_POST['job_id'] ) ? absint( $_POST['job_id'] ) : 0;
+		$resume_key = isset( $_POST['resume_key'] ) ? sanitize_text_field( wp_unslash( $_POST['resume_key'] ) ) : '';
 		$by_key     = '' !== $resume_key && RestoreManager::verify_resume_key( $job_id, $resume_key );
 
 		if ( ! $by_key ) {
@@ -296,7 +301,8 @@ class RestoreAjax {
 
 		// Only used transiently if this step happens to be the init step of
 		// an encrypted backup's restore — never stored.
-		$encryption_password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- password used verbatim; never stored, logged or output.
+		// Used verbatim (see preview()).
+		$encryption_password = isset( $_POST['encryption_password'] ) ? (string) filter_var( wp_unslash( $_POST['encryption_password'] ), FILTER_UNSAFE_RAW ) : '';
 
 		( new RestoreManager() )->process_step( $job, $encryption_password );
 
@@ -388,10 +394,16 @@ class RestoreAjax {
 				if ( ! empty( $payload['db_swapped'] ) && ! empty( $payload['dest_home_url'] ) ) {
 					global $wpdb;
 					$dest_home = (string) $payload['dest_home_url'];
-					$dest_site = (string) ( $payload['dest_site_url'] ? $payload['dest_site_url'] : $dest_home );
-					$wpdb->query( $wpdb->prepare( "UPDATE `{$wpdb->options}` SET option_value = %s WHERE option_name = 'home'", $dest_home ) );
-					$wpdb->query( $wpdb->prepare( "UPDATE `{$wpdb->options}` SET option_value = %s WHERE option_name = 'siteurl'", $dest_site ) );
+					$dest_site = '' !== (string) ( $payload['dest_site_url'] ?? '' ) ? (string) $payload['dest_site_url'] : $dest_home;
+					// Direct writes, not update_option(): this request's option
+					// cache may still hold the values from before the table
+					// swap, and update_option() would then skip the write as
+					// "unchanged" while the database keeps the backup's URLs.
+					$wpdb->update( $wpdb->options, array( 'option_value' => $dest_home ), array( 'option_name' => 'home' ) );
+					$wpdb->update( $wpdb->options, array( 'option_value' => $dest_site ), array( 'option_name' => 'siteurl' ) );
 					wp_cache_delete( 'alloptions', 'options' );
+					wp_cache_delete( 'home', 'options' );
+					wp_cache_delete( 'siteurl', 'options' );
 					Logger::info( 'restore_home_siteurl_forced: home/siteurl recovered to ' . $dest_home . ' after fatal error.', array(), $job_id );
 				}
 

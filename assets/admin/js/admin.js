@@ -231,10 +231,22 @@
 
 	/**
 	 * WordPress puts every plugin's admin notices under the page header, where
-	 * another plugin's message breaks Wrensafe's layout. They are gathered
-	 * into one collapsed bar instead; nothing is hidden (the bar shows how
-	 * many there are and opens on click). Wrensafe's own notices stay.
+	 * another plugin's message breaks Wrensafe's layout. Notices from other
+	 * plugins are gathered into one collapsed bar instead; nothing is hidden
+	 * (the bar shows how many there are and opens on click).
+	 *
+	 * Wrensafe's own notices (class wpbp-notice) and WordPress's own notices
+	 * stay where WordPress puts them: update and maintenance messages, the
+	 * default-password reminder, recovery mode, plugins or themes that failed
+	 * to load or were turned off by an update, and the privacy-policy notice.
 	 */
+	function isWordPressNotice( notice ) {
+		var $notice = $( notice );
+
+		return $notice.is( '.update-nag, .default-password-nag, .policy-text-updated' ) ||
+			$notice.find( 'a[href*="action=exit_recovery_mode"], a[href*="plugin_status=paused"], a[href*="plugin_status=inactive"], a[href$="/wp-admin/themes.php"]' ).length > 0;
+	}
+
 	function initOtherNotices() {
 		var $end = $( '.wpbp-wrap .wp-header-end' ).first();
 
@@ -245,7 +257,7 @@
 		var $others = $( '#wpbody-content' ).find( 'div.notice, div.updated, div.error' )
 			.not( '.wpbp-notice, .inline, .hidden, .wpbp-other-notices *, .wpbp-modal-overlay *' )
 			.filter( function () {
-				return ! $( this ).closest( '.wpbp-card, .wpbp-settings-content' ).length;
+				return ! $( this ).closest( '.wpbp-card, .wpbp-settings-content' ).length && ! isWordPressNotice( this );
 			} );
 
 		if ( ! $others.length ) {
@@ -1735,10 +1747,10 @@
 			modal.$body.html(
 				'<p class="wpbp-modal-sub">' + wpbpTHtml( 'Please keep this window open while Wrensafe creates your backup.' ) + '</p>' +
 				wpbpProgressMarkup() +
-				'<p class="wpbp-progress-status wpbp-backup-current-step">' + ( wpbpAdmin.i18n.starting || 'Starting…' ) + '</p>' +
+				'<p class="wpbp-progress-status wpbp-backup-current-step"></p>' +
 				'<ul class="wpbp-verify-checklist wpbp-backup-checklist"></ul>'
 			);
-			$status = modal.$body.find( '.wpbp-backup-current-step' );
+			$status = modal.$body.find( '.wpbp-backup-current-step' ).text( wpbpAdmin.i18n.starting || 'Starting…' );
 			$checklist = modal.$body.find( '.wpbp-backup-checklist' );
 			// Spinner in the title spins until the job reaches a terminal state.
 			$spinner = $( '<span class="wpbp-spinner"></span>' );
@@ -4466,7 +4478,7 @@
 
 		$button.on( 'click', function () {
 			$button.prop( 'disabled', true );
-			$results.html( '<p>' + wpbpTHtml( 'Scanning…' ) + '</p>' );
+			$results.empty().append( $( '<p>' ).text( wpbpT( 'Scanning…' ) ) );
 
 			$.post( wpbpAdmin.ajaxUrl, {
 				action: 'wpbp_malware_scan',
@@ -4475,13 +4487,13 @@
 				$button.prop( 'disabled', false );
 
 				if ( ! response.success ) {
-					return $results.html( '<p>' + ( response.data && response.data.message || wpbpAdmin.i18n.genericError ) + '</p>' );
+					return $results.empty().append( $( '<p>' ).text( ( response.data && response.data.message ) || wpbpAdmin.i18n.genericError ) );
 				}
 
 				renderResults( response.data );
 			} ).fail( function ( xhr ) {
 				$button.prop( 'disabled', false );
-				$results.html( '<p>' + ( wpbpXhrMessage( xhr ) ) + '</p>' );
+				$results.empty().append( $( '<p>' ).text( wpbpXhrMessage( xhr ) ) );
 			} );
 		} );
 

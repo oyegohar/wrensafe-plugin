@@ -1,14 +1,14 @@
-=== Wrensafe – WP Backup, Restore & Migration ===
+=== Wrensafe – Backup, Restore & Migration ===
 Contributors: oyegohar
 Tags: backup, restore, migration, staging, clone
-Requires at least: 6.0
+Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.3
+Stable tag: 1.1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Back up, restore and migrate WordPress: full or partial backups, off-site copies (FTP, SFTP, S3), schedules, staging and guided restores.
+Back up, restore and migrate WordPress: full or partial backups, off-site copies (FTP, S3), schedules, staging and guided restores.
 
 == Description ==
 
@@ -19,7 +19,7 @@ Wrensafe backs up your WordPress site and restores it — on the same server or 
 * **Full site or just what you need:** database, files, media, themes, plugins, or everything.
 * **AES-256 encryption** (optional, per backup). The password is never stored.
 * **Automatic backups** every day, week or month at the time you choose, keeping only the newest copies — with a separate schedule for the database, for example the database every day and the whole site every week. Plus an automatic safety backup before WordPress, plugin or theme updates.
-* **Off-site copies:** each backup can be copied to your own FTP/FTPS, SFTP or S3-compatible storage right after it's made. It's sent in small parts that resume after an interruption, so large backups work on any host, and only the newest copies are kept there. Passwords and keys are stored encrypted.
+* **Off-site copies:** each backup can be copied to your own FTP/FTPS or S3-compatible storage right after it's made. It's sent in small parts that resume after an interruption, so large backups work on any host, and only the newest copies are kept there. Passwords and keys are stored encrypted.
 * **Checked after every backup** (optional): the same integrity check as Verify runs as soon as a backup is made, and a backup that fails it is reported instead of being kept as good.
 * **No size limits:** multi-gigabyte sites back up, download, upload and restore. Interrupted downloads and uploads resume where they stopped.
 * **Works on shared hosting:** backups and restores run in small, time-limited steps, so they finish even where PHP may only run for 30 seconds.
@@ -78,7 +78,7 @@ On your own server, in `wp-content/wrensafe-storage/` by default. You can choose
 
 = Can backups be copied to another server or to cloud storage? =
 
-Yes. Under **Settings → Remote storage**, choose FTP/FTPS, SFTP or S3-compatible storage (Amazon S3 or any service with an S3-compatible API), enter the details and select **Test connection**. Each automatic backup, and optionally each backup you make yourself, is copied there right after it's made, and only the newest copies you choose to keep are left there. SFTP needs the PHP SSH2 extension; FTP needs PHP's FTP extension (most hosts have it). If a copy fails, the backup stays on your server, the Backup Browser shows it, and you get an email if failure emails are on.
+Yes. Under **Settings → Remote storage**, choose FTP/FTPS or S3-compatible storage (Amazon S3 or any service with an S3-compatible API), enter the details and select **Test connection**. Each automatic backup, and optionally each backup you make yourself, is copied there right after it's made, and only the newest copies you choose to keep are left there. FTP needs PHP's FTP extension (most hosts have it). If a copy fails, the backup stays on your server, the Backup Browser shows it, and you get an email if failure emails are on.
 
 = How do I change my site's address in the database? =
 
@@ -147,7 +147,7 @@ Nothing is deleted unless you turn on **Settings → Advanced → Uninstall**. E
 
 = What are the minimum requirements? =
 
-WordPress 6.0 or later and PHP 7.4 or later (PHP 8.3 or newer is recommended). Tested up to WordPress 7.1 and PHP 8.4. The PHP ZIP extension is recommended.
+WordPress 6.2 or later and PHP 7.4 or later (PHP 8.3 or newer is recommended). Tested up to WordPress 7.1 and PHP 8.4. The PHP ZIP extension is recommended.
 
 == Privacy ==
 
@@ -155,13 +155,14 @@ Wrensafe stores backups on your own server and never sends them, or any usage da
 
 == External services ==
 
-Wrensafe only contacts the services below, and only after a site administrator configures or starts the related feature. Nothing is sent on activation, and no usage data or tracking is collected.
+Wrensafe only contacts the services below, and only after a site administrator configures or starts the related feature (the Site Health check, which only calls the site itself, is the one exception). Nothing is sent on activation, and no usage data or tracking is collected. Like every request WordPress makes, these requests include the site's address in the User-Agent header.
 
 * **WordPress.org core checksums API** (api.wordpress.org) — when an administrator runs the Malware Scanner, to compare WordPress core files with the official checksums. Data sent: the site's WordPress version. [Privacy Policy](https://wordpress.org/about/privacy/).
-* **Import from URL** — downloads a backup archive from the URL the administrator enters on the Import / Restore page.
+* **Import from URL** — downloads a backup archive from the URL the administrator enters on the Import / Restore page. Nothing is sent to that server apart from the request itself.
 * **Direct Migration** — sends backup data to the other WordPress site the administrator pairs with a one-time migration key.
-* **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS, SFTP or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice; Wrensafe has no service of its own.
-* **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. No other server is contacted.
+* **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice; Wrensafe has no service of its own.
+* **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. It runs when Tools → Site Health is opened and during WordPress's own weekly Site Health check. No other server is contacted.
+* **Email notifications** — backup, restore and copy results are sent with WordPress's own `wp_mail()` to the addresses set under Settings → Notifications, through whatever mail service the site uses.
 
 == Screenshots ==
 
@@ -175,11 +176,29 @@ Wrensafe only contacts the services below, and only after a site administrator c
 8. Migration Assistant scores how ready the site is to move, recommends the safest method and lists the next steps.
 9. Settings grouped by task: the backup folder, backups before updates, exclusions, notifications, migration and WooCommerce Safe Mode.
 10. Restore backups made by other backup plugins: upload the files just as that plugin saved them.
-11. Off-site copies: copy each backup to FTP/FTPS, SFTP or S3-compatible storage, and test the connection before saving.
+11. Off-site copies: copy each backup to FTP/FTPS or S3-compatible storage, and test the connection before saving.
 12. Search & Replace: a dry run shows how many rows would change in each table before anything is saved.
 13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 
 == Changelog ==
+
+= 1.1.4 =
+* Changed: the plugin is now called "Wrensafe – Backup, Restore & Migration".
+* Changed: Wrensafe now needs WordPress 6.2 or later (PHP 7.4 or later, as before). On an older WordPress or PHP it stays inactive and says what it needs instead of stopping the site.
+* Changed: off-site copies go to FTP/FTPS or S3-compatible storage. SFTP is no longer included: its connection relied on a PHP feature many hosts block. Saved SFTP settings are kept and Settings → Remote storage explains what to do.
+* Security: Direct Migration's receiving site now checks the key, the request limits and every field before it accepts a request, and "Restrict to one IP address" now locks the key to the first server that sends with it, as described.
+* Security: temporary database files made during a backup, restore or import now have names that can't be guessed, and the storage folder is protected on Apache 2.2 and 2.4 (without errors) and on IIS.
+* Security: settings saved by any route are checked like the Settings screen checks them, a backup can only be deleted from the backup folders, Import from URL no longer reaches addresses on the server's own network, and on multisite only network administrators can use Wrensafe.
+* Security: a restore only runs the table statements of the backup it restores; anything else stops the restore before the live site changes.
+* Fixed: "Push to live" copied the staging site's own Wrensafe records and its address and "discourage search engines" setting to the live site.
+* Fixed: backups included the tables of staging sites, so each new staging site copied the earlier ones.
+* Fixed: a restore's clean-up could remove the temporary tables of another WordPress site that shares the database.
+* Fixed: the safety file a restore uses stayed behind when Wrensafe was deactivated during a restore, which could leave the site blank; it is now removed on deactivation and can't be opened directly.
+* Fixed: migration keys expired early on sites ahead of UTC, and a key could expire during a long transfer.
+* Fixed: a remote storage password with a backslash didn't work after saving.
+* Fixed: a missing Zip, Zlib, bz2 or OpenSSL extension now gives a clear message instead of an error; backup encryption is turned off with the reason when OpenSSL is missing.
+* Fixed: some error messages showed a character code instead of an apostrophe or a quote.
+* Changed: emails are sent as plain text; Wrensafe's menu icon styles load only for users who see the menu; WordPress's own notices are no longer moved on Wrensafe's screens; the 5-minute background check runs only while a schedule is on (otherwise once a day).
 
 = 1.1.3 =
 * Fixed: Direct Migration stopped with "Too many requests" partway through a larger backup, and new attempts were refused too. The receiving site no longer counts the parts of a transfer that uses a valid key, its limits no longer extend themselves while you retry, and the sending site waits and continues when asked to slow down (also with a receiving site on an older version).
@@ -216,7 +235,7 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Changed: an import from a URL stops downloading at the size limit instead of after the whole file.
 
 = 1.0.2 =
-* New name: Wrensafe – WP Backup, Restore & Migration (slug `wrensafe`). Settings, backups and the backup list carry over, and the backup folder moves to `wp-content/wrensafe-storage/` automatically.
+* New name: Wrensafe (slug `wrensafe`). Settings, backups and the backup list carry over, and the backup folder moves to `wp-content/wrensafe-storage/` automatically.
 * Fixed: after a site had no visitors for a few days, automatic backups stayed "overdue" and ran again on each check until they caught up. Missed runs are now skipped, and daily, weekly and monthly backups always run at the time you set.
 
 = 1.0.1 =
@@ -238,6 +257,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.4 =
+Security and reliability fixes, WordPress 6.2 or later required. SFTP off-site copies are no longer included; choose FTP/FTPS or S3-compatible storage instead.
 
 = 1.1.3 =
 Direct Migration no longer stops with "Too many requests", continues an interrupted transfer, and explains HTTPS and key problems before sending. Update both sites.

@@ -69,9 +69,6 @@ class Plugin {
 		\WPBP\Utils\FileSystem::adopt_legacy_storage();
 		CapabilityManager::register();
 		Notifier::register();
-		// Deleting a second copy of this plugin must not run its uninstall
-		// routine (see Uninstaller::before_plugin_uninstall()). Also in WP-CLI.
-		add_action( 'pre_uninstall_plugin', array( \WPBP\Core\Uninstaller::class, 'before_plugin_uninstall' ) );
 
 		/**
 		 * Fires once Wrensafe is loaded and before it registers its hooks.
@@ -101,7 +98,15 @@ class Plugin {
 		}
 	}
 
+	/**
+	 * Why Wrensafe isn't running, for the people who can do something about
+	 * it (those who can manage plugins).
+	 */
 	public function render_incompatibility_notice(): void {
+		if ( ! current_user_can( 'activate_plugins' ) ) {
+			return;
+		}
+
 		printf(
 			'<div class="notice notice-error wpbp-notice"><p>%s</p></div>',
 			esc_html( Compatibility::get_incompatibility_message() )

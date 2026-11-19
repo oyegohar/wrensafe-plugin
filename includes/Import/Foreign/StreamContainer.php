@@ -14,10 +14,6 @@ defined( 'ABSPATH' ) || exit;
 // Wrensafe's protected storage directory.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages are stored as a job's error and shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
-
 /** Shared helpers for byte-stream containers. */
 abstract class StreamContainer implements ContainerReader {
 
@@ -33,7 +29,7 @@ abstract class StreamContainer implements ContainerReader {
 		$handle = fopen( $file, 'rb' );
 
 		if ( false === $handle ) {
-			throw new \RuntimeException( __( 'The backup file could not be opened.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup file could not be opened.', 'wrensafe' ) );
 		}
 
 		$this->handle      = $handle;
@@ -70,7 +66,7 @@ abstract class StreamContainer implements ContainerReader {
 			$chunk = fread( $this->handle, (int) min( 1048576, $length ) );
 
 			if ( false === $chunk || '' === $chunk ) {
-				throw new \RuntimeException( __( 'The backup file ended unexpectedly (it may be incomplete).', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The backup file ended unexpectedly (it may be incomplete).', 'wrensafe' ) );
 			}
 
 			if ( null !== $out ) {
@@ -90,13 +86,11 @@ abstract class StreamContainer implements ContainerReader {
 		$data = (string) fread( $this->handle, $length );
 
 		if ( strlen( $data ) !== $length ) {
-			throw new \RuntimeException( __( 'The backup file ended unexpectedly (it may be incomplete).', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The backup file ended unexpectedly (it may be incomplete).', 'wrensafe' ) );
 		}
 
 		return $data;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

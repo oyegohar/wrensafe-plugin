@@ -12,7 +12,7 @@ defined( 'ABSPATH' ) || exit;
 class Compatibility {
 
 	const MIN_PHP_VERSION = '7.4';
-	const MIN_WP_VERSION  = '6.0';
+	const MIN_WP_VERSION  = '6.2';
 
 	/**
 	 * Whether the current environment meets the plugin's minimum requirements.

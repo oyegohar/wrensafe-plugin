@@ -20,9 +20,11 @@ defined( 'ABSPATH' ) || exit;
 
 class BackupBrowserAjax {
 
-	private static function get_backup_or_die(): array {
-		// phpcs:disable WordPress.Security.NonceVerification.Missing -- only called by handlers after check_ajax_referer().
-		$id     = isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0;
+	/**
+	 * The backup with this ID, or a 404 JSON error. Each handler reads the
+	 * ID from the request after checking its nonce.
+	 */
+	private static function get_backup_or_die( int $id ): array {
 		$backup = $id ? BackupsRepository::find( $id ) : null;
 
 		if ( null === $backup ) {
@@ -30,7 +32,6 @@ class BackupBrowserAjax {
 		}
 
 		return $backup;
-		// phpcs:enable WordPress.Security.NonceVerification.Missing
 	}
 
 	public static function delete(): void {
@@ -40,10 +41,17 @@ class BackupBrowserAjax {
 			wp_send_json_error( array( 'message' => __( 'You do not have permission to delete backups.', 'wrensafe' ) ), 403 );
 		}
 
-		$backup = self::get_backup_or_die();
+		$backup = self::get_backup_or_die( isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0 );
 
 		if ( ! empty( $backup['is_locked'] ) ) {
 			wp_send_json_error( array( 'message' => __( 'This backup is locked and cannot be deleted.', 'wrensafe' ) ), 400 );
+		}
+
+		// The path comes from the database: only a file inside a backup
+		// folder is ever deleted (the same check as the bulk delete).
+		if ( ! empty( $backup['file_path'] ) && ! FileSystem::is_backup_file_path( (string) $backup['file_path'] ) ) {
+			Logger::error( 'Blocked delete of backup #' . $backup['id'] . ': file path resolves outside the backups directory.' );
+			wp_send_json_error( array( 'message' => __( 'This backup’s file is outside the backup folder, so it wasn’t deleted.', 'wrensafe' ) ), 400 );
 		}
 
 		if ( ! empty( $backup['file_path'] ) && file_exists( $backup['file_path'] ) ) {
@@ -148,7 +156,7 @@ class BackupBrowserAjax {
 			wp_send_json_error( array( 'message' => __( 'You do not have permission to verify backups.', 'wrensafe' ) ), 403 );
 		}
 
-		$backup = self::get_backup_or_die();
+		$backup = self::get_backup_or_die( isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0 );
 
 		if ( ! FileSystem::is_backup_file_path( (string) $backup['file_path'] ) ) {
 			Logger::error( 'Blocked verify of backup #' . $backup['id'] . ': file path resolves outside the backups directory.' );
@@ -168,7 +176,7 @@ class BackupBrowserAjax {
 		}
 
 		$checker  = new IntegrityChecker();
-		$password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- password used verbatim; never stored, logged or output.
+		$password = isset( $_POST['encryption_password'] ) ? (string) filter_var( wp_unslash( $_POST['encryption_password'] ), FILTER_UNSAFE_RAW ) : ''; // Kept exactly as typed (never sanitize_text_field()); never stored, logged or output.
 		$result   = $checker->verify_archive( $backup['file_path'], $password );
 
 		// An encrypted backup's contents can't be inspected without its
@@ -226,8 +234,8 @@ class BackupBrowserAjax {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 		self::require_view_capability();
 
-		$backup   = self::get_backup_or_die();
-		$password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- password used verbatim; never stored, logged or output.
+		$backup   = self::get_backup_or_die( isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0 );
+		$password = isset( $_POST['encryption_password'] ) ? (string) filter_var( wp_unslash( $_POST['encryption_password'] ), FILTER_UNSAFE_RAW ) : ''; // Kept exactly as typed (never sanitize_text_field()); never stored, logged or output.
 
 		$state = VerifyManager::start( (int) $backup['id'], $password );
 
@@ -241,9 +249,9 @@ class BackupBrowserAjax {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 		self::require_view_capability();
 
-		$job_id   = isset( $_POST['job_id'] ) ? sanitize_key( wp_unslash( $_POST['job_id'] ) ) : '';
-		$password = isset( $_POST['encryption_password'] ) ? (string) wp_unslash( $_POST['encryption_password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- password used verbatim; never stored, logged or output.
-		$state    = '' !== $job_id ? VerifyManager::step( $job_id, $password ) : null;
+		// The password is only needed to start (VerifyManager::start()).
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( wp_unslash( $_POST['job_id'] ) ) : '';
+		$state  = '' !== $job_id ? VerifyManager::step( $job_id ) : null;
 
 		if ( null === $state ) {
 			wp_send_json_error( array( 'message' => __( 'The verification session expired. Select Verify again.', 'wrensafe' ) ), 404 );
@@ -278,14 +286,14 @@ class BackupBrowserAjax {
 	public static function toggle_lock(): void {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 
-		// Administrator is already covered by CapabilityManager::current_user_can()'s
-		// own manage_options fallback.
+		// Administrators are covered by CapabilityManager::current_user_can()
+		// (on multisite: super admins only).
 		if ( ! CapabilityManager::current_user_can( CapabilityManager::DELETE_BACKUPS )
 			&& ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_SETTINGS ) ) {
 			wp_send_json_error( array( 'message' => __( 'You do not have permission to lock backups.', 'wrensafe' ) ), 403 );
 		}
 
-		$backup    = self::get_backup_or_die();
+		$backup    = self::get_backup_or_die( isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0 );
 		$is_locked = empty( $backup['is_locked'] ) ? 1 : 0;
 
 		BackupsRepository::update( (int) $backup['id'], array( 'is_locked' => $is_locked ) );
@@ -301,14 +309,19 @@ class BackupBrowserAjax {
 		);
 	}
 
+	/**
+	 * Save a backup's note and tags. Changing a backup needs the same
+	 * capability as locking it (managing backups), not just viewing them.
+	 */
 	public static function update_meta(): void {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 
-		if ( ! CapabilityManager::current_user_can( CapabilityManager::VIEW_BACKUPS ) ) {
+		if ( ! CapabilityManager::current_user_can( CapabilityManager::DELETE_BACKUPS )
+			&& ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_SETTINGS ) ) {
 			wp_send_json_error( array( 'message' => __( 'You do not have permission to edit backups.', 'wrensafe' ) ), 403 );
 		}
 
-		$backup = self::get_backup_or_die();
+		$backup = self::get_backup_or_die( isset( $_POST['backup_id'] ) ? absint( $_POST['backup_id'] ) : 0 );
 
 		$note = isset( $_POST['note'] ) ? sanitize_text_field( wp_unslash( $_POST['note'] ) ) : '';
 

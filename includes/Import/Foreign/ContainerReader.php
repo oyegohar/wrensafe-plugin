@@ -9,14 +9,6 @@ namespace WPBP\Import\Foreign;
 
 defined( 'ABSPATH' ) || exit;
 
-// Archives are read with native file handles (fopen/fread/fseek): WP_Filesystem
-// has no streaming API. Every path is an uploaded import file inside
-// Wrensafe's protected storage directory.
-// phpcs:disable WordPress.WP.AlternativeFunctions
-
-// Exception messages are stored as a job's error and shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 /**
  * Common contract: next() returns the next entry and positions the reader at
  * its content; copy_to() streams that content (or skip() passes it).
@@ -48,7 +40,3 @@ interface ContainerReader {
 
 	public function close(): void;
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
-// phpcs:enable WordPress.WP.AlternativeFunctions

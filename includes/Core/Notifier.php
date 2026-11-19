@@ -10,10 +10,17 @@
 namespace WPBP\Core;
 
 use WPBP\Core\Database\BackupsRepository;
+use WPBP\Utils\Errors;
 
 defined( 'ABSPATH' ) || exit;
 
 class Notifier {
+
+	/**
+	 * The emails are plain text: names and error messages are sent exactly
+	 * as they are, and no mail client treats them as HTML.
+	 */
+	private const HEADERS = array( 'Content-Type: text/plain; charset=UTF-8' );
 
 	public static function register(): void {
 		add_action( 'wpbp_job_finished', array( self::class, 'job_finished' ), 10, 2 );
@@ -93,7 +100,7 @@ class Notifier {
 
 			foreach ( (array) ( $job->result()['deactivated'] ?? array() ) as $item ) {
 				/* translators: 1: plugin name, 2: why it was turned off */
-				$lines[] = sprintf( __( 'Turned off so the site keeps working: %1$s (%2$s).', 'wrensafe' ), (string) ( $item['name'] ?? '' ), (string) ( $item['reason'] ?? '' ) );
+				$lines[] = sprintf( __( 'Turned off so the site keeps working: %1$s (%2$s).', 'wrensafe' ), Errors::plain( (string) ( $item['name'] ?? '' ) ), Errors::plain( (string) ( $item['reason'] ?? '' ) ) );
 			}
 		}
 
@@ -102,7 +109,7 @@ class Notifier {
 		/* translators: %s: site address */
 		$lines[] = sprintf( __( '— Wrensafe on %s', 'wrensafe' ), home_url() );
 
-		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, $subject ), implode( "\n\n", $lines ) );
+		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, $subject ), implode( "\n\n", $lines ), self::HEADERS );
 	}
 
 	/**
@@ -126,7 +133,7 @@ class Notifier {
 		$lines  = array(
 			__( 'A backup was made, but copying it to your remote storage failed. The backup is safe on this server.', 'wrensafe' ),
 			/* translators: %s: error message */
-			sprintf( __( 'Reason: %s', 'wrensafe' ), $reason ),
+			sprintf( __( 'Reason: %s', 'wrensafe' ), Errors::plain( $reason ) ),
 		);
 
 		if ( $backup ) {
@@ -139,11 +146,11 @@ class Notifier {
 		/* translators: %s: site address */
 		$lines[] = sprintf( __( '— Wrensafe on %s', 'wrensafe' ), home_url() );
 
-		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, __( 'Off-site copy failed', 'wrensafe' ) ), implode( "\n\n", $lines ) );
+		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, __( 'Off-site copy failed', 'wrensafe' ) ), implode( "\n\n", $lines ), self::HEADERS );
 	}
 
 	private static function reason( AbstractJob $job ): string {
-		$message = (string) $job->error_message();
+		$message = Errors::plain( (string) $job->error_message() );
 
 		return '' !== $message ? $message : __( 'unknown — see the Activity Logs', 'wrensafe' );
 	}

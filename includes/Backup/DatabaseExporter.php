@@ -7,17 +7,19 @@
 
 namespace WPBP\Backup;
 
+use WPBP\Core\Database\StagingSitesRepository;
 use WPBP\Core\Settings;
 use WPBP\Utils\ChunkSizeCalculator;
 use WPBP\Utils\Paths;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with table and
+// column names as identifier placeholders (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class DatabaseExporter {
@@ -38,6 +40,8 @@ class DatabaseExporter {
 	 * since they describe this installation rather than site content and
 	 * are never restored anyway (see DatabaseImporter/RestoreManager).
 	 * Tables left out under Settings → Backup are skipped too, unless $all.
+	 * Staging sites' tables ({prefix}stg_{slug}_…) are never included: they
+	 * belong to the staging copies, not to this site.
 	 */
 	public function get_tables( bool $all = false ): array {
 		global $wpdb;
@@ -49,12 +53,13 @@ class DatabaseExporter {
 			ARRAY_N
 		);
 
-		$tables = array();
+		$tables  = array();
+		$staging = self::staging_prefixes();
 
 		foreach ( (array) $rows as $row ) {
 			$table = (string) ( $row[0] ?? '' );
 
-			if ( '' !== $table && 0 === strpos( $table, $wpdb->prefix ) && ! self::is_restore_work_table( $table ) ) {
+			if ( '' !== $table && 0 === strpos( $table, $wpdb->prefix ) && ! self::is_restore_work_table( $table ) && ! self::has_prefix( $table, $staging ) ) {
 				$tables[] = $table;
 			}
 		}
@@ -90,6 +95,39 @@ class DatabaseExporter {
 	}
 
 	/**
+	 * The table prefixes of this site's staging copies (see StagingManager:
+	 * {prefix}stg_{slug}_).
+	 *
+	 * @return string[]
+	 */
+	private static function staging_prefixes(): array {
+		global $wpdb;
+
+		$prefixes = array();
+
+		foreach ( StagingSitesRepository::list_all() as $site ) {
+			$prefix = (string) ( $site['table_prefix'] ?? '' );
+
+			if ( Str::starts_with( $prefix, $wpdb->prefix . 'stg_' ) && strlen( $prefix ) > strlen( $wpdb->prefix . 'stg_' ) ) {
+				$prefixes[] = $prefix;
+			}
+		}
+
+		return $prefixes;
+	}
+
+	/** @param string[] $prefixes */
+	private static function has_prefix( string $table, array $prefixes ): bool {
+		foreach ( $prefixes as $prefix ) {
+			if ( Str::starts_with( $table, $prefix ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Staging/old tables a restore creates temporarily (see RestoreManager)
 	 * must never be exported as site content.
 	 */
@@ -116,7 +154,7 @@ class DatabaseExporter {
 	public function get_row_count( string $table ): int {
 		global $wpdb;
 
-		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::quote_identifier( $table ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- identifier quoted above.
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $table ) );
 	}
 
 	/**
@@ -128,7 +166,7 @@ class DatabaseExporter {
 	public function export_create_statement( string $table, $handle ): void {
 		global $wpdb;
 
-		$row = $wpdb->get_row( 'SHOW CREATE TABLE ' . self::quote_identifier( $table ), ARRAY_N ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.SchemaChange -- identifier quoted above.
+		$row = $wpdb->get_row( $wpdb->prepare( 'SHOW CREATE TABLE %i', $table ), ARRAY_N ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- reads a table definition for the backup; it changes nothing.
 
 		if ( ! $row || empty( $row[1] ) ) {
 			return;
@@ -148,7 +186,7 @@ class DatabaseExporter {
 	private function primary_key_columns( string $table ): array {
 		global $wpdb;
 
-		$keys    = $wpdb->get_results( 'SHOW KEYS FROM ' . self::quote_identifier( $table ) . " WHERE Key_name = 'PRIMARY'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- identifier quoted above.
+		$keys    = $wpdb->get_results( $wpdb->prepare( 'SHOW KEYS FROM %i WHERE Key_name = %s', $table, 'PRIMARY' ), ARRAY_A );
 		$columns = array();
 
 		foreach ( (array) $keys as $key ) {
@@ -179,17 +217,21 @@ class DatabaseExporter {
 	public function export_data_chunk( string $table, int $offset, $handle ): int {
 		global $wpdb;
 
-		$order_by = '';
-		$pk       = $this->primary_key_columns( $table );
+		$pk = $this->primary_key_columns( $table );
 
-		if ( ! empty( $pk ) ) {
-			$order_by = ' ORDER BY ' . implode( ', ', array_map( array( self::class, 'quote_identifier' ), $pk ) );
-		}
-
-		$rows = $wpdb->get_results( // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name quoted as an identifier by quote_identifier(); identifiers can't be placeholders before WordPress 6.2.
-			'SELECT * FROM ' . self::quote_identifier( $table ) . $order_by . ' LIMIT ' . (int) $offset . ', ' . self::rows_per_chunk(), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- identifiers quoted, integers cast.
-			ARRAY_A
-		);
+		// Ordered by the primary key (one %i per column) when there is one.
+		$rows = empty( $pk )
+			? $wpdb->get_results(
+				$wpdb->prepare( 'SELECT * FROM %i LIMIT %d, %d', $table, $offset, self::rows_per_chunk() ),
+				ARRAY_A
+			)
+			: $wpdb->get_results(
+				$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- one %i per primary-key column; the sniff can't count array_fill() placeholders.
+					'SELECT * FROM %i ORDER BY ' . implode( ', ', array_fill( 0, count( $pk ), '%i' ) ) . ' LIMIT %d, %d',
+					array_merge( array( $table ), $pk, array( $offset, self::rows_per_chunk() ) )
+				),
+				ARRAY_A
+			);
 
 		if ( empty( $rows ) ) {
 			return 0;

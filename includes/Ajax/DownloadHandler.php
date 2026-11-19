@@ -115,20 +115,29 @@ class DownloadHandler {
 			fseek( $handle, $start );
 		}
 
+		// The file is copied stream to stream, at most CHUNK_SIZE bytes at a
+		// time, so memory use stays the same for a multi-GB archive.
+		$output = fopen( 'php://output', 'wb' );
+
+		if ( false === $output ) {
+			fclose( $handle );
+			exit;
+		}
+
 		$remaining = $end - $start + 1;
 
-		while ( $remaining > 0 && ! feof( $handle ) && ! connection_aborted() ) {
-			$chunk = fread( $handle, (int) min( self::CHUNK_SIZE, $remaining ) );
+		while ( $remaining > 0 && ! connection_aborted() ) {
+			$copied = stream_copy_to_stream( $handle, $output, (int) min( self::CHUNK_SIZE, $remaining ) );
 
-			if ( false === $chunk || '' === $chunk ) {
+			if ( false === $copied || 0 === $copied ) {
 				break;
 			}
 
-			echo $chunk; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- binary file contents.
-			$remaining -= strlen( $chunk );
+			$remaining -= $copied;
 			flush();
 		}
 
+		fclose( $output );
 		fclose( $handle );
 
 		exit;

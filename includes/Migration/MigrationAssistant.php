@@ -89,6 +89,7 @@ class MigrationAssistant {
 	 *     has_openssl:bool,
 	 *     has_zip:bool,
 	 *     has_curl:bool,
+ *     has_http:bool,
 	 *     table_count:int,
 	 *     large_tables:string[],
 	 *     upload_size_bytes:int,
@@ -116,6 +117,8 @@ class MigrationAssistant {
 			'has_openssl'        => ServerInfo::has_openssl(),
 			'has_zip'            => ServerInfo::has_zip_archive(),
 			'has_curl'           => ServerInfo::has_curl(),
+			// The HTTP API falls back to PHP streams without cURL.
+			'has_http'           => wp_http_supports( array( 'ssl' ) ),
 			'table_count'        => (int) $wpdb->get_var( 'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()' ),
 			'large_tables'       => $large_tables,
 			'upload_size_bytes'  => $upload_size,
@@ -161,8 +164,8 @@ class MigrationAssistant {
 			$warnings[] = __( 'This server has neither ZipArchive nor PharData, so Wrensafe can’t create backup files here. Ask your host to turn on the PHP zip extension.', 'wrensafe' );
 		}
 
-		if ( ! $scan['has_curl'] ) {
-			$warnings[] = __( 'cURL is not available — Direct Migration and importing a backup from a URL won\'t work.', 'wrensafe' );
+		if ( ! self::can_send_requests( $scan ) ) {
+			$warnings[] = __( 'This server can’t make HTTPS requests (PHP has neither cURL nor OpenSSL), so Direct Migration and importing a backup from a URL won’t work.', 'wrensafe' );
 		}
 
 		if ( $scan['has_multisite'] ) {
@@ -174,7 +177,7 @@ class MigrationAssistant {
 		}
 
 		// Choose method.
-		if ( $scan['has_curl'] && $scan['ssl_enabled'] ) {
+		if ( self::can_send_requests( $scan ) && $scan['ssl_enabled'] ) {
 			$method = self::METHOD_DIRECT;
 		}
 
@@ -205,7 +208,7 @@ class MigrationAssistant {
 			'score'                   => $this->readiness_score( $scan ),
 			'reason'                  => $this->reason_for( $method ),
 			'warnings'                => $warnings,
-			'steps'                   => $this->wizard_steps( $method, $scan ),
+			'steps'                   => $this->wizard_steps( $method ),
 			'recommended_backup_type' => $recommended_type,
 		);
 	}
@@ -234,7 +237,7 @@ class MigrationAssistant {
 			$score -= 40;
 		}
 
-		if ( ! $scan['has_curl'] ) {
+		if ( ! self::can_send_requests( $scan ) ) {
 			$score -= 15;
 		}
 
@@ -252,11 +255,11 @@ class MigrationAssistant {
 	private function reason_for( string $method ): string {
 		switch ( $method ) {
 			case self::METHOD_DIRECT:
-				return __( 'This server has cURL and HTTPS, so sending the backup straight to the new site is the fastest option.', 'wrensafe' );
+				return __( 'This site uses HTTPS and this server can make HTTPS requests, so sending the backup straight to the new site is the fastest option.', 'wrensafe' );
 			case self::METHOD_CLOUD:
 				return __( 'This site doesn’t use HTTPS, so sending the backup through cloud storage is safer than an unencrypted direct transfer.', 'wrensafe' );
 			default:
-				return __( 'A direct transfer needs cURL and HTTPS on this server, and one of them is missing. Download a backup and import it on the new site instead. This works on any server.', 'wrensafe' );
+				return __( 'A direct transfer needs HTTPS on this site and a server that can make HTTPS requests, and one of them is missing. Download a backup and import it on the new site instead. This works on any server.', 'wrensafe' );
 		}
 	}
 
@@ -264,7 +267,16 @@ class MigrationAssistant {
 	// Private helpers.
 	// -----------------------------------------------------------------------
 
-	private function wizard_steps( string $method, array $scan ): array {
+	/**
+	 * Whether this server can send the HTTPS requests Direct Migration and URL
+	 * imports make. WordPress uses cURL when it is there and PHP streams
+	 * otherwise. Scans saved before 1.1.4 only have has_curl.
+	 */
+	private static function can_send_requests( array $scan ): bool {
+		return isset( $scan['has_http'] ) ? (bool) $scan['has_http'] : ! empty( $scan['has_curl'] );
+	}
+
+	private function wizard_steps( string $method ): array {
 		$steps = array(
 			array(
 				'id'    => 'scan',
@@ -374,7 +386,7 @@ class MigrationAssistant {
 			return 0;
 		}
 
-		while ( false !== ( $entry = readdir( $fh ) ) ) {
+		for ( $entry = readdir( $fh ); false !== $entry; $entry = readdir( $fh ) ) {
 			if ( '.' === $entry || '..' === $entry ) {
 				continue;
 			}

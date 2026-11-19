@@ -19,9 +19,9 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
-// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+// object-cached. Every query goes through $wpdb->prepare(), with table names as
+// identifier placeholders (%i).
+// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
 class StagingCreator {
 
@@ -165,9 +165,9 @@ class StagingCreator {
 		$suffix        = substr( $source_table, strlen( $live_prefix ) );
 		$staging_table = $staging_prefix . $suffix;
 
-		$wpdb->query( 'DROP TABLE IF EXISTS `' . esc_sql( $staging_table ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange -- creates/drops this staging site's own tables (names from the staging prefix, escaped).
-		$wpdb->query( 'CREATE TABLE `' . esc_sql( $staging_table ) . '` LIKE `' . esc_sql( $source_table ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange -- creates/drops this staging site's own tables (names from the staging prefix, escaped).
-		$wpdb->query( 'INSERT INTO `' . esc_sql( $staging_table ) . '` SELECT * FROM `' . esc_sql( $source_table ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $staging_table ) );
+		$wpdb->query( $wpdb->prepare( 'CREATE TABLE %i LIKE %i', $staging_table, $source_table ) );
+		$wpdb->query( $wpdb->prepare( 'INSERT INTO %i SELECT * FROM %i', $staging_table, $source_table ) );
 
 		return $staging_table;
 	}
@@ -182,7 +182,12 @@ class StagingCreator {
 		// The keys and salts WordPress may keep in the options table: the
 		// staging site makes its own on first use.
 		$names = Paths::SECRET_KEY_NAMES;
-		$wpdb->query( $wpdb->prepare( 'DELETE FROM `' . esc_sql( $staging_prefix . 'options' ) . '` WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $names ), '%s' ) ) . ')', $names ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- staging table name escaped; one %s per name.
+		$wpdb->query(
+			$wpdb->prepare(
+				'DELETE FROM %i WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $names ), '%s' ) ) . ')',
+				array_merge( array( $staging_prefix . 'options' ), $names )
+			)
+		);
 
 		if ( $exclude_comments ) {
 			$this->truncate_if_exists( $staging_prefix . 'comments' );
@@ -192,8 +197,8 @@ class StagingCreator {
 		if ( $exclude_users ) {
 			// Keep schema but remove everyone except the current admin to avoid locking staging out entirely.
 			$current_user_id = get_current_user_id();
-			$wpdb->query( $wpdb->prepare( 'DELETE FROM `' . esc_sql( $staging_prefix . 'users' ) . '` WHERE ID != %d', $current_user_id ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-			$wpdb->query( $wpdb->prepare( 'DELETE FROM `' . esc_sql( $staging_prefix . 'usermeta' ) . '` WHERE user_id != %d', $current_user_id ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE ID != %d', $staging_prefix . 'users', $current_user_id ) );
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE user_id != %d', $staging_prefix . 'usermeta', $current_user_id ) );
 		}
 
 		if ( $exclude_orders ) {
@@ -206,10 +211,11 @@ class StagingCreator {
 	private function truncate_if_exists( string $table ): void {
 		global $wpdb;
 
-		$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+		// esc_like(): "_" in a table name is a LIKE wildcard otherwise.
+		$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 
-		if ( $exists ) {
-			$wpdb->query( 'TRUNCATE TABLE `' . esc_sql( $table ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		if ( $exists === $table ) {
+			$wpdb->query( $wpdb->prepare( 'TRUNCATE TABLE %i', $table ) );
 		}
 	}
 

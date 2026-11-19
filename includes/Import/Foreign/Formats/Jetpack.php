@@ -15,9 +15,6 @@ use WPBP\Import\Foreign\TarReader;
 
 defined( 'ABSPATH' ) || exit;
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class Jetpack extends AbstractFormat {
 
 	private const SQL_PATTERN = '#(?:^|/)sql/[^/]+\.sql(?:\.gz)?$#i';
@@ -38,7 +35,7 @@ class Jetpack extends AbstractFormat {
 		$path = $this->archive( $files );
 
 		if ( null === $path ) {
-			throw new \RuntimeException( __( 'No Jetpack VaultPress Backup download was found.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No Jetpack VaultPress Backup download was found.', 'wrensafe' ) );
 		}
 
 		return array(
@@ -106,6 +103,13 @@ class Jetpack extends AbstractFormat {
 	 * seconds (the analysis runs in one request).
 	 */
 	private function has_sql_folder( string $path, bool $gzip ): bool {
+		// Without PHP's Zlib extension a .tar.gz can't be looked into; the
+		// file name may still identify it (the import then reports the missing
+		// extension).
+		if ( $gzip && ! in_array( 'compress.zlib', stream_get_wrappers(), true ) ) {
+			return false;
+		}
+
 		$reader   = new TarReader();
 		$found    = false;
 		$deadline = microtime( true ) + 4;
@@ -131,5 +135,3 @@ class Jetpack extends AbstractFormat {
 		return $found;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

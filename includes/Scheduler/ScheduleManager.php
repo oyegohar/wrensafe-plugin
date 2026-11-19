@@ -12,6 +12,7 @@ use WPBP\Backup\BackupManager;
 use WPBP\Core\Database\BackupsRepository;
 use WPBP\Core\Database\SchedulesRepository;
 use WPBP\Core\LimitsManager;
+use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 
 defined( 'ABSPATH' ) || exit;
@@ -34,7 +35,10 @@ class ScheduleManager {
 
 		$data['next_run_at'] = $this->calculate_first_run( $data['run_time'] ?? '00:00' );
 
-		return SchedulesRepository::create( $data );
+		$id = SchedulesRepository::create( $data );
+		CronHandler::reschedule();
+
+		return $id;
 	}
 
 	public function update( int $id, array $data ): bool {
@@ -52,12 +56,20 @@ class ScheduleManager {
 		}
 
 		SchedulesRepository::update( $id, $data );
+		CronHandler::reschedule();
 
 		return true;
 	}
 
+	/** Turn a schedule on or off. */
+	public function set_enabled( int $id, bool $enabled ): void {
+		SchedulesRepository::update( $id, array( 'enabled' => $enabled ? 1 : 0 ) );
+		CronHandler::reschedule();
+	}
+
 	public function delete( int $id ): void {
 		SchedulesRepository::delete( $id );
+		CronHandler::reschedule();
 	}
 
 	/**
@@ -144,12 +156,21 @@ class ScheduleManager {
 	}
 
 	/**
+	 * The site's local time as a number to compare with the stored schedule
+	 * times. Those are site-local "Y-m-d H:i:s" strings, read with
+	 * strtotime() (UTC in WordPress), so "now" is read the same way.
+	 */
+	private static function local_now(): int {
+		return (int) strtotime( current_time( 'mysql' ) );
+	}
+
+	/**
 	 * First run time: today at run_time, or tomorrow if that has already passed.
 	 */
 	public function calculate_first_run( string $run_time ): string {
 		$today_at_time = current_time( 'Y-m-d' ) . ' ' . $run_time . ':00';
 
-		if ( strtotime( $today_at_time ) <= current_time( 'timestamp' ) ) { // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested
+		if ( strtotime( $today_at_time ) <= self::local_now() ) {
 			$today_at_time = gmdate( 'Y-m-d H:i:s', strtotime( $today_at_time . ' +1 day' ) );
 		}
 
@@ -185,7 +206,7 @@ class ScheduleManager {
 				break;
 		}
 
-		$now  = current_time( 'timestamp' ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- compared with site-local schedule times.
+		$now  = self::local_now();
 		$next = strtotime( $base . ' ' . $interval );
 
 		for ( $i = 0; false !== $next && $next <= $now && $i < 1000; $i++ ) {
@@ -209,6 +230,29 @@ class ScheduleManager {
 	}
 
 	/**
+	 * Delete a backup record and its file. The path comes from the database,
+	 * so a file outside Wrensafe's backup folders is never deleted: the
+	 * backup is then kept and false returned.
+	 *
+	 * @param array<string,mixed> $backup A backups table row.
+	 */
+	public static function delete_backup( array $backup ): bool {
+		$path = (string) ( $backup['file_path'] ?? '' );
+
+		if ( '' !== $path && ! FileSystem::is_backup_file_path( $path ) ) {
+			return false;
+		}
+
+		if ( '' !== $path && file_exists( $path ) ) {
+			wp_delete_file( $path );
+		}
+
+		BackupsRepository::delete( (int) $backup['id'] );
+
+		return true;
+	}
+
+	/**
 	 * Delete this schedule's oldest backups beyond its retention count.
 	 * Locked backups are never auto-deleted.
 	 */
@@ -223,15 +267,18 @@ class ScheduleManager {
 		$unlocked  = array_values( array_filter( $backups, static fn( $b ) => empty( $b['is_locked'] ) ) );
 		$to_delete = array_slice( $unlocked, $retention );
 
+		$removed = 0;
+
 		foreach ( $to_delete as $backup ) {
-			if ( file_exists( $backup['file_path'] ) ) {
-				wp_delete_file( $backup['file_path'] );
+			if ( ! self::delete_backup( $backup ) ) {
+				Logger::error( 'Retention cleanup skipped backup #' . $backup['id'] . ': file path resolves outside the backups directory.' );
+				continue;
 			}
-			BackupsRepository::delete( (int) $backup['id'] );
+			++$removed;
 		}
 
-		if ( ! empty( $to_delete ) ) {
-			Logger::info( sprintf( 'Retention cleanup removed %d old backup(s) for schedule "%s".', count( $to_delete ), $schedule['title'] ) );
+		if ( $removed > 0 ) {
+			Logger::info( sprintf( 'Retention cleanup removed %d old backup(s) for schedule "%s".', $removed, $schedule['title'] ) );
 		}
 	}
 }

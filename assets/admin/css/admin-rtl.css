@@ -10,9 +10,11 @@
  *   npx rtlcss assets/admin/css/admin.css assets/admin/css/admin-rtl.css
  */
 
-/* Manrope (SIL Open Font License, see ../fonts/OFL.txt), bundled: no remote fonts. */
+/* Manrope (SIL Open Font License, see ../fonts/OFL.txt), bundled: no remote fonts.
+   Registered under its own family name, so a theme's or another plugin's
+   Manrope can't replace it (or be replaced by it). */
 @font-face {
-	font-family: "Manrope";
+	font-family: "Wrensafe Manrope";
 	font-style: normal;
 	font-weight: 500;
 	font-display: swap;
@@ -20,7 +22,7 @@
 }
 
 @font-face {
-	font-family: "Manrope";
+	font-family: "Wrensafe Manrope";
 	font-style: normal;
 	font-weight: 800;
 	font-display: swap;
@@ -49,7 +51,11 @@
 	margin: 16px 0;
 }
 
-:root {
+/* Custom properties live on Wrensafe's own containers, not on :root. */
+.wpbp-wrap,
+.wpbp-modal-overlay,
+.wpbp-notice,
+.wpbp-toasts {
 	--wpbp-primary: #2457f5;
 	--wpbp-primary-dark: #1e48d0;
 	--wpbp-accent: #62b6ff;
@@ -1287,7 +1293,7 @@
 
 	/* Typography — the WordPress core stack, no web fonts */
 	--wpbp-font: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, oxygen-sans, ubuntu, cantarell, "Helvetica Neue", sans-serif;
-	--wpbp-font-display: "Manrope", -apple-system, blinkmacsystemfont, "Segoe UI", roboto, sans-serif; /* headings, brand */
+	--wpbp-font-display: "Wrensafe Manrope", -apple-system, blinkmacsystemfont, "Segoe UI", roboto, sans-serif; /* headings, brand */
 	--wpbp-font-mono: ui-monospace, menlo, consolas, monaco, "Liberation Mono", monospace;
 	--wpbp-text-2xs: 11px;  /* eyebrow, uppercase only */
 	--wpbp-text-xs: 12px;   /* meta, pills, table head */
@@ -6313,10 +6319,13 @@ body.wpbp-modal-open {
 
 /* Cobalt Ice 2.1 brand layer --------------------------------------------- */
 
-/* Frost ground on Wrensafe's own screens only. The body class ends in the page
-   slug ("…page_wrensafe-backup"); its start follows the translated menu title. */
-body[class*="page_wrensafe"] {
-	background: #f4f7ff;
+/* Frost ground on Wrensafe's own screens. Painted by Wrensafe's wrapper, not
+   by WordPress's <body>: the wrapper's background plus a wide box-shadow of
+   the same colour fill the content area around it (a shadow takes no space
+   and can't cause scrolling; the admin menu, toolbar and footer sit above it). */
+.wpbp-wrap {
+	background-color: var(--wpbp-page-bg);
+	box-shadow: 0 0 0 100vmax var(--wpbp-page-bg);
 }
 
 /* Manrope for headings and the brand line; body text keeps the WordPress admin font. */

@@ -397,7 +397,7 @@ class FileScanner {
 				}
 
 				$directory = '' === $relative_dir ? $root_path : $root_path . '/' . $relative_dir;
-				$names     = @scandir( $directory ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- unreadable folders are skipped, like the iterator did.
+				$names     = is_dir( $directory ) && is_readable( $directory ) ? scandir( $directory ) : false; // Unreadable folders are skipped, like the iterator did.
 
 				if ( false === $names ) {
 					continue;

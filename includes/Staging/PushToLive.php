@@ -13,7 +13,9 @@ namespace WPBP\Staging;
 
 use WPBP\Core\Database\StagingSitesRepository;
 use WPBP\Restore\SearchReplaceEngine;
+use WPBP\Utils\Errors;
 use WPBP\Utils\Logger;
+use WPBP\Utils\Str;
 use WPBP\Utils\Paths;
 
 defined( 'ABSPATH' ) || exit;
@@ -57,8 +59,8 @@ class PushToLive {
 					$job->mark_failed( __( 'Unknown push phase.', 'wrensafe' ) );
 			}
 		} catch ( \Throwable $e ) {
-			Logger::error( 'Staging push job #' . $job->id() . ' failed: ' . $e->getMessage(), array(), $job->id() );
-			$job->mark_failed( $e->getMessage() );
+			Logger::error( 'Staging push job #' . $job->id() . ' failed: ' . Errors::text( $e ), array(), $job->id() );
+			$job->mark_failed( Errors::text( $e ) );
 		}
 	}
 
@@ -73,17 +75,23 @@ class PushToLive {
 		}
 
 		// Discover tables on the staging side and translate to their live equivalents.
-		$staging_tables = $wpdb->get_col(
-			$wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $staging['table_prefix'] ) . '%' )
+		$staging_tables = self::pushable_tables(
+			(string) $staging['table_prefix'],
+			(array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $staging['table_prefix'] ) . '%' ) )
 		);
 
 		$payload['staging_prefix'] = $staging['table_prefix'];
 		$payload['staging_dir']    = $staging['path'];
 		$payload['staging_url']    = $staging['url'];
 		$payload['staging_tables'] = $staging_tables;
-		$payload['table_index']    = 0;
-		$payload['content_offset'] = 0;
-		$payload['phase']          = 'push_database';
+		// Read now: once the staging options table is pushed, home_url() and
+		// blog_public return the staging copy's values (its address, and
+		// "discourage search engines", which staging always sets).
+		$payload['live_url']         = untrailingslashit( home_url() );
+		$payload['live_blog_public'] = (string) get_option( 'blog_public', '1' );
+		$payload['table_index']      = 0;
+		$payload['content_offset']   = 0;
+		$payload['phase']            = 'push_database';
 
 		$job->set_payload( $payload );
 		$job->mark_running();
@@ -103,6 +111,13 @@ class PushToLive {
 				! empty( $payload['exclude_comments'] ),
 				! empty( $payload['exclude_orders'] )
 			);
+
+			// The live site keeps its search engine setting.
+			if ( isset( $payload['live_blog_public'] ) ) {
+				$wpdb->update( $wpdb->options, array( 'option_value' => (string) $payload['live_blog_public'] ), array( 'option_name' => 'blog_public' ) );
+				wp_cache_delete( 'alloptions', 'options' );
+				wp_cache_delete( 'blog_public', 'options' );
+			}
 
 			$payload['phase'] = 'push_files';
 			$job->update_progress( 55, __( 'Database pushed to live.', 'wrensafe' ) );
@@ -168,8 +183,17 @@ class PushToLive {
 			return;
 		}
 
-		$live_tables = $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $wpdb->prefix ) . '%' ) );
-		$index       = $payload['sr_table_index'];
+		// Only the tables that were pushed hold the staging address. Every
+		// other table with this site's prefix stays as it is: other staging
+		// sites' tables ({prefix}stg_…, the one pushed from among them, whose
+		// own address must stay the staging one) and Wrensafe's own tables.
+		$live_tables = array();
+
+		foreach ( (array) $payload['staging_tables'] as $staging_table ) {
+			$live_tables[] = $wpdb->prefix . substr( (string) $staging_table, strlen( (string) $payload['staging_prefix'] ) );
+		}
+
+		$index = $payload['sr_table_index'];
 
 		if ( $index >= count( $live_tables ) ) {
 			$payload['phase'] = 'push_finalize';
@@ -182,7 +206,7 @@ class PushToLive {
 			$live_tables[ $index ],
 			(int) $payload['sr_row_offset'],
 			untrailingslashit( $payload['staging_url'] ),
-			untrailingslashit( home_url() )
+			(string) ( $payload['live_url'] ?? untrailingslashit( home_url() ) )
 		);
 
 		if ( $result['done'] ) {
@@ -194,6 +218,31 @@ class PushToLive {
 
 		$job->update_progress( 90, sprintf( /* translators: %s: database table name */ __( 'Replacing URLs in %s', 'wrensafe' ), $live_tables[ $index ] ) );
 		$job->set_payload( $payload );
+	}
+
+	/**
+	 * The staging tables to copy to the live site: every table with the
+	 * staging prefix except the staging copy's own Wrensafe tables (pushing
+	 * them would replace the live job list, this push's own job included)
+	 * and tables a restore on the staging site left behind.
+	 *
+	 * @param string[] $tables
+	 * @return string[]
+	 */
+	private static function pushable_tables( string $staging_prefix, array $tables ): array {
+		$own = strtolower( $staging_prefix . 'wpbp_' );
+
+		return array_values(
+			array_filter(
+				array_map( 'strval', $tables ),
+				static function ( string $table ) use ( $staging_prefix, $own ): bool {
+					return Str::starts_with( $table, $staging_prefix )
+						&& ! Str::starts_with( strtolower( $table ), $own )
+						&& ! Str::ends_with( $table, '_wpbptmp' )
+						&& ! Str::ends_with( $table, '_wpbpold' );
+				}
+			)
+		);
 	}
 
 	private function step_finalize( StagingJob $job, array $payload ): void {

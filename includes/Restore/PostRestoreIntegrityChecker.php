@@ -80,7 +80,7 @@ class PostRestoreIntegrityChecker {
 				continue;
 			}
 
-			$slug = strtok( $plugin, '/' ); // "woocommerce/woocommerce.php" => "woocommerce".
+			$slug = strtok( $plugin, '/' ); // The plugin's folder name, e.g. woocommerce.
 
 			// Single-file plugins (e.g. hello.php) have no directory — just the
 			// main file check applies.

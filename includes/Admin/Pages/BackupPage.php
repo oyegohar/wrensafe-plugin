@@ -87,13 +87,20 @@ class BackupPage extends AbstractPage {
 					<th scope="row"><label for="wpbp-backup-tag"><?php esc_html_e( 'Tag', 'wrensafe' ); ?></label></th>
 					<td><input type="text" id="wpbp-backup-tag" class="regular-text" placeholder="<?php esc_attr_e( 'e.g. client-handover', 'wrensafe' ); ?>" /></td>
 				</tr>
+				<?php
+				// Why encryption can't be used on this server ('' when it can).
+				$encryption_off = method_exists( \WPBP\Backup\BackupEncryption::class, 'unavailable_reason' ) ? (string) \WPBP\Backup\BackupEncryption::unavailable_reason() : '';
+				?>
 				<tr>
 					<th scope="row"><?php esc_html_e( 'Encryption', 'wrensafe' ); ?></th>
 					<td>
 						<div class="wpbp-checkbox-row">
-							<input type="checkbox" id="wpbp-backup-encrypt" />
+							<input type="checkbox" id="wpbp-backup-encrypt" <?php disabled( '' !== $encryption_off ); ?><?php echo '' !== $encryption_off ? ' aria-describedby="wpbp-backup-encrypt-unavailable"' : ''; ?> />
 							<div class="wpbp-checkbox-content">
 								<label for="wpbp-backup-encrypt"><?php esc_html_e( 'Encrypt this backup with a password (AES-256)', 'wrensafe' ); ?></label>
+								<?php if ( '' !== $encryption_off ) : ?>
+									<p class="wpbp-field-description" id="wpbp-backup-encrypt-unavailable"><?php echo esc_html( $encryption_off ); ?></p>
+								<?php endif; ?>
 								<div id="wpbp-backup-encrypt-fields" class="wpbp-password-field" hidden>
 									<span class="wpbp-password-input">
 										<input type="password" id="wpbp-backup-encrypt-password" class="regular-text" placeholder="<?php esc_attr_e( 'Password', 'wrensafe' ); ?>" autocomplete="new-password" />

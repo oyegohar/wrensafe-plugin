@@ -12,6 +12,7 @@ use WPBP\Backup\BackupEncryption;
 use WPBP\Backup\ManifestBuilder;
 use WPBP\Utils\ChunkSizeCalculator;
 use WPBP\Utils\FileSystem;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -30,6 +31,9 @@ class ArchiveReader {
 	private bool $encrypted_without_password = false;
 	private bool $decryption_failed          = false;
 	private ?string $temp_decrypted_path     = null;
+
+	/** Why this server can't decrypt the archive (no OpenSSL), or ''. */
+	private string $decryption_unavailable = '';
 
 	/**
 	 * A single ZipArchive handle kept open for this reader's lifetime and
@@ -76,7 +80,13 @@ class ArchiveReader {
 	 */
 	public function close(): void {
 		if ( null !== $this->zip ) {
-			@$this->zip->close(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			try {
+				$this->zip->close(); // Opened read-only: nothing to write back.
+			} catch ( \Throwable $e ) {
+				// PHP 8 throws for an archive that is already closed; nothing to do.
+				unset( $e );
+			}
+
 			$this->zip = null;
 		}
 	}
@@ -126,6 +136,12 @@ class ArchiveReader {
 		if ( ( new BackupEncryption() )->is_encrypted( $this->path ) ) {
 			if ( '' === $this->password ) {
 				$this->encrypted_without_password = true;
+				return false;
+			}
+
+			$this->decryption_unavailable = BackupEncryption::unavailable_reason();
+
+			if ( '' !== $this->decryption_unavailable ) {
 				return false;
 			}
 
@@ -556,7 +572,7 @@ class ArchiveReader {
 
 			for ( $i = 0; $i < $zip->numFiles; $i++ ) { // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
 				$name = $zip->getNameIndex( $i );
-				if ( str_starts_with( $name, 'files/' ) ) {
+				if ( Str::starts_with( $name, 'files/' ) ) {
 					$entries[] = $name;
 				}
 			}
@@ -569,7 +585,7 @@ class ArchiveReader {
 
 			foreach ( new \RecursiveIteratorIterator( $phar ) as $file ) {
 				$name = 'files/' . ltrim( str_replace( $phar->getPath(), '', $file->getPathname() ), '/' );
-				if ( str_starts_with( $name, 'files/' ) ) {
+				if ( Str::starts_with( $name, 'files/' ) ) {
 					$entries[] = $name;
 				}
 			}
@@ -602,14 +618,14 @@ class ArchiveReader {
 		$files_count   = 0;
 
 		foreach ( $entries as $entry ) {
-			if ( ! str_starts_with( $entry, 'files/' ) ) {
+			if ( ! Str::starts_with( $entry, 'files/' ) ) {
 				continue;
 			}
 
 			++$files_count;
 
 			foreach ( $prefixes['plugins'] as $prefix ) {
-				if ( str_starts_with( $entry, $prefix ) ) {
+				if ( Str::starts_with( $entry, $prefix ) ) {
 					$slug = self::section_item( substr( $entry, strlen( $prefix ) ) );
 					if ( '' !== $slug ) {
 						$plugins[ $slug ] = true;
@@ -619,9 +635,9 @@ class ArchiveReader {
 			}
 
 			foreach ( $prefixes['themes'] as $prefix ) {
-				if ( str_starts_with( $entry, $prefix ) ) {
+				if ( Str::starts_with( $entry, $prefix ) ) {
 					$rest = substr( $entry, strlen( $prefix ) );
-					if ( str_contains( $rest, '/' ) ) {
+					if ( Str::contains( $rest, '/' ) ) {
 						$themes[ strtok( $rest, '/' ) ] = true;
 					}
 					continue 2;
@@ -629,7 +645,7 @@ class ArchiveReader {
 			}
 
 			foreach ( $prefixes['uploads'] as $prefix ) {
-				if ( str_starts_with( $entry, $prefix ) ) {
+				if ( Str::starts_with( $entry, $prefix ) ) {
 					++$uploads_count;
 					continue 2;
 				}
@@ -653,11 +669,11 @@ class ArchiveReader {
 	 * name, or the file name of a single-file plugin ("hello.php").
 	 */
 	private static function section_item( string $rest ): string {
-		if ( str_contains( $rest, '/' ) ) {
+		if ( Str::contains( $rest, '/' ) ) {
 			return (string) strtok( $rest, '/' );
 		}
 
-		return ( str_ends_with( $rest, '.php' ) && 'index.php' !== $rest ) ? $rest : '';
+		return ( Str::ends_with( $rest, '.php' ) && 'index.php' !== $rest ) ? $rest : '';
 	}
 
 	/**
@@ -677,7 +693,7 @@ class ArchiveReader {
 		$uploads_dir = rtrim( str_replace( '\\', '/', (string) ( $metadata['uploads_basedir'] ?? '' ) ), '/' );
 
 		$relative = static function ( string $path ) use ( $abspath ): string {
-			if ( '' !== $abspath && '' !== $path && str_starts_with( $path, $abspath . '/' ) ) {
+			if ( '' !== $abspath && '' !== $path && Str::starts_with( $path, $abspath . '/' ) ) {
 				return substr( $path, strlen( $abspath ) + 1 );
 			}
 
@@ -720,6 +736,8 @@ class ArchiveReader {
 		if ( ! $this->open() ) {
 			if ( $this->encrypted_without_password ) {
 				$message = __( 'This backup is encrypted. Please provide its password.', 'wrensafe' );
+			} elseif ( '' !== $this->decryption_unavailable ) {
+				$message = $this->decryption_unavailable;
 			} elseif ( $this->decryption_failed ) {
 				$message = __( 'Incorrect password, or the backup file is corrupted.', 'wrensafe' );
 			} else {

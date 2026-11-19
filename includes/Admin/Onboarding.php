@@ -170,7 +170,7 @@ class Onboarding {
 
 			<ol class="wpbp-onboarding-steps">
 				<?php foreach ( $steps as $i => $step ) : ?>
-					<li class="<?php echo $step['done'] ? 'is-done' : ( $i === $next ? 'is-next' : '' ); ?>">
+					<li class="<?php echo esc_attr( $step['done'] ? 'is-done' : ( $i === $next ? 'is-next' : '' ) ); ?>">
 						<span class="wpbp-onboarding-step-num" aria-hidden="true"><?php echo esc_html( (string) ( $i + 1 ) ); ?></span>
 						<span class="wpbp-onboarding-step-text">
 							<strong><?php echo esc_html( $step['title'] ); ?></strong>
@@ -218,7 +218,7 @@ class Onboarding {
 				<?php foreach ( $slides as $i => list( $icon, $title, $text ) ) : ?>
 					<div class="wpbp-welcome-slide" data-title="<?php echo esc_attr( $title ); ?>"<?php echo 0 === $i ? '' : ' hidden'; ?>>
 						<?php if ( 'brand' === $icon ) : ?>
-							<span class="wpbp-welcome-icon is-brand" aria-hidden="true"><?php echo \WPBP\Admin\Pages\AbstractPage::BRAND_MARK_SVG; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline SVG constant (the brand mark). ?></span>
+							<span class="wpbp-welcome-icon is-brand" aria-hidden="true"><?php echo wp_kses( \WPBP\Admin\Pages\AbstractPage::BRAND_MARK_SVG, Kses::allowed() ); ?></span>
 						<?php else : ?>
 							<span class="wpbp-welcome-icon" aria-hidden="true"><?php Icons::render( $icon, 28 ); ?></span>
 						<?php endif; ?>
@@ -265,6 +265,10 @@ class Onboarding {
 	 */
 	public function dismiss_ready_notice(): void {
 		check_admin_referer( 'wpbp_dismiss_ready_notice' );
+
+		if ( ! CapabilityManager::current_user_can( CapabilityManager::VIEW_DASHBOARD ) ) {
+			wp_die( esc_html__( 'You do not have permission to do that.', 'wrensafe' ), '', array( 'response' => 403 ) );
+		}
 
 		$state                     = self::state();
 		$state['notice_dismissed'] = true;

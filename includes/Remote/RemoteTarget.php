@@ -1,6 +1,6 @@
 <?php
 /**
- * A place backups are copied to (FTP, SFTP, S3-compatible storage).
+ * A place backups are copied to (FTP/FTPS or S3-compatible storage).
  *
  * Uploads are resumable: begin() prepares, send() moves as much of the file
  * as fits before a deadline and keeps its position in $state (stored in the

@@ -34,11 +34,13 @@ class AdminMenu {
 	}
 
 	/**
-	 * Tiny global stylesheet for the admin menu: the Wrensafe icon and the
-	 * Backup Browser submenu badge. Added on every admin screen (the menu is
-	 * visible everywhere), since the plugin's main stylesheet only loads on
-	 * its own pages. Printed via the Styles API on a file-less handle instead
-	 * of a raw <style> tag.
+	 * Tiny stylesheet for the admin menu: the Wrensafe icon and the Backup
+	 * Browser submenu badge. The menu is on every screen of a site's admin
+	 * for the users who can open Wrensafe, so these rules are added there,
+	 * for those users only (never in the Network Admin, which has no Wrensafe
+	 * menu); the plugin's main stylesheet only loads on its own pages. Every
+	 * rule is scoped to Wrensafe's own menu item. Printed via the Styles API
+	 * on a file-less handle instead of a raw <style> tag.
 	 *
 	 * The icon is the colour mark (Royal Cobalt over Ice Blue). When the item
 	 * is hovered, open or current, WordPress gives it the colour scheme's
@@ -46,6 +48,10 @@ class AdminMenu {
 	 * stay readable.
 	 */
 	public function enqueue_badge_styles(): void {
+		if ( is_network_admin() || is_user_admin() || ! $this->user_sees_menu() ) {
+			return;
+		}
+
 		$mark = esc_url( WPBP_PLUGIN_URL . 'assets/admin/images/wrensafe-mark.svg' );
 		$item = '#adminmenu #toplevel_page_' . self::TOP_SLUG;
 
@@ -55,9 +61,24 @@ class AdminMenu {
 			'wpbp-admin-menu',
 			$item . ' div.wp-menu-image::before{content:"";width:20px;height:20px;margin-top:7px;padding:0;border-radius:5px;background:url("' . $mark . '") center/18px 18px no-repeat;transition:background-color .15s ease-in-out,background-size .15s ease-in-out}'
 			. $item . ':is(.current,.wp-has-current-submenu,.opensub,:hover) div.wp-menu-image::before,' . $item . ' > a:focus div.wp-menu-image::before{background-color:#fff;background-size:14px 14px}'
-			. '#adminmenu .wp-submenu a:has(> .wpbp-menu-badge){white-space:nowrap}'
-			. '#adminmenu .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:#2457f5;color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
+			. $item . ' .wp-submenu a:has(> .wpbp-menu-badge){white-space:nowrap}'
+			. $item . ' .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:#2457f5;color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
 		);
+	}
+
+	/**
+	 * Whether WordPress shows the Wrensafe menu to the current user: they can
+	 * open at least one of its pages (with the capability WordPress checks
+	 * for the menu item).
+	 */
+	private function user_sees_menu(): bool {
+		foreach ( $this->pages() as $page ) {
+			if ( current_user_can( $page[2] ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -119,7 +140,8 @@ class AdminMenu {
 
 		// Numeric badge on the Backup Browser submenu: completed local backups
 		// only (failed/corrupted records and cancelled jobs are excluded).
-		$backup_count = \WPBP\Core\Database\BackupsRepository::count_completed();
+		// Counted only for users who see that item.
+		$backup_count = current_user_can( CapabilityManager::VIEW_BACKUPS ) ? \WPBP\Core\Database\BackupsRepository::count_completed() : 0;
 
 		foreach ( $pages as $slug => $page ) {
 			// The Dashboard (TOP_SLUG) is already registered by add_menu_page()

@@ -20,6 +20,7 @@ use WPBP\Security\CapabilityManager;
 use WPBP\Security\PathValidator;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Paths;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -50,15 +51,17 @@ class ImportSourceAjax {
 
 		$url = isset( $_POST['url'] ) ? sanitize_url( wp_unslash( $_POST['url'] ) ) : '';
 
+		// wp_http_validate_url() also refuses addresses of this server and of
+		// its local network (the download below is a wp_safe_remote_get()).
 		if ( '' === $url || ! wp_http_validate_url( $url ) ) {
-			wp_send_json_error( array( 'message' => __( 'Please enter a valid URL.', 'wrensafe' ) ), 400 );
+			wp_send_json_error( array( 'message' => __( 'Please enter a valid web address. Addresses on this server or its local network can’t be used here; for a file on this server, use “Import from a server path”.', 'wrensafe' ) ), 400 );
 		}
 
-		if ( ! str_ends_with( strtolower( (string) wp_parse_url( $url, PHP_URL_PATH ) ), '.wbp' ) ) {
+		if ( ! Str::ends_with( strtolower( (string) wp_parse_url( $url, PHP_URL_PATH ) ), '.wbp' ) ) {
 			wp_send_json_error( array( 'message' => __( 'The URL must point to a .wbp file.', 'wrensafe' ) ), 400 );
 		}
 
-		if ( ! str_starts_with( $url, 'https://' ) && empty( $_POST['allow_http'] ) ) {
+		if ( ! Str::starts_with( strtolower( $url ), 'https://' ) && empty( $_POST['allow_http'] ) ) {
 			wp_send_json_error(
 				array(
 					'message'                    => __( 'This URL is not HTTPS — the archive would be downloaded over an insecure connection. Continue anyway?', 'wrensafe' ),
@@ -69,7 +72,9 @@ class ImportSourceAjax {
 
 		$local_path = self::new_local_path( 'url-import' );
 
-		$response = wp_remote_get(
+		// wp_safe_remote_get(): the address is typed by a user, so requests to
+		// this server and its local network (and redirects there) are refused.
+		$response = wp_safe_remote_get(
 			$url,
 			array(
 				'timeout'             => 120,
@@ -126,13 +131,13 @@ class ImportSourceAjax {
 	public static function server_path(): void {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! CapabilityManager::is_site_administrator() ) {
 			wp_send_json_error( array( 'message' => __( 'Importing from a server path requires administrator access.', 'wrensafe' ) ), 403 );
 		}
 
 		$path = isset( $_POST['path'] ) ? sanitize_text_field( wp_unslash( $_POST['path'] ) ) : '';
 
-		if ( '' === $path || ! str_ends_with( strtolower( $path ), '.wbp' ) ) {
+		if ( '' === $path || ! Str::ends_with( strtolower( $path ), '.wbp' ) ) {
 			wp_send_json_error( array( 'message' => __( 'Please enter the full path to a .wbp file.', 'wrensafe' ) ), 400 );
 		}
 

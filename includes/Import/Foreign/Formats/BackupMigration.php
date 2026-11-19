@@ -19,9 +19,6 @@ use WPBP\Import\Foreign\AbstractFormat;
 
 defined( 'ABSPATH' ) || exit;
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class BackupMigration extends AbstractFormat {
 
 	public function key(): string {
@@ -40,14 +37,16 @@ class BackupMigration extends AbstractFormat {
 		$path = $this->archive( $files );
 
 		if ( null === $path ) {
-			throw new \RuntimeException( __( 'No Backup Migration archive was found.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No Backup Migration archive was found.', 'wrensafe' ) );
 		}
+
+		self::require_zip();
 
 		$manifest = json_decode( (string) self::zip_entry( $path, 'bmi_backup_manifest.json' ), true );
 		$manifest = is_array( $manifest ) ? $manifest : array();
 
 		if ( ! empty( $manifest['is_encrypted'] ) ) {
-			throw new \RuntimeException( __( 'This Backup Migration backup is encrypted. Make an unencrypted backup in Backup Migration, then upload that one.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This Backup Migration backup is encrypted. Make an unencrypted backup in Backup Migration, then upload that one.', 'wrensafe' ) );
 		}
 
 		$url = untrailingslashit( (string) ( $manifest['dbdomain'] ?? '' ) );
@@ -105,5 +104,3 @@ class BackupMigration extends AbstractFormat {
 		return null;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

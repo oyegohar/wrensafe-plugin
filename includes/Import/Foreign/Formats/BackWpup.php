@@ -18,9 +18,6 @@ defined( 'ABSPATH' ) || exit;
 // streaming API. Paths are uploaded import files in protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class BackWpup extends AbstractFormat {
 
 	public function key(): string {
@@ -36,13 +33,8 @@ class BackWpup extends AbstractFormat {
 			$ext = self::ext( $name );
 
 			if ( 'zip' === $ext ) {
-				$zip = new \ZipArchive();
-				if ( true === $zip->open( $path ) ) {
-					$found = false !== $zip->locateName( 'backwpup_readme.txt' );
-					$zip->close();
-					if ( $found ) {
-						return true;
-					}
+				if ( self::zip_has( $path, 'backwpup_readme.txt' ) ) {
+					return true;
 				}
 			} elseif ( 'tar' === $ext && null !== $this->tar_manifest( $path ) ) {
 				return true;
@@ -65,11 +57,8 @@ class BackWpup extends AbstractFormat {
 			$manifest = null;
 
 			if ( 'zip' === $ext ) {
-				$zip = new \ZipArchive();
-				if ( true === $zip->open( $path ) ) {
-					$manifest = json_decode( (string) $zip->getFromName( 'manifest.json' ), true );
-					$zip->close();
-				}
+				self::require_zip();
+				$manifest = json_decode( (string) self::zip_entry( $path, 'manifest.json' ), true );
 			} elseif ( 'tar' === $ext ) {
 				$manifest = $this->tar_manifest( $path );
 			}
@@ -96,7 +85,7 @@ class BackWpup extends AbstractFormat {
 			);
 		}
 
-		throw new \RuntimeException( __( 'No BackWPup archive was found.', 'wrensafe' ) );
+		throw new \RuntimeException( esc_html__( 'No BackWPup archive was found.', 'wrensafe' ) );
 	}
 
 	public function classify( array $source, string $path ): array {
@@ -147,7 +136,5 @@ class BackWpup extends AbstractFormat {
 		return $found;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

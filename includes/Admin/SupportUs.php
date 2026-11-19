@@ -1,6 +1,6 @@
 <?php
 /**
- * Renders the "Support Us" card shown on the dashboard, settings page, and footer.
+ * Renders the "Support Us" card shown on the dashboard and the settings page.
  *
  * Every link comes from a constant (filterable with wpbp_support_link) rather than a
  * hardcoded URL — a button/link is only rendered once the site admin has
@@ -82,22 +82,5 @@ class SupportUs {
 			</div>
 		</div>
 		<?php
-	}
-
-	/**
-	 * Render a small inline credit line for use in the admin footer.
-	 */
-	public static function render_footer_text(): string {
-		$url = self::support_url();
-
-		if ( '' === $url ) {
-			return __( 'Enjoying Wrensafe?', 'wrensafe' );
-		}
-
-		return sprintf(
-			/* translators: %s: Support Us link */
-			__( 'Enjoying Wrensafe? %s', 'wrensafe' ),
-			'<a href="' . esc_url( $url ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Support development', 'wrensafe' ) . '</a>'
-		);
 	}
 }

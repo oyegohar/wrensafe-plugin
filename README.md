@@ -1,10 +1,10 @@
-![Wrensafe – WP Backup, Restore & Migration](.wordpress-org/banner-1544x500.png)
+![Wrensafe – Backup, Restore & Migration](.wordpress-org/banner-1544x500.png)
 
-# Wrensafe – WP Backup, Restore & Migration
+# Wrensafe – Backup, Restore & Migration
 
 Back up, restore and migrate WordPress with checks at every step. Nothing on your site changes until you've reviewed it.
 
-**Free · GPL v2 or later · WordPress 6.0+ · PHP 7.4+**
+**Free · GPL v2 or later · WordPress 6.2+ · PHP 7.4+**
 
 > Wrensafe is waiting for approval in the WordPress.org plugin directory. Until then, download it from this page.
 
@@ -43,7 +43,7 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 <td><img src=".wordpress-org/screenshot-10.png" alt="Restore backups from other plugins"><br><sub><b>Restore backups made by 10 other plugins</b>, just as they saved them.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-11.png" alt="Remote storage"><br><sub><b>Off-site copies</b> to FTP/FTPS, SFTP or S3-compatible storage, with a connection test.</sub></td>
+<td><img src=".wordpress-org/screenshot-11.png" alt="Remote storage"><br><sub><b>Off-site copies</b> to FTP/FTPS or S3-compatible storage, with a connection test.</sub></td>
 <td><img src=".wordpress-org/screenshot-12.png" alt="Search &amp; Replace"><br><sub><b>Search &amp; Replace</b>: a dry run shows what would change before anything is saved.</sub></td>
 </tr>
 <tr>
@@ -60,7 +60,7 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 - Optional AES-256 encryption per backup; the password is never stored.
 - Notes and tags on backups.
 - Automatic backups every day, week or month at a set time, keeping the newest copies, with a separate schedule for the database (for example daily, while the whole site is backed up weekly).
-- **Off-site copies** to your own FTP/FTPS, SFTP or S3-compatible storage right after each backup, sent in parts that resume, keeping the newest copies there. Passwords and keys are stored encrypted.
+- **Off-site copies** to your own FTP/FTPS or S3-compatible storage right after each backup, sent in parts that resume, keeping the newest copies there. Passwords and keys are stored encrypted.
 - Optional check of every backup right after it's made.
 - A backup before WordPress, plugin and theme updates.
 - No size limit: backups run in short steps, so they finish even where PHP stops scripts after 30 seconds. Interrupted uploads and downloads resume.
@@ -95,7 +95,7 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 
 ## Privacy
 
-Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP, SFTP or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, or Direct Migration to another site.
+Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP/FTPS or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, or Direct Migration to another site.
 
 ## Found a problem?
 

@@ -28,6 +28,7 @@ use WPBP\Import\Foreign\Formats\Generic;
 use WPBP\Import\Foreign\Formats\UpdraftPlus;
 use WPBP\Import\Foreign\Formats\Wpvivid;
 use WPBP\Restore\ImportValidator;
+use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 
@@ -36,9 +37,6 @@ defined( 'ABSPATH' ) || exit;
 // Archives and dumps are streamed with native handles: WP_Filesystem has no
 // streaming API. Every path is inside Wrensafe's protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
-
-// Exception messages are stored as the job error and shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 class ForeignConverter {
 
@@ -80,6 +78,52 @@ class ForeignConverter {
 		return null;
 	}
 
+	/**
+	 * What an uploaded set contains (the format's describe()), once it is
+	 * clear this server's PHP can read every part of it: a missing Zip,
+	 * Zlib or Bzip2 extension is reported now, before the conversion
+	 * starts, instead of halfway through it.
+	 *
+	 * @param array<string,string> $files
+	 * @return array{sources:array,meta:array,warnings:array}
+	 * @throws \RuntimeException When the backup can't be imported on this server.
+	 */
+	public static function describe( AbstractFormat $format, array $files ): array {
+		$plan = $format->describe( $files );
+
+		foreach ( (array) ( $plan['sources'] ?? array() ) as $source ) {
+			self::require_extensions( (array) $source );
+		}
+
+		return $plan;
+	}
+
+	/**
+	 * The PHP extensions reading one source needs.
+	 *
+	 * @param array<string,mixed> $source
+	 * @throws \RuntimeException When one of them is missing.
+	 */
+	private static function require_extensions( array $source ): void {
+		$type = (string) ( $source['type'] ?? '' );
+
+		if ( 'zip' === $type || ! empty( $source['inner'] ) ) {
+			AbstractFormat::require_zip();
+		}
+
+		if ( 'sqlgz' === $type ) {
+			AbstractFormat::require_zlib();
+		}
+
+		if ( 'tgz' === $type ) {
+			if ( preg_match( '/\.bz2$/i', (string) ( $source['file'] ?? '' ) ) ) {
+				AbstractFormat::require_bz2();
+			} else {
+				AbstractFormat::require_zlib();
+			}
+		}
+	}
+
 	private static function deadline(): float {
 		$max = (int) ini_get( 'max_execution_time' );
 
@@ -97,11 +141,13 @@ class ForeignConverter {
 
 		if ( false !== $disk_free && $disk_free < $size * 1.2 + 104857600 ) {
 			throw new \RuntimeException(
-				sprintf(
-					/* translators: 1: free disk space, 2: space needed */
-					__( 'Not enough free disk space to prepare this backup (free: %1$s, needed: about %2$s). Free up space and try again.', 'wrensafe' ),
-					size_format( (int) $disk_free ),
-					size_format( (int) ( $size * 1.2 + 104857600 ) )
+				esc_html(
+					sprintf(
+						/* translators: 1: free disk space, 2: space needed */
+						__( 'Not enough free disk space to prepare this backup (free: %1$s, needed: about %2$s). Free up space and try again.', 'wrensafe' ),
+						size_format( (int) $disk_free ),
+						size_format( (int) ( $size * 1.2 + 104857600 ) )
+					)
 				)
 			);
 		}
@@ -134,7 +180,7 @@ class ForeignConverter {
 			$format = self::format( (string) $payload['format'] );
 
 			if ( null === $format ) {
-				throw new \RuntimeException( __( 'Unknown backup format.', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'Unknown backup format.', 'wrensafe' ) );
 			}
 
 			switch ( $payload['phase'] ) {
@@ -159,9 +205,11 @@ class ForeignConverter {
 					break;
 			}
 		} catch ( \Throwable $e ) {
-			Logger::failed( 'foreign_import_failed: ' . $e->getMessage(), array(), $job->id() );
+			$message = Errors::text( $e );
+
+			Logger::failed( 'foreign_import_failed: ' . $message, array(), $job->id() );
 			self::cleanup_partial( $job, $payload );
-			$job->mark_failed( $e->getMessage() );
+			$job->mark_failed( $message );
 		}
 	}
 
@@ -333,20 +381,29 @@ class ForeignConverter {
 			return $payload['src']['file'];
 		}
 
+		self::require_extensions( $source );
+
 		$tmp = $payload['tmp'] . 'source-' . $payload['src']['index'] . ( 'tgz' === $source['type'] ? '.tar' : '.zip' );
 		$out = fopen( $tmp, 'wb' );
+
+		if ( false === $out ) {
+			throw new \RuntimeException( esc_html__( 'A temporary file could not be created (check the storage folder permissions and free disk space).', 'wrensafe' ) );
+		}
 
 		if ( ! empty( $source['inner'] ) ) {
 			$zip = new \ZipArchive();
 
 			if ( true !== $zip->open( $source['file'] ) ) {
-				throw new \RuntimeException( __( 'The backup file could not be opened (it may be incomplete).', 'wrensafe' ) );
+				fclose( $out );
+				throw new \RuntimeException( esc_html__( 'The backup file could not be opened (it may be incomplete).', 'wrensafe' ) );
 			}
 
 			$in = $zip->getStream( (string) $source['inner'] );
 
 			if ( false === $in ) {
-				throw new \RuntimeException( __( 'A part of the backup could not be read.', 'wrensafe' ) );
+				fclose( $out );
+				$zip->close();
+				throw new \RuntimeException( esc_html__( 'A part of the backup could not be read.', 'wrensafe' ) );
 			}
 
 			stream_copy_to_stream( $in, $out );
@@ -357,7 +414,8 @@ class ForeignConverter {
 			$in      = fopen( $wrapper . $source['file'], 'rb' );
 
 			if ( false === $in ) {
-				throw new \RuntimeException( __( 'The compressed archive could not be opened.', 'wrensafe' ) );
+				fclose( $out );
+				throw new \RuntimeException( esc_html__( 'The compressed archive could not be opened.', 'wrensafe' ) );
 			}
 
 			stream_copy_to_stream( $in, $out );
@@ -384,23 +442,36 @@ class ForeignConverter {
 		return $payload;
 	}
 
-	/** Note an SQL dump (decompressing .gz) and read any site details in its header. */
-	/** @param string $name The dump's path inside the backup (for ordering). */
+	/**
+	 * Note an SQL dump (decompressing .gz) and read any site details in its header.
+	 *
+	 * @param string $name The dump's path inside the backup (for ordering).
+	 */
 	private static function register_sql( array $payload, string $file, bool $gzip, string $name, AbstractFormat $format ): array {
 		if ( $gzip ) {
+			AbstractFormat::require_zlib();
+
 			$plain = $payload['tmp'] . 'dump-' . count( $payload['sql_files'] ) . '-plain.sql';
 			$in    = gzopen( $file, 'rb' );
 			$out   = fopen( $plain, 'wb' );
 
 			if ( false === $in || false === $out ) {
-				throw new \RuntimeException( __( 'The database dump could not be decompressed.', 'wrensafe' ) );
+				if ( false !== $in ) {
+					gzclose( $in );
+				}
+				if ( false !== $out ) {
+					fclose( $out );
+				}
+				throw new \RuntimeException( esc_html__( 'The database dump could not be decompressed.', 'wrensafe' ) );
 			}
 
 			while ( ! gzeof( $in ) ) {
 				$chunk = gzread( $in, 1048576 );
 
 				if ( false === $chunk ) {
-					throw new \RuntimeException( __( 'The database dump is damaged (decompression failed).', 'wrensafe' ) );
+					gzclose( $in );
+					fclose( $out );
+					throw new \RuntimeException( esc_html__( 'The database dump is damaged (decompression failed).', 'wrensafe' ) );
 				}
 
 				fwrite( $out, $chunk );
@@ -616,7 +687,7 @@ class ForeignConverter {
 		$has_file = $payload['files'] > 0;
 
 		if ( ! $has_db && ! $has_file ) {
-			throw new \RuntimeException( __( 'No site files or database were found in this backup.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No site files or database were found in this backup.', 'wrensafe' ) );
 		}
 
 		$checksums = array();
@@ -704,7 +775,7 @@ class ForeignConverter {
 		$result = ImportValidator::validate_and_create_job( (string) $payload['out'], 'import:' . $format->key(), array( 'source_format' => $format->key() ) );
 
 		if ( empty( $result['success'] ) ) {
-			throw new \RuntimeException( (string) ( $result['message'] ?? __( 'The converted backup could not be read.', 'wrensafe' ) ) );
+			throw new \RuntimeException( esc_html( (string) ( $result['message'] ?? __( 'The converted backup could not be read.', 'wrensafe' ) ) ) );
 		}
 
 		$result['warnings'] = $payload['warnings'];
@@ -733,7 +804,5 @@ class ForeignConverter {
 		}
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

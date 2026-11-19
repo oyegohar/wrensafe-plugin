@@ -18,9 +18,6 @@ defined( 'ABSPATH' ) || exit;
 // streaming API. Paths are uploaded import files in protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class Wpvivid extends AbstractFormat {
 
 	public function key(): string {
@@ -53,10 +50,12 @@ class Wpvivid extends AbstractFormat {
 			$part = strtolower( $m[1] );
 
 			if ( 'all' === $part ) {
+				self::require_zip();
+
 				$zip = new \ZipArchive();
 
 				if ( true !== $zip->open( $path ) ) {
-					throw new \RuntimeException( __( 'The WPvivid backup could not be opened (it may be incomplete).', 'wrensafe' ) );
+					throw new \RuntimeException( esc_html__( 'The WPvivid backup could not be opened (it may be incomplete).', 'wrensafe' ) );
 				}
 
 				$info = json_decode( (string) $zip->getFromName( 'wpvivid_package_info.json' ), true );
@@ -114,7 +113,5 @@ class Wpvivid extends AbstractFormat {
 		return $this->content_target( $path );
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

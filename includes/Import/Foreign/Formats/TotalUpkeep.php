@@ -13,9 +13,6 @@ use WPBP\Import\Foreign\AbstractFormat;
 
 defined( 'ABSPATH' ) || exit;
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class TotalUpkeep extends AbstractFormat {
 
 	public function key(): string {
@@ -34,20 +31,22 @@ class TotalUpkeep extends AbstractFormat {
 		$path = $this->archive( $files );
 
 		if ( null === $path ) {
-			throw new \RuntimeException( __( 'No Total Upkeep archive was found.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No Total Upkeep archive was found.', 'wrensafe' ) );
 		}
+
+		self::require_zip();
 
 		$dump = self::zip_find( $path, '#^[^/]+\.sql$#i' );
 
 		if ( null === $dump ) {
-			throw new \RuntimeException( __( 'This Total Upkeep backup has no database dump. Make a full backup in Total Upkeep, then upload that one.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This Total Upkeep backup has no database dump. Make a full backup in Total Upkeep, then upload that one.', 'wrensafe' ) );
 		}
 
 		// Total Upkeep Premium can encrypt the dump; a plain one starts with SQL text.
 		$head = $this->entry_head( $path, $dump );
 
 		if ( ! preg_match( '#^\s*(?:--|/\*|\#|CREATE|DROP|SET|INSERT)#i', $head ) ) {
-			throw new \RuntimeException( __( 'This Total Upkeep backup\'s database is encrypted. Turn off database encryption in Total Upkeep, make a new backup, then upload that one.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'This Total Upkeep backup\'s database is encrypted. Turn off database encryption in Total Upkeep, make a new backup, then upload that one.', 'wrensafe' ) );
 		}
 
 		return array(
@@ -84,6 +83,10 @@ class TotalUpkeep extends AbstractFormat {
 
 	/** The first bytes of a zip entry. */
 	private function entry_head( string $zip_path, string $entry ): string {
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			return '';
+		}
+
 		$zip = new \ZipArchive();
 
 		if ( true !== $zip->open( $zip_path ) ) {
@@ -102,5 +105,3 @@ class TotalUpkeep extends AbstractFormat {
 		return $head;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

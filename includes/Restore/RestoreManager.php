@@ -22,9 +22,11 @@ use WPBP\Core\Database\BackupsRepository;
 use WPBP\Core\Database\JobsRepository;
 use WPBP\Core\Database\RestorePointsRepository;
 use WPBP\Security\PathValidator;
+use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 use WPBP\Utils\Paths;
+use WPBP\Utils\Str;
 use WPBP\WooCommerce\CheckoutMaintenance;
 use WPBP\WooCommerce\OrderSync;
 use WPBP\WooCommerce\WooSafeMode;
@@ -34,9 +36,9 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
-// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+// object-cached. Every query goes through $wpdb->prepare(), with table and
+// column names as identifier placeholders (%i).
+// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
 // Archive entries and restore work files are streamed with native file handles
 // (fopen/fread/fwrite/rename): WP_Filesystem has no streaming API. Every path is
@@ -44,9 +46,6 @@ defined( 'ABSPATH' ) || exit;
 // validated by FileRestorer::resolve_destination().
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages here are stored as a job's error_message and logged; they
-// reach the browser only as JSON rendered with jQuery .text(), never as HTML.
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 class RestoreManager {
 
@@ -164,14 +163,63 @@ class RestoreManager {
 
 		$wpdb->query( 'SET FOREIGN_KEY_CHECKS = 0' ); // Staging tables may reference each other.
 
-		foreach ( array( self::TEMP_TABLE_SUFFIX, self::OLD_TABLE_SUFFIX ) as $suffix ) {
-			$like   = '%' . $wpdb->esc_like( $suffix );
-			$tables = $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $like ) );
+		foreach ( self::leftover_work_tables() as $table ) {
+			$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $table ) );
+		}
+	}
 
-			foreach ( (array) $tables as $table ) {
-				$wpdb->query( 'DROP TABLE IF EXISTS `' . str_replace( '`', '', $table ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.SchemaChange -- drops/renames this restore's own tables (names from $wpdb->prefix and a fixed prefix, backticks removed).
+	/**
+	 * This site's leftover restore tables: {prefix}…_wpbptmp and
+	 * {prefix}…_wpbpold (temp_table_name() and old_table_name() keep this
+	 * site's prefix at the start of every name).
+	 *
+	 * Another WordPress site can share the database with a longer prefix
+	 * that starts with this one (wp_ and wp_shop_, or a staging copy's
+	 * wp_stg_…_), and run a restore of its own. Its tables match the pattern
+	 * too, so a table is left alone when it starts with such a prefix (one
+	 * with both an options and a posts table that isn't this site's).
+	 *
+	 * @return string[]
+	 */
+	public static function leftover_work_tables(): array {
+		global $wpdb;
+
+		$prefix = $wpdb->prefix;
+		$all    = (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $prefix ) . '%' ) );
+		$index  = array_flip( $all );
+		$others = array();
+
+		foreach ( $all as $table ) {
+			$table = (string) $table;
+
+			if ( Str::ends_with( $table, 'options' ) && strlen( $table ) > strlen( $prefix . 'options' ) ) {
+				$other = substr( $table, 0, -strlen( 'options' ) );
+
+				if ( isset( $index[ $other . 'posts' ] ) ) {
+					$others[] = $other;
+				}
 			}
 		}
+
+		$found = array();
+
+		foreach ( $all as $table ) {
+			$table = (string) $table;
+
+			if ( ! Str::ends_with( $table, self::TEMP_TABLE_SUFFIX ) && ! Str::ends_with( $table, self::OLD_TABLE_SUFFIX ) ) {
+				continue;
+			}
+
+			foreach ( $others as $other ) {
+				if ( Str::starts_with( $table, $other ) ) {
+					continue 2;
+				}
+			}
+
+			$found[] = $table;
+		}
+
+		return $found;
 	}
 
 	/**
@@ -401,7 +449,7 @@ class RestoreManager {
 			}
 		} catch ( \Throwable $e ) {
 			Logger::failed(
-				sprintf( 'restore_failed: restore job #%d failed: %s (in %s:%d)', $job->id(), $e->getMessage(), $e->getFile(), $e->getLine() ),
+				sprintf( 'restore_failed: restore job #%d failed: %s (in %s:%d)', $job->id(), Errors::text( $e ), $e->getFile(), $e->getLine() ),
 				array(),
 				$job->id()
 			);
@@ -423,7 +471,7 @@ class RestoreManager {
 			// staging tables this failed run created.
 			$this->drop_restore_staging_tables();
 			Logger::info( 'restore_failure_recovery_completed: maintenance disabled, staging tables cleared, destination URLs and plugin safety enforced.', array(), $job->id() );
-			$job->mark_failed( $e->getMessage() );
+			$job->mark_failed( Errors::text( $e ) );
 			$this->release_restore_lock( $job->id() );
 		}
 	}
@@ -564,7 +612,7 @@ class RestoreManager {
 			if ( file_exists( $decrypted . '.part' ) ) {
 				wp_delete_file( $decrypted . '.part' );
 			}
-			$this->fail_preflight( $job, $e->getMessage() );
+			$this->fail_preflight( $job, Errors::text( $e ) );
 			return;
 		}
 
@@ -938,7 +986,7 @@ class RestoreManager {
 			$reader      = new ArchiveReader( $payload['archive_path'] );
 			$db_manifest = $reader->read_json( 'database/manifest.json' ) ?? array();
 
-			$payload['db_tables']      = $this->filter_db_tables( $db_manifest, $payload );
+			$payload['db_tables']      = $this->filter_db_tables( $db_manifest, $payload, $job->id() );
 			$payload['db_table_index'] = 0;
 			$payload['db_stage']       = 'extract';
 			$payload['db_offset']      = 0;
@@ -970,6 +1018,11 @@ class RestoreManager {
 			$reader->extract_to( 'database/' . $entry['schema_file'], $schema_path );
 			$reader->extract_to( 'database/' . $entry['data_file'], $data_path );
 
+			// A staging table an interrupted restore left behind (a dump from
+			// another plugin has no DROP TABLE before its CREATE TABLE).
+			global $wpdb;
+			$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', (string) $entry['tmp_table'] ) );
+
 			$payload['db_stage']  = 'schema';
 			$payload['db_offset'] = 0;
 			$job->set_payload( $payload );
@@ -998,11 +1051,13 @@ class RestoreManager {
 			// catch block uniformly disables maintenance mode, logs the
 			// table + SQL error, and stops before file restore ever runs.
 			throw new \RuntimeException(
-				sprintf(
-					/* translators: 1: destination table name, 2: database error message */
-					__( 'Database restore failed on table %1$s: %2$s', 'wrensafe' ),
-					$entry['dest_table'],
-					$result['error']
+				esc_html(
+					sprintf(
+						/* translators: 1: destination table name, 2: database error message */
+						__( 'Database restore failed on table %1$s: %2$s', 'wrensafe' ),
+						$entry['dest_table'],
+						Errors::utf8( (string) $result['error'] )
+					)
 				)
 			);
 		}
@@ -1037,7 +1092,7 @@ class RestoreManager {
 	 *
 	 * @return array<int,array{source_table:string,dest_table:string,tmp_table:string,schema_file:string,data_file:string}>
 	 */
-	private function filter_db_tables( array $db_manifest, array $payload ): array {
+	private function filter_db_tables( array $db_manifest, array $payload, int $job_id = 0 ): array {
 		global $wpdb;
 		$dest_prefix = $wpdb->prefix;
 
@@ -1048,6 +1103,10 @@ class RestoreManager {
 		$tables = array();
 
 		foreach ( $db_manifest as $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+
 			$source_table     = (string) ( $entry['source_table'] ?? '' );
 			$normalized_table = (string) ( $entry['normalized_table'] ?? $source_table );
 			$dest_table       = $dest_prefix . $normalized_table;
@@ -1056,9 +1115,17 @@ class RestoreManager {
 				continue;
 			}
 
+			// Table names from the backup's manifest end up in SQL (as
+			// identifiers, and in the checks of DatabaseImporter): only the
+			// characters WordPress table names use.
+			if ( ! self::is_safe_table_name( $source_table ) || ! self::is_safe_table_name( $normalized_table ) || ! self::is_safe_table_name( $dest_table ) ) {
+				Logger::warning( 'restore_table_skipped: the backup lists a table with a name a restore doesn\'t accept (' . sanitize_text_field( Errors::utf8( $source_table ) ) . '); it was not restored.', array(), $job_id );
+				continue;
+			}
+
 			// Wrensafe's own tables (jobs, logs, backup list — this restore's
 			// own job included) always stay this site's.
-			if ( 0 === strpos( $normalized_table, 'wpbp_' ) ) {
+			if ( 0 === stripos( $normalized_table, 'wpbp_' ) ) {
 				continue;
 			}
 
@@ -1083,6 +1150,11 @@ class RestoreManager {
 		}
 
 		return $tables;
+	}
+
+	/** A table name of letters, digits, "_", "$" and "-", at most 64 bytes. */
+	private static function is_safe_table_name( string $name ): bool {
+		return 1 === preg_match( '/^[A-Za-z0-9_$-]{1,64}$/', $name );
 	}
 
 	/**
@@ -1141,12 +1213,13 @@ class RestoreManager {
 		// reference through foreign keys (they follow a table when it's renamed).
 		$wpdb->query( 'SET FOREIGN_KEY_CHECKS = 0' );
 
-		$rename_parts = array();
-		$old_tables   = array();
+		// Pairs of names for one RENAME TABLE: from, to, from, to, …
+		$renames    = array();
+		$old_tables = array();
 
 		foreach ( $tables as $entry ) {
-			$live = $entry['dest_table'];
-			$tmp  = $entry['tmp_table'];
+			$live = (string) $entry['dest_table'];
+			$tmp  = (string) $entry['tmp_table'];
 
 			if ( ! isset( $existing[ $tmp ] ) ) {
 				// Staging table missing (e.g. a table the backup didn't
@@ -1156,23 +1229,31 @@ class RestoreManager {
 
 			if ( isset( $existing[ $live ] ) ) {
 				$old = $this->old_table_name( $live );
-				$wpdb->query( 'DROP TABLE IF EXISTS `' . $old . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.SchemaChange -- drops/renames this restore's own tables (names from $wpdb->prefix and a fixed prefix, backticks removed).
-				$rename_parts[] = "`{$live}` TO `{$old}`, `{$tmp}` TO `{$live}`";
-				$old_tables[]   = $old;
+				$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $old ) );
+				array_push( $renames, $live, $old, $tmp, $live );
+				$old_tables[] = $old;
 			} else {
-				$rename_parts[] = "`{$tmp}` TO `{$live}`";
+				array_push( $renames, $tmp, $live );
 			}
 		}
 
-		if ( ! empty( $rename_parts ) ) {
-			$wpdb->query( 'RENAME TABLE ' . implode( ', ', $rename_parts ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- drops/renames this restore's own tables (names from $wpdb->prefix and a fixed prefix, backticks removed).
+		if ( ! empty( $renames ) ) {
+			// One "%i TO %i" per pair of names in $renames.
+			$wpdb->query(
+				$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- two names per "%i TO %i"; the sniff can't count array_fill() placeholders.
+					'RENAME TABLE ' . implode( ', ', array_fill( 0, count( $renames ) / 2, '%i TO %i' ) ),
+					$renames
+				)
+			);
 
 			if ( '' !== (string) $wpdb->last_error ) {
 				throw new \RuntimeException(
-					sprintf(
-						/* translators: %s: database error message */
-						__( 'Database swap failed, no changes applied: %s', 'wrensafe' ),
-						$wpdb->last_error
+					esc_html(
+						sprintf(
+							/* translators: %s: database error message */
+							__( 'Database swap failed, no changes applied: %s', 'wrensafe' ),
+							Errors::utf8( (string) $wpdb->last_error )
+						)
 					)
 				);
 			}
@@ -1228,7 +1309,7 @@ class RestoreManager {
 		}
 
 		foreach ( $old_tables as $old ) {
-			$wpdb->query( 'DROP TABLE IF EXISTS `' . $old . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.SchemaChange -- drops/renames this restore's own tables (names from $wpdb->prefix and a fixed prefix, backticks removed).
+			$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $old ) );
 		}
 
 		// The swapped-in data is invisible to anything still holding the old
@@ -1339,7 +1420,7 @@ class RestoreManager {
 						$entries,
 						static function ( $entry ) use ( $prefixes ) {
 							foreach ( $prefixes as $prefix ) {
-								if ( str_starts_with( $entry, $prefix ) ) {
+								if ( Str::starts_with( (string) $entry, $prefix ) ) {
 									return true;
 								}
 							}
@@ -1350,10 +1431,12 @@ class RestoreManager {
 
 				if ( empty( $entries ) ) {
 					throw new \RuntimeException(
-						sprintf(
-							/* translators: %s: restore section such as "plugins" */
-							__( 'This backup has no %s to restore. Nothing was changed.', 'wrensafe' ),
-							$root_filter
+						esc_html(
+							sprintf(
+								/* translators: %s: restore section such as "plugins" */
+								__( 'This backup has no %s to restore. Nothing was changed.', 'wrensafe' ),
+								$root_filter
+							)
 						)
 					);
 				}
@@ -1367,7 +1450,7 @@ class RestoreManager {
 			$list_handle = fopen( $this->entries_list_path( $job->id() ), 'wb' );
 
 			if ( false === $list_handle ) {
-				throw new \RuntimeException( __( 'The restore could not write its temporary file list (check the storage folder permissions).', 'wrensafe' ) );
+				throw new \RuntimeException( esc_html__( 'The restore could not write its temporary file list (check the storage folder permissions).', 'wrensafe' ) );
 			}
 
 			foreach ( $entries as $entry_name ) {
@@ -1401,7 +1484,7 @@ class RestoreManager {
 		$list_handle = fopen( $this->entries_list_path( $job->id() ), 'rb' );
 
 		if ( false === $list_handle ) {
-			throw new \RuntimeException( __( 'The restore lost its temporary file list. Start the restore again.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The restore lost its temporary file list. Start the restore again.', 'wrensafe' ) );
 		}
 
 		fseek( $list_handle, (int) ( $payload['file_list_offset'] ?? 0 ) );
@@ -1655,7 +1738,7 @@ class RestoreManager {
 			// is the start of this site's path, e.g. /var/www/html → /var/www/html/wp).
 			global $wpdb;
 			$restored                  = array_column( (array) ( $payload['db_tables'] ?? array() ), 'dest_table' );
-			$existing                  = $wpdb->get_col( "SHOW TABLES LIKE '" . esc_sql( $wpdb->esc_like( $wpdb->prefix ) ) . "%'" );
+			$existing                  = $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $wpdb->prefix ) . '%' ) );
 			$payload['sr_tables']      = array_values( array_intersect( $existing, $restored ) );
 			$payload['sr_table_index'] = 0;
 			$payload['sr_cursor']      = null;
@@ -1949,8 +2032,11 @@ class RestoreManager {
 			return;
 		}
 
-		$wpdb->query( $wpdb->prepare( "UPDATE `{$wpdb->options}` SET option_value = %s WHERE option_name = 'home'", $dest_home ) );
-		$wpdb->query( $wpdb->prepare( "UPDATE `{$wpdb->options}` SET option_value = %s WHERE option_name = 'siteurl'", '' !== $dest_site ? $dest_site : $dest_home ) );
+		// Direct writes, not update_option(): in this request the option
+		// cache still holds the values from before the swap, so
+		// update_option() would see "no change" and skip the write.
+		$wpdb->update( $wpdb->options, array( 'option_value' => $dest_home ), array( 'option_name' => 'home' ) );
+		$wpdb->update( $wpdb->options, array( 'option_value' => '' !== $dest_site ? $dest_site : $dest_home ), array( 'option_name' => 'siteurl' ) );
 
 		$this->keep_destination_backup_dir( $payload );
 
@@ -1988,10 +2074,13 @@ class RestoreManager {
 		list( $table, $name_column ) = self::secret_key_table();
 		$names                       = Paths::SECRET_KEY_NAMES;
 
-		$placeholders = implode( ', ', array_fill( 0, count( $names ), '%s' ) );
-
-		$sql  = "SELECT * FROM `{$table}` WHERE `{$name_column}` IN ({$placeholders})"; // Core table/column names from $wpdb; one %s per name.
-		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $names ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- core table/column names from $wpdb, values prepared.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT * FROM %i WHERE %i IN (' . implode( ', ', array_fill( 0, count( $names ), '%s' ) ) . ')',
+				array_merge( array( $table, $name_column ), $names )
+			),
+			ARRAY_A
+		);
 
 		return is_array( $rows ) ? $rows : array();
 	}
@@ -2011,9 +2100,12 @@ class RestoreManager {
 		list( $table, $name_column ) = self::secret_key_table();
 		$names                       = Paths::SECRET_KEY_NAMES;
 
-		$placeholders = implode( ', ', array_fill( 0, count( $names ), '%s' ) );
-
-		$wpdb->query( $wpdb->prepare( "DELETE FROM `{$table}` WHERE `{$name_column}` IN ({$placeholders})", $names ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter -- core table/column names from $wpdb; one %s per name.
+		$wpdb->query(
+			$wpdb->prepare(
+				'DELETE FROM %i WHERE %i IN (' . implode( ', ', array_fill( 0, count( $names ), '%s' ) ) . ')',
+				array_merge( array( $table, $name_column ), $names )
+			)
+		);
 
 		foreach ( $rows as $row ) {
 			// New row ids: the restored table may already use the old ones.
@@ -2089,7 +2181,7 @@ class RestoreManager {
 			$this->force_destination_urls( $payload, $job->id() );
 			Logger::info( 'restore_domain_recovery_completed: destination home/siteurl restored.', array(), $job->id() );
 		} catch ( \Throwable $e ) {
-			Logger::error( 'restore_domain_recovery_failed: ' . $e->getMessage(), array(), $job->id() );
+			Logger::error( 'restore_domain_recovery_failed: ' . Errors::text( $e ), array(), $job->id() );
 		}
 	}
 
@@ -2106,7 +2198,5 @@ class RestoreManager {
 		RestoreSiteMaintenance::disable();
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

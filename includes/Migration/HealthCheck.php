@@ -8,6 +8,7 @@
 namespace WPBP\Migration;
 
 use WPBP\Utils\FileSystem;
+use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -140,11 +141,17 @@ class HealthCheck {
 		}
 	}
 
+	/**
+	 * Requests to other sites (Direct Migration, importing from a URL). The
+	 * WordPress HTTP API uses cURL when it is there and PHP streams otherwise.
+	 */
 	private function check_curl(): void {
 		if ( function_exists( 'curl_version' ) ) {
-			$this->add( __( 'cURL', 'wrensafe' ), 'pass', __( 'Available', 'wrensafe' ) );
+			$this->add( __( 'HTTP requests', 'wrensafe' ), 'pass', __( 'cURL available', 'wrensafe' ) );
+		} elseif ( wp_http_supports( array( 'ssl' ) ) ) {
+			$this->add( __( 'HTTP requests', 'wrensafe' ), 'pass', __( 'cURL isn’t installed; WordPress sends requests with PHP streams instead.', 'wrensafe' ) );
 		} else {
-			$this->add( __( 'cURL', 'wrensafe' ), 'warning', __( 'Not available — Direct Migration and importing a backup from a URL won\'t work.', 'wrensafe' ), 5 );
+			$this->add( __( 'HTTP requests', 'wrensafe' ), 'warning', __( 'This server can’t make HTTPS requests (PHP has neither cURL nor OpenSSL), so Direct Migration and importing a backup from a URL won’t work.', 'wrensafe' ), 5 );
 		}
 	}
 
@@ -165,7 +172,7 @@ class HealthCheck {
 	}
 
 	private function check_ssl(): void {
-		if ( str_starts_with( home_url(), 'https://' ) ) {
+		if ( Str::starts_with( home_url(), 'https://' ) ) {
 			$this->add( __( 'SSL', 'wrensafe' ), 'pass', __( 'HTTPS enabled', 'wrensafe' ) );
 		} else {
 			$this->add( __( 'SSL', 'wrensafe' ), 'warning', __( 'This site is not using HTTPS — direct migration transfers will be unencrypted.', 'wrensafe' ), 5 );
@@ -201,7 +208,9 @@ class HealthCheck {
 		if ( empty( $names ) ) {
 			$this->add( __( 'Large tables', 'wrensafe' ), 'pass', __( 'None found.', 'wrensafe' ) );
 		} else {
-			$this->add( /* translators: %s: comma-separated list of table names */ __( 'Large tables', 'wrensafe' ), 'warning', sprintf( __( 'Large tables found: %s. Backups and restores of this site take longer.', 'wrensafe' ), implode( ', ', $names ) ), 3 );
+			/* translators: %s: comma-separated list of table names */
+			$message = sprintf( __( 'Large tables found: %s. Backups and restores of this site take longer.', 'wrensafe' ), implode( ', ', $names ) );
+			$this->add( __( 'Large tables', 'wrensafe' ), 'warning', $message, 3 );
 		}
 	}
 
@@ -233,9 +242,7 @@ class HealthCheck {
 	}
 
 	private function check_storage_protection(): void {
-		$base = FileSystem::storage_dir();
-
-		if ( file_exists( $base . '.htaccess' ) && file_exists( $base . 'index.php' ) ) {
+		if ( \WPBP\Security\FileGuard::status()['protected'] ) {
 			$this->add( __( 'Backup folder protection', 'wrensafe' ), 'pass', __( 'Protected.', 'wrensafe' ) );
 		} else {
 			$this->add( __( 'Backup folder protection', 'wrensafe' ), 'fail', __( 'Protection files are missing from the storage folder.', 'wrensafe' ), 10 );

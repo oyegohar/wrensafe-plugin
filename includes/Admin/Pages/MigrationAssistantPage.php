@@ -38,8 +38,9 @@ class MigrationAssistantPage extends AbstractPage {
 		$latest    = MigrationAssistant::latest_result();
 
 		// Printed before the (footer) admin script via the Scripts API rather
-		// than a raw <script> tag.
-		wp_add_inline_script( 'wpbp-admin', 'window.wpbpMaLatest = ' . wp_json_encode( $latest ) . ';', 'before' );
+		// than a raw <script> tag. < > & and quotes are written as \u escapes,
+		// so no scanned value (a file or plugin name) can end the script.
+		wp_add_inline_script( 'wpbp-admin', 'window.wpbpMaLatest = ' . wp_json_encode( $latest, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT ) . ';', 'before' );
 		?>
 
 		<!-- Start: what it does, and the two ways to go on -->

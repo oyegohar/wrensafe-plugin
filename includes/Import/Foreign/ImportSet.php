@@ -49,7 +49,7 @@ class ImportSet {
 		$name = self::clean_name( $filename );
 
 		if ( ! rename( $from, $dir . $name ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- moving a finished upload inside protected storage.
-			throw new \RuntimeException( __( 'The uploaded file could not be moved into place (check file permissions).', 'wrensafe' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( esc_html__( 'The uploaded file could not be moved into place (check file permissions).', 'wrensafe' ) );
 		}
 
 		return $name;
@@ -64,9 +64,10 @@ class ImportSet {
 		}
 
 		$files = array();
+		$names = scandir( $dir );
 
-		foreach ( (array) scandir( $dir ) as $name ) {
-			if ( '.' !== $name[0] && 'index.php' !== $name && is_file( $dir . $name ) ) {
+		foreach ( is_array( $names ) ? $names : array() as $name ) {
+			if ( '' !== $name && '.' !== $name[0] && 'index.php' !== $name && is_file( $dir . $name ) ) {
 				$files[ $name ] = $dir . $name;
 			}
 		}

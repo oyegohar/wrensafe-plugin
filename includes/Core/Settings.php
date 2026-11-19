@@ -19,6 +19,19 @@ class Settings {
 	const OPTION_NAME  = 'wpbp_settings';
 	const OPTION_GROUP = 'wpbp_settings_group';
 
+	/** True while Settings::update() saves (trusted code, not a form). */
+	private static bool $internal_update = false;
+
+	/**
+	 * The array sanitize() last returned. update_option() runs the sanitize
+	 * callback a second time when the option doesn't exist yet (it falls
+	 * through to add_option()); that second pass gets this array back and
+	 * keeps it as it is.
+	 *
+	 * @var array<string,mixed>|null
+	 */
+	private static ?array $last_sanitized = null;
+
 	/**
 	 * Default values for every known setting key.
 	 */
@@ -84,17 +97,31 @@ class Settings {
 	 * Sanitize the settings array before it's saved.
 	 */
 	public function sanitize( $value ): array {
-		$value   = is_array( $value ) ? $value : array();
+		$value = is_array( $value ) ? $value : array();
+
+		if ( null !== self::$last_sanitized && $value === self::$last_sanitized ) {
+			return $value;
+		}
+
+		self::$last_sanitized = self::sanitize_value( $value );
+
+		return self::$last_sanitized;
+	}
+
+	/**
+	 * @param array<string,mixed> $value Submitted (or, from update(), complete) settings.
+	 * @return array<string,mixed>
+	 */
+	private static function sanitize_value( array $value ): array {
 		$current = self::get_all();
 
-		// No tab marker: a complete settings array, not a form post. That is
-		// Settings::update(), and WordPress running this callback a second
-		// time when the option doesn't exist yet (update_option() falls
-		// through to add_option(), which sanitizes the already-clean value
-		// again). Treating that as a General-tab post threw every other
-		// change away, so the value is kept, with each key's type enforced.
-		if ( ! array_key_exists( '_tab', $value ) ) {
-			return self::clean_complete( $value, $current );
+		// Settings::update() saves a complete settings array; a form post
+		// always names its tab. A post without a tab (an old or hand-made
+		// form) is handled like update(): only known settings, each checked
+		// the way its tab checks it, and the backup folder validated like
+		// on the Backup tab.
+		if ( self::$internal_update || ! array_key_exists( '_tab', $value ) ) {
+			return self::clean_complete( $value, $current, ! self::$internal_update );
 		}
 
 		// Only overwrite keys present in the submitted tab; checkboxes are
@@ -316,46 +343,66 @@ class Settings {
 	}
 
 	/**
-	 * Type-check a complete settings array. Known keys take their default's
-	 * type and keys already stored keep their type. A new key (an add-on's
-	 * setting on its first save, already sanitized by the add-on) is kept
-	 * when it is a plain value or an array.
+	 * Check a complete settings array. Only settings Wrensafe knows
+	 * (defaults()) are taken from $value, each sanitized like the Settings
+	 * screen sanitizes it; settings already stored are kept as they are.
+	 *
+	 * @param array<string,mixed> $value
+	 * @param array<string,mixed> $current Settings stored now.
+	 * @param bool                $from_request Whether $value came from a request (options.php), not from update().
+	 * @return array<string,mixed>
 	 */
-	private static function clean_complete( array $value, array $current ): array {
+	private static function clean_complete( array $value, array $current, bool $from_request ): array {
 		$defaults = self::defaults();
 		$clean    = $current;
 
 		foreach ( $value as $key => $item ) {
-			if ( ! is_string( $key ) || '' === $key ) {
+			if ( ! is_string( $key ) || ! array_key_exists( $key, $defaults ) ) {
 				continue;
 			}
 
-			if ( ! array_key_exists( $key, $current ) ) {
-				if ( is_scalar( $item ) || is_array( $item ) ) {
-					$clean[ $key ] = $item;
-				}
+			// The Security tab needs its own capability (see sanitize_value()).
+			if ( $from_request && 'allow_locked_backup_downloads' === $key && ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_SECURITY ) ) {
 				continue;
 			}
 
-			$type = array_key_exists( $key, $defaults ) ? gettype( $defaults[ $key ] ) : gettype( $current[ $key ] );
+			switch ( $key ) {
+				case 'backup_dir':
+					$clean[ $key ] = is_scalar( $item ) ? self::save_backup_dir( (string) $item, (string) ( $current['backup_dir'] ?? '' ) ) : (string) ( $current['backup_dir'] ?? '' );
+					break;
 
-			switch ( $type ) {
-				case 'boolean':
-					$clean[ $key ] = (bool) $item;
+				case 'excluded_tables':
+					$clean[ $key ] = is_array( $item ) ? self::clean_excluded_tables( $item ) : $current[ $key ];
 					break;
-				case 'integer':
-					$clean[ $key ] = (int) $item;
+
+				case 'notification_email':
+					// Like the Notifications tab: an address that doesn't look
+					// right keeps the previous one.
+					$email         = is_scalar( $item ) ? trim( (string) $item ) : '';
+					$clean[ $key ] = '' === $email || is_email( $email ) ? sanitize_email( $email ) : $current[ $key ];
 					break;
-				case 'array':
-					$clean[ $key ] = is_array( $item ) ? $item : $current[ $key ];
+
+				case 'custom_excluded_paths':
+					$clean[ $key ] = is_scalar( $item ) ? sanitize_textarea_field( (string) $item ) : $current[ $key ];
 					break;
+
+				case 'chunk_size_bytes':
+					$clean[ $key ] = is_scalar( $item ) ? absint( $item ) : $current[ $key ];
+					break;
+
+				case 'migration_chunk_size_mb':
+					$clean[ $key ] = is_scalar( $item ) ? max( 1, min( 25, absint( $item ) ) ) : $current[ $key ];
+					break;
+
+				case 'exclude_larger_than_mb':
+					$clean[ $key ] = is_scalar( $item ) ? min( 1000000, absint( $item ) ) : $current[ $key ];
+					break;
+
 				default:
-					if ( 'notification_email' === $key ) {
-						$clean[ $key ] = sanitize_email( (string) $item );
-					} elseif ( 'custom_excluded_paths' === $key ) {
-						$clean[ $key ] = sanitize_textarea_field( (string) $item );
-					} else {
-						$clean[ $key ] = is_scalar( $item ) ? sanitize_text_field( (string) $item ) : $current[ $key ];
+					if ( is_bool( $defaults[ $key ] ) ) {
+						$clean[ $key ] = is_scalar( $item ) && (bool) $item;
+					} elseif ( is_scalar( $item ) ) {
+						$clean[ $key ] = sanitize_text_field( (string) $item );
 					}
 			}
 		}
@@ -397,6 +444,12 @@ class Settings {
 		$all         = self::get_all();
 		$all[ $key ] = $value;
 
-		return update_option( self::OPTION_NAME, $all );
+		self::$internal_update = true;
+
+		try {
+			return update_option( self::OPTION_NAME, $all );
+		} finally {
+			self::$internal_update = false;
+		}
 	}
 }

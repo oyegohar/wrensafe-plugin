@@ -57,7 +57,7 @@ class ImportRestorePage extends AbstractPage {
 		// Importing from an arbitrary server path is restricted to true
 		// administrators (see ImportSourceAjax::server_path()) — hide the
 		// option entirely for a Team Access user who'd just be rejected.
-		if ( current_user_can( 'manage_options' ) ) {
+		if ( CapabilityManager::is_site_administrator() ) {
 			$sources['server'] = array( __( 'Server path', 'wrensafe' ), __( 'Import a .wbp file already on this server.', 'wrensafe' ), 'dashicons-portfolio' );
 		}
 
@@ -162,7 +162,7 @@ class ImportRestorePage extends AbstractPage {
 							</td>
 							<td data-colname="<?php esc_attr_e( 'Type', 'wrensafe' ); ?>"><?php echo esc_html( \WPBP\Admin\Labels::backup_type( (string) $backup['backup_type'] ) ); ?></td>
 							<td data-colname="<?php esc_attr_e( 'Size', 'wrensafe' ); ?>"><?php echo esc_html( size_format( (int) $backup['size'] ) ); ?></td>
-							<td data-colname="<?php esc_attr_e( 'Created', 'wrensafe' ); ?>"><?php echo \WPBP\Utils\Time::local_time_markup( $backup['created_at'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped inside. ?></td>
+							<td data-colname="<?php esc_attr_e( 'Created', 'wrensafe' ); ?>"><?php echo wp_kses( \WPBP\Utils\Time::local_time_markup( (string) $backup['created_at'] ), \WPBP\Admin\Kses::allowed() ); ?></td>
 							<td data-colname="<?php esc_attr_e( 'Status', 'wrensafe' ); ?>">
 								<span class="wpbp-backup-status wpbp-backup-status-<?php echo esc_attr( $backup['status'] ); ?>"><?php echo esc_html( \WPBP\Admin\Labels::status( (string) $backup['status'] ) ); ?></span>
 								<?php if ( ! empty( $backup['is_encrypted'] ) ) : ?>
@@ -199,7 +199,7 @@ class ImportRestorePage extends AbstractPage {
 			<p class="wpbp-limit-note"><?php esc_html_e( 'HTTPS URLs are used by default. An HTTP URL will ask for confirmation before downloading.', 'wrensafe' ); ?></p>
 		</div>
 
-		<?php if ( current_user_can( 'manage_options' ) ) : ?>
+		<?php if ( CapabilityManager::is_site_administrator() ) : ?>
 		<div class="wpbp-card wpbp-import-source-panel" data-source="server" id="wpbp-server-path-import-card" hidden>
 			<h2><?php esc_html_e( 'Import from a server path', 'wrensafe' ); ?></h2>
 			<p>

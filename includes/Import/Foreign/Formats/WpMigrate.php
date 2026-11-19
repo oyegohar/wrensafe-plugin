@@ -14,9 +14,6 @@ use WPBP\Import\Foreign\AbstractFormat;
 
 defined( 'ABSPATH' ) || exit;
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class WpMigrate extends AbstractFormat {
 
 	private const SQL_SIGNATURE = '# WordPress MySQL database migration';
@@ -83,7 +80,7 @@ class WpMigrate extends AbstractFormat {
 		}
 
 		if ( empty( $sources ) ) {
-			throw new \RuntimeException( __( 'No WP Migrate export was found.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No WP Migrate export was found.', 'wrensafe' ) );
 		}
 
 		if ( 1 === count( $sources ) && 'zip' !== $sources[0]['type'] ) {
@@ -117,5 +114,3 @@ class WpMigrate extends AbstractFormat {
 		return array( 'skip' );
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

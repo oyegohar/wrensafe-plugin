@@ -17,9 +17,6 @@ defined( 'ABSPATH' ) || exit;
 // streaming API. Paths are uploaded import files in protected storage.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-// Exception messages reach the browser as JSON shown with jQuery .text().
-// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-
 class Generic extends AbstractFormat {
 
 	public function key(): string {
@@ -77,7 +74,7 @@ class Generic extends AbstractFormat {
 		}
 
 		if ( ! $usable ) {
-			throw new \RuntimeException( __( 'No WordPress site files (a wp-content, plugins, themes or uploads folder) and no database dump were found in these files.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'No WordPress site files (a wp-content, plugins, themes or uploads folder) and no database dump were found in these files.', 'wrensafe' ) );
 		}
 
 		return array(
@@ -89,10 +86,12 @@ class Generic extends AbstractFormat {
 
 	/** Whether any entry of a zip would be imported (reads only the zip's index). */
 	private function zip_has_site_content( string $path ): bool {
+		self::require_zip();
+
 		$zip = new \ZipArchive();
 
 		if ( true !== $zip->open( $path ) ) {
-			throw new \RuntimeException( __( 'The .zip file could not be opened. It may be damaged or incomplete.', 'wrensafe' ) );
+			throw new \RuntimeException( esc_html__( 'The .zip file could not be opened. It may be damaged or incomplete.', 'wrensafe' ) );
 		}
 
 		$found = false;
@@ -108,7 +107,5 @@ class Generic extends AbstractFormat {
 		return $found;
 	}
 }
-
-// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
 
 // phpcs:enable WordPress.WP.AlternativeFunctions

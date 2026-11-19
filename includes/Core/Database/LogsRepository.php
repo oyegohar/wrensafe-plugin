@@ -12,8 +12,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with the table
+// name as an identifier placeholder (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class LogsRepository {
@@ -52,7 +52,8 @@ class LogsRepository {
 
 		return $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . ' ORDER BY id DESC LIMIT %d', // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'SELECT * FROM %i ORDER BY id DESC LIMIT %d',
+				self::table(),
 				$limit
 			),
 			ARRAY_A
@@ -68,8 +69,7 @@ class LogsRepository {
 	public static function get_recent_levels( int $limit, array $levels ): array {
 		global $wpdb;
 
-		$levels       = array_values( array_filter( array_map( 'sanitize_key', $levels ) ) );
-		$placeholders = implode( ',', array_fill( 0, count( $levels ), '%s' ) );
+		$levels = array_values( array_filter( array_map( 'sanitize_key', $levels ) ) );
 
 		if ( ! $levels ) {
 			return array();
@@ -77,8 +77,8 @@ class LogsRepository {
 
 		return (array) $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE level IN ($placeholders) ORDER BY id DESC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- table name is $wpdb->prefix plus a fixed internal suffix; $placeholders is one %s per level.
-				array_merge( $levels, array( $limit ) )
+				'SELECT * FROM %i WHERE level IN (' . implode( ', ', array_fill( 0, count( $levels ), '%s' ) ) . ') ORDER BY id DESC LIMIT %d',
+				array_merge( array( self::table() ), $levels, array( $limit ) )
 			),
 			ARRAY_A
 		);
@@ -96,7 +96,8 @@ class LogsRepository {
 		// One fixed, fully prepared query: an empty filter matches every row.
 		return (array) $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM ' . esc_sql( self::table() ) . " WHERE ( %s = '' OR level = %s ) AND ( %s = '' OR message LIKE %s ) ORDER BY id DESC LIMIT %d OFFSET %d", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				"SELECT * FROM %i WHERE ( %s = '' OR level = %s ) AND ( %s = '' OR message LIKE %s ) ORDER BY id DESC LIMIT %d OFFSET %d",
+				self::table(),
 				$level,
 				$level,
 				$like,
@@ -118,7 +119,8 @@ class LogsRepository {
 
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
-				'SELECT COUNT(*) FROM ' . esc_sql( self::table() ) . " WHERE ( %s = '' OR level = %s ) AND ( %s = '' OR message LIKE %s )", // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				"SELECT COUNT(*) FROM %i WHERE ( %s = '' OR level = %s ) AND ( %s = '' OR message LIKE %s )",
+				self::table(),
 				$level,
 				$level,
 				$like,
@@ -133,7 +135,7 @@ class LogsRepository {
 	public static function clear(): void {
 		global $wpdb;
 
-		$wpdb->query( 'TRUNCATE TABLE ' . esc_sql( self::table() ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( $wpdb->prepare( 'TRUNCATE TABLE %i', self::table() ) );
 	}
 
 	/**
@@ -142,8 +144,7 @@ class LogsRepository {
 	private static function trim_old(): void {
 		global $wpdb;
 
-		$table = esc_sql( self::table() );
-		$count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+		$count = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', self::table() ) );
 
 		if ( $count <= self::MAX_ROWS ) {
 			return;
@@ -151,7 +152,8 @@ class LogsRepository {
 
 		$wpdb->query(
 			$wpdb->prepare(
-				"DELETE FROM {$table} ORDER BY id ASC LIMIT %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is $wpdb->prefix plus a fixed internal suffix; values use placeholders.
+				'DELETE FROM %i ORDER BY id ASC LIMIT %d',
+				self::table(),
 				$count - self::MAX_ROWS
 			)
 		);

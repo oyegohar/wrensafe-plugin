@@ -465,6 +465,9 @@ class SettingsPage extends AbstractPage {
 
 			<h2><?php esc_html_e( 'Off-site copies', 'wrensafe' ); ?></h2>
 			<p class="description"><?php esc_html_e( 'Keep a copy of your backups on another server, so you still have them if this server fails or the site is hacked. Each backup is copied right after it’s made, in small parts, so large backups work on any host.', 'wrensafe' ); ?></p>
+			<?php if ( \WPBP\Remote\RemoteStorage::has_retired_sftp() ) : ?>
+				<div class="notice notice-warning inline wpbp-notice"><p><?php esc_html_e( 'Backups were copied to an SFTP server. Wrensafe no longer includes SFTP, so no copies are made there now; your backups stay on this server. Choose FTP / FTPS or S3-compatible storage below to keep off-site copies.', 'wrensafe' ); ?></p></div>
+			<?php endif; ?>
 
 			<table class="form-table" role="presentation">
 				<tr>
@@ -496,12 +499,6 @@ class SettingsPage extends AbstractPage {
 				$field( 'ftp', 'folder', __( 'Folder', 'wrensafe' ), 'text', __( 'Inside the folder you log in to, unless it starts with / (a full path). Created if it doesn’t exist. Use a folder only for these backups.', 'wrensafe' ) );
 				$checkbox( 'ftp', 'ftps', __( 'Use TLS (FTPS)', 'wrensafe' ), __( 'Recommended: without TLS the password and the backup travel unencrypted. Turn it off only if your server doesn’t support it.', 'wrensafe' ) );
 				$checkbox( 'ftp', 'passive', __( 'Passive mode', 'wrensafe' ), __( 'Works behind most firewalls. Turn it off only if your FTP host asks you to.', 'wrensafe' ) );
-
-				$field( 'sftp', 'host', __( 'Server', 'wrensafe' ), 'text', '', 'sftp.example.com' );
-				$field( 'sftp', 'port', __( 'Port', 'wrensafe' ), 'number' );
-				$field( 'sftp', 'username', __( 'Username', 'wrensafe' ) );
-				$field( 'sftp', 'password', __( 'Password', 'wrensafe' ), 'password' );
-				$field( 'sftp', 'folder', __( 'Folder', 'wrensafe' ), 'text', __( 'Inside the folder you log in to, unless it starts with / (a full path). Created if it doesn’t exist. Use a folder only for these backups.', 'wrensafe' ) );
 
 				$field( 's3', 'endpoint', __( 'Endpoint', 'wrensafe' ), 'url', __( 'The storage service’s S3 address, for example https://s3.us-west-004.backblazeb2.com, https://s3.wasabisys.com or https://ACCOUNT.r2.cloudflarestorage.com. For Amazon S3, use the endpoint of your bucket’s region from the list at docs.aws.amazon.com/general/latest/gr/s3.html.', 'wrensafe' ), 'https://s3.example.com' );
 				$field( 's3', 'region', __( 'Region', 'wrensafe' ), 'text', __( 'As shown by the service, for example us-east-1 or eu-central-003 (Cloudflare R2: auto).', 'wrensafe' ) );

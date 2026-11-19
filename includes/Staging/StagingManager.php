@@ -14,6 +14,7 @@ namespace WPBP\Staging;
 use WPBP\Backup\DatabaseExporter;
 use WPBP\Core\Database\StagingSitesRepository;
 use WPBP\Restore\SearchReplaceEngine;
+use WPBP\Utils\Errors;
 use WPBP\Utils\Logger;
 use WPBP\Utils\Paths;
 
@@ -63,8 +64,8 @@ class StagingManager {
 					$job->mark_failed( __( 'Unknown staging phase.', 'wrensafe' ) );
 			}
 		} catch ( \Throwable $e ) {
-			Logger::error( 'Staging job #' . $job->id() . ' failed: ' . $e->getMessage(), array(), $job->id() );
-			$job->mark_failed( $e->getMessage() );
+			Logger::error( 'Staging job #' . $job->id() . ' failed: ' . Errors::text( $e ), array(), $job->id() );
+			$job->mark_failed( Errors::text( $e ) );
 		}
 	}
 

@@ -18,8 +18,8 @@ defined( 'ABSPATH' ) || exit;
 // Database access in this file is direct by design: Wrensafe's own tables (or,
 // in the backup/restore engine, the site's tables being exported, imported or
 // swapped) have no WordPress API, and the data must be read fresh, so it is not
-// object-cached. Values go through $wpdb->prepare(); table names come from
-// $wpdb->prefix with fixed suffixes and are escaped or quoted as identifiers.
+// object-cached. Every query goes through $wpdb->prepare(), with table and
+// column names as identifier placeholders (%i).
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 
 class SearchReplaceEngine {
@@ -76,13 +76,10 @@ class SearchReplaceEngine {
 			);
 		}
 
-		$quoted_table = '`' . str_replace( '`', '``', $table ) . '`';
-		$quoted_pk    = '`' . str_replace( '`', '``', $primary_key ) . '`';
-
 		// Stable order, so updating rows mid-scan can't make a later chunk
 		// skip or revisit rows.
-		$rows = $wpdb->get_results( // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name quoted as an identifier (backticks escaped); values are prepared.
-			'SELECT * FROM ' . $quoted_table . ' ORDER BY ' . $quoted_pk . ' LIMIT ' . (int) $offset . ', ' . self::ROWS_PER_CHUNK, // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- identifiers quoted, integers cast.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare( 'SELECT * FROM %i ORDER BY %i LIMIT %d, %d', $table, $primary_key, $offset, self::ROWS_PER_CHUNK ),
 			ARRAY_A
 		);
 
@@ -135,14 +132,15 @@ class SearchReplaceEngine {
 			);
 		}
 
-		$quoted_table = '`' . str_replace( '`', '``', $table ) . '`';
-		$quoted_pk    = '`' . str_replace( '`', '``', $primary_key ) . '`';
-		$where        = null === $after ? '' : $wpdb->prepare( ' WHERE ' . $quoted_pk . ' > %s', $after ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- the only interpolation is the quoted primary-key identifier; the value goes through %s.
-
-		$rows = $wpdb->get_results( // phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name quoted as an identifier (backticks escaped); values are prepared.
-			'SELECT * FROM ' . $quoted_table . $where . ' ORDER BY ' . $quoted_pk . ' LIMIT ' . self::ROWS_PER_CHUNK, // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- identifiers quoted, value prepared above.
-			ARRAY_A
-		);
+		$rows = null === $after
+			? $wpdb->get_results(
+				$wpdb->prepare( 'SELECT * FROM %i ORDER BY %i LIMIT %d', $table, $primary_key, self::ROWS_PER_CHUNK ),
+				ARRAY_A
+			)
+			: $wpdb->get_results(
+				$wpdb->prepare( 'SELECT * FROM %i WHERE %i > %s ORDER BY %i LIMIT %d', $table, $primary_key, $after, $primary_key, self::ROWS_PER_CHUNK ),
+				ARRAY_A
+			);
 
 		if ( empty( $rows ) ) {
 			return array(
@@ -221,7 +219,7 @@ class SearchReplaceEngine {
 			return $this->primary_keys[ $table ];
 		}
 
-		$keys = $wpdb->get_results( 'SHOW KEYS FROM `' . str_replace( '`', '``', $table ) . "` WHERE Key_name = 'PRIMARY'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- identifier quoted.
+		$keys = $wpdb->get_results( $wpdb->prepare( 'SHOW KEYS FROM %i WHERE Key_name = %s', $table, 'PRIMARY' ), ARRAY_A );
 
 		$this->primary_keys[ $table ] = ( is_array( $keys ) && 1 === count( $keys ) ) ? (string) $keys[0]['Column_name'] : null;
 

@@ -79,7 +79,37 @@ class CapabilityManager {
 	 */
 	public static function register(): void {
 		add_filter( 'user_has_cap', array( self::class, 'grant_to_administrators' ) );
+		add_filter( 'map_meta_cap', array( self::class, 'require_super_admin' ), 10, 3 );
 		add_action( 'admin_init', array( self::class, 'repair_admin_role' ) );
+	}
+
+	/**
+	 * On multisite only super admins hold Wrensafe's capabilities. A site's
+	 * own administrator must not restore files, run Search & Replace, import
+	 * from a server path or change the backup folder: on a network those
+	 * reach every site (and let them run PHP), which is a super admin's job.
+	 *
+	 * @param string[] $caps    Primitive capabilities required.
+	 * @param string   $cap     Capability being checked.
+	 * @param int      $user_id User ID.
+	 * @return string[]
+	 */
+	public static function require_super_admin( $caps, $cap, $user_id ) {
+		if ( is_multisite() && is_string( $cap ) && in_array( $cap, self::all_capabilities(), true ) && ! is_super_admin( (int) $user_id ) ) {
+			return array( 'do_not_allow' );
+		}
+
+		return $caps;
+	}
+
+	/**
+	 * Whether the current user is a full administrator: one who can manage
+	 * options on a single site, a super admin on multisite. For the few
+	 * actions Team Access never grants (importing a backup from a path on
+	 * the server).
+	 */
+	public static function is_site_administrator(): bool {
+		return is_multisite() ? is_super_admin() : current_user_can( 'manage_options' );
 	}
 
 	/**
@@ -87,7 +117,9 @@ class CapabilityManager {
 	 * @return array<string,bool>
 	 */
 	public static function grant_to_administrators( $allcaps ) {
-		if ( is_array( $allcaps ) && ! empty( $allcaps['manage_options'] ) ) {
+		// On multisite super admins already pass every check, and nobody else
+		// gets these capabilities (see require_super_admin()).
+		if ( ! is_multisite() && is_array( $allcaps ) && ! empty( $allcaps['manage_options'] ) ) {
 			foreach ( self::all_capabilities() as $cap ) {
 				$allcaps[ $cap ] = true;
 			}
@@ -159,9 +191,14 @@ class CapabilityManager {
 
 	/**
 	 * Capability check helper — administrators always pass via
-	 * add_to_admin_role(), other users only if explicitly granted.
+	 * add_to_admin_role(), other users only if explicitly granted. On
+	 * multisite only super admins pass (see require_super_admin()).
 	 */
 	public static function current_user_can( string $capability ): bool {
+		if ( is_multisite() ) {
+			return is_super_admin() && current_user_can( $capability );
+		}
+
 		return current_user_can( $capability ) || current_user_can( 'manage_options' );
 	}
 }

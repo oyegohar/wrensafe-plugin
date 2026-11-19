@@ -36,7 +36,7 @@ class Time {
 	 * e.g. 120 seconds ago → "2 minutes ago"
 	 */
 	public static function human_diff( int $timestamp ): string {
-		$diff = max( 0, time() - $timestamp ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested
+		$diff = max( 0, time() - $timestamp );
 
 		if ( $diff < 60 ) {
 			return __( 'Just now', 'wrensafe' );
@@ -45,15 +45,16 @@ class Time {
 		return sprintf(
 			/* translators: %s: human time diff */
 			__( '%s ago', 'wrensafe' ),
-			human_time_diff( $timestamp, time() ) // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested
+			human_time_diff( $timestamp, time() )
 		);
 	}
 
 	/**
-	 * Convert a MySQL datetime string to a UNIX timestamp.
+	 * Convert a stored datetime ("Y-m-d H:i:s", as written by
+	 * current_time( 'mysql' )) to a UNIX timestamp.
 	 * Returns 0 if the string is empty or unparseable.
 	 */
-	public static function mysql_to_timestamp( string $mysql_datetime ): int {
+	public static function to_timestamp( string $mysql_datetime ): int {
 		if ( '' === $mysql_datetime || '0000-00-00 00:00:00' === $mysql_datetime ) {
 			return 0;
 		}
@@ -66,7 +67,7 @@ class Time {
 	 * Format a MySQL datetime for display using the site's date/time format.
 	 */
 	public static function format_mysql( string $mysql_datetime ): string {
-		$ts = self::mysql_to_timestamp( $mysql_datetime ); // phpcs:ignore PHPCompatibility.Extensions.RemovedExtensions.mysql_DeprecatedRemoved -- plugin method name, not the removed mysql extension.
+		$ts = self::to_timestamp( $mysql_datetime );
 
 		if ( 0 === $ts ) {
 			return '—';
@@ -100,7 +101,9 @@ class Time {
 	 * A <span class="wpbp-local-time"> element whose data-utc attribute is the
 	 * canonical UTC time. admin.js rewrites the text to the viewer's local
 	 * timezone (Intl.DateTimeFormat); the server-rendered fallback text (site
-	 * timezone) is shown if JavaScript is unavailable. Returns escaped HTML.
+	 * timezone) is shown if JavaScript is unavailable. Returns HTML built
+	 * from escaped parts; print it with
+	 * wp_kses( Time::local_time_markup( … ), \WPBP\Admin\Kses::allowed() ).
 	 */
 	public static function local_time_markup( string $mysql_datetime, bool $with_time = true ): string {
 		$utc = self::utc_iso_from_mysql( $mysql_datetime );
@@ -132,6 +135,6 @@ class Time {
 			return null;
 		}
 
-		return time() + (int) $schedules[ $recurrence ]['interval']; // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested
+		return time() + (int) $schedules[ $recurrence ]['interval'];
 	}
 }
