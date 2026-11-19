@@ -14,6 +14,12 @@ if ( defined( 'WPBP_PLUGIN_BASENAME' ) && WPBP_PLUGIN_BASENAME !== WP_UNINSTALL_
 	return;
 }
 
+// Wrensafe's classes need PHP 7.4 (see wrensafe.php) and can't even be loaded
+// on an older PHP: leave the data for an uninstall after a PHP upgrade.
+if ( version_compare( PHP_VERSION, '7.4', '<' ) ) {
+	return;
+}
+
 require_once __DIR__ . '/includes/Core/Settings.php';
 require_once __DIR__ . '/includes/Core/Uninstaller.php';
 

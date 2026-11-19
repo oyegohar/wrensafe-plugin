@@ -14,8 +14,9 @@
  *
  * Only statements that write to that one table are run (see
  * statement_for_table()): a backup's SQL file can't drop, create or change
- * any other table, and anything that isn't a table statement stops the
- * restore before the live database is touched.
+ * any other table, or copy another table, a file on the server or another
+ * server's data into it, and anything else stops the restore before the
+ * live database is touched.
  *
  * Foreign keys: a CREATE TABLE's REFERENCES are pointed at the staging
  * tables of this restore (see foreign_key_map()), and explicit constraint
@@ -87,11 +88,21 @@ class DatabaseImporter {
 
 		$wpdb->query( 'SET FOREIGN_KEY_CHECKS = 0' ); // This connection only; tables arrive in any order.
 
-		// Keep rows whose AUTO_INCREMENT id is 0 as 0 (mysqldump does the same).
-		$mode = (string) $wpdb->get_var( 'SELECT @@SESSION.sql_mode' );
+		// Keep rows whose AUTO_INCREMENT id is 0 as 0 (mysqldump does the
+		// same), and read quotes the standard way: statement_for_table()
+		// finds the quoted strings with backslash escapes on and "…" as a
+		// string, so this connection doesn't use NO_BACKSLASH_ESCAPES or
+		// ANSI_QUOTES (part of ANSI).
+		$mode   = (string) $wpdb->get_var( 'SELECT @@SESSION.sql_mode' );
+		$modes  = array_values( array_filter( array_map( 'trim', explode( ',', strtoupper( $mode ) ) ) ) );
+		$wanted = array_values( array_diff( $modes, array( 'NO_BACKSLASH_ESCAPES', 'ANSI_QUOTES', 'ANSI' ) ) );
 
-		if ( false === stripos( $mode, 'NO_AUTO_VALUE_ON_ZERO' ) ) {
-			$wpdb->query( $wpdb->prepare( 'SET SESSION sql_mode = %s', ltrim( $mode . ',NO_AUTO_VALUE_ON_ZERO', ',' ) ) );
+		if ( ! in_array( 'NO_AUTO_VALUE_ON_ZERO', $wanted, true ) ) {
+			$wanted[] = 'NO_AUTO_VALUE_ON_ZERO';
+		}
+
+		if ( $wanted !== $modes ) {
+			$wpdb->query( $wpdb->prepare( 'SET SESSION sql_mode = %s', implode( ',', $wanted ) ) );
 		}
 
 		$count   = 0;
@@ -179,7 +190,9 @@ class DatabaseImporter {
 			// statement_for_table() only lets through DROP TABLE IF EXISTS,
 			// CREATE TABLE, INSERT, REPLACE, UPDATE and DELETE statements on
 			// the one table being restored, renamed to this restore's own
-			// staging table, so no other table can be read into it or changed.
+			// staging table, and refuses any that reads other data (a
+			// subquery, LOAD_FILE, a MERGE / FEDERATED / CONNECT table,
+			// CREATE TABLE … LIKE, variables): see stays_in_table().
 			$wpdb->query( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- see above: a restored backup's own SQL, limited to its staging table.
 
 			if ( '' === (string) $wpdb->last_error ) {
@@ -200,7 +213,8 @@ class DatabaseImporter {
 	 *  - null for a session statement, which is skipped (SKIPPED_STATEMENT,
 	 *    and ALTER TABLE … DISABLE/ENABLE KEYS: MyISAM load hints);
 	 *  - '' for anything else (another table, several tables, any other
-	 *    kind of statement), which stops the restore.
+	 *    kind of statement, or one that reads other data: see
+	 *    stays_in_table()), which stops the restore.
 	 *
 	 * Comments, including mysqldump's /*!40101 … *\/ ones, never get here:
 	 * SqlStatementReader drops them.
@@ -229,10 +243,98 @@ class DatabaseImporter {
 				continue;
 			}
 
-			return preg_replace( '/\s+/', ' ', strtoupper( $m[1] ) ) . ' `' . str_replace( '`', '``', $dest_table ) . '`' . substr( $statement, strlen( $m[0] ) );
+			$rest   = substr( $statement, strlen( $m[0] ) );
+			$create = 0 === stripos( $m[1], 'CREATE' );
+
+			if ( ! self::stays_in_table( $rest, $create ) ) {
+				return '';
+			}
+
+			return preg_replace( '/\s+/', ' ', strtoupper( $m[1] ) ) . ' `' . str_replace( '`', '``', $dest_table ) . '`' . $rest;
 		}
 
 		return '';
+	}
+
+	/**
+	 * Words that let a statement read another table, a file on the server
+	 * or another server: subqueries and the TABLE statement, file functions,
+	 * user and system variables (@), and the storage engines and table
+	 * options that point a table at other data. A table's own DROP / CREATE
+	 * / INSERT / REPLACE / UPDATE / DELETE never needs them. Comment markers
+	 * are refused too: SqlStatementReader has already removed every comment.
+	 */
+	private const OTHER_DATA = '/\b(?:SELECT|TABLE|LOAD_FILE|OUTFILE|DUMPFILE|UNION|DIRECTORY|CONNECTION|MERGE|MRG_MYISAM|FEDERATED|FEDERATEDX|CONNECT|SPIDER|OQGRAPH|DATA_TABLE|FILE_NAME|TABLE_TYPE|SRCDEF)\b|@|#|--|\/\*/i';
+
+	/**
+	 * Whether the rest of a statement (after its verb and table name) only
+	 * touches that table: none of the OTHER_DATA words outside quoted
+	 * strings and `identifiers`, and for CREATE TABLE no "LIKE other_table"
+	 * and no quoted ENGINE name (which would hide a refused engine).
+	 */
+	private static function stays_in_table( string $rest, bool $create ): bool {
+		$code = self::sql_outside_quotes( $rest );
+
+		if ( null === $code || 1 === preg_match( self::OTHER_DATA, $code ) ) {
+			return false;
+		}
+
+		return ! $create || 1 !== preg_match( '/\bLIKE\b|\b(?:ENGINE|TYPE)\s*=?\s*(?:\'\'|""|``)/i', $code );
+	}
+
+	/**
+	 * The SQL with every quoted string and `identifier` emptied ('', "",
+	 * ``), read the way MySQL reads it on the import's connection (backslash
+	 * escapes on, "…" a string, doubled quotes), or null when a quote isn't
+	 * closed.
+	 */
+	private static function sql_outside_quotes( string $sql ): ?string {
+		$out    = '';
+		$length = strlen( $sql );
+		$i      = 0;
+
+		while ( $i < $length ) {
+			$quote = $sql[ $i ];
+
+			if ( '`' !== $quote && "'" !== $quote && '"' !== $quote ) {
+				$out .= $quote;
+				++$i;
+				continue;
+			}
+
+			$closed = false;
+			++$i;
+
+			while ( $i < $length ) {
+				$ch = $sql[ $i ];
+
+				if ( '\\' === $ch && '`' !== $quote ) {
+					$i += 2;
+					continue;
+				}
+
+				if ( $ch === $quote ) {
+					if ( $i + 1 < $length && $sql[ $i + 1 ] === $quote ) {
+						$i += 2;
+						continue;
+					}
+
+					$closed = true;
+					++$i;
+					break;
+				}
+
+				++$i;
+			}
+
+			if ( ! $closed ) {
+				return null;
+			}
+
+			$out .= $quote . $quote;
+		}
+
+		return $out;
 	}
 
 	/**

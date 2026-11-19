@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.5
+Stable tag: 1.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -157,10 +157,10 @@ Wrensafe stores backups on your own server and never sends them, or any usage da
 
 Wrensafe only contacts the services below, and only after a site administrator configures or starts the related feature (the Site Health check, which only calls the site itself, is the one exception). Nothing is sent on activation, and no usage data or tracking is collected. Like every request WordPress makes, these requests include the site's address in the User-Agent header.
 
-* **WordPress.org core checksums API** (api.wordpress.org) — when an administrator runs the Malware Scanner, to compare WordPress core files with the official checksums. Data sent: the site's WordPress version. [Privacy Policy](https://wordpress.org/about/privacy/).
+* **WordPress.org core checksums API** (api.wordpress.org) — when an administrator runs the Security scan (Wrensafe → System Info), to compare WordPress core files with the official checksums. Data sent: the site's WordPress version. [Privacy Policy](https://wordpress.org/about/privacy/).
 * **Import from URL** — downloads a backup archive from the URL the administrator enters on the Import / Restore page. Nothing is sent to that server apart from the request itself.
-* **Direct Migration** — sends backup data to the other WordPress site the administrator pairs with a one-time migration key.
-* **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice; Wrensafe has no service of its own.
+* **Direct Migration** — when an administrator sends a backup, sends it to the other WordPress site they pair with a one-time migration key, and only to that site. Data sent: the migration key, the backup archive (in signed parts), its file name, size, type and checksum, and this site's address, which is shown in the receiving site's backup list.
+* **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice: no service is preset (the providers named in the settings are only examples), and Wrensafe has no service of its own.
 * **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. It runs when Tools → Site Health is opened and during WordPress's own weekly Site Health check. No other server is contacted.
 * **Email notifications** — backup, restore and copy results are sent with WordPress's own `wp_mail()` to the addresses set under Settings → Notifications, through whatever mail service the site uses.
 
@@ -181,6 +181,13 @@ Wrensafe only contacts the services below, and only after a site administrator c
 13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 
 == Changelog ==
+
+= 1.1.6 =
+* Security: a TAR backup is checked before PHP opens it, so a crafted file can no longer make PHP 7 create objects from data hidden in the archive. Wrensafe's own TAR backups (made where ZipArchive is missing) open as before.
+* Security: a restore now refuses SQL statements that would copy another table, a file on the server or another server's data into the table being restored (subqueries, LOAD_FILE, MERGE/FEDERATED/CONNECT tables, CREATE TABLE … LIKE, variables). Backups made by Wrensafe and the supported plugins restore as before.
+* Fixed: restoring a TAR backup (made on a server without ZipArchive) restored only the database and none of the site's files, while reporting success. It restores the files now.
+* Changed: removed two unused nonce helpers.
+* Changed: External services in this readme now say exactly what Direct Migration sends, and where the security scan is.
 
 = 1.1.5 =
 * Fixed: a backup could miss database rows when the site deleted others while the backup ran (for example WordPress removing its ping notes for new posts, or expired sessions). Tables are now read in the order of their primary key, so rows deleted during a backup no longer make it skip rows that still exist.
@@ -260,6 +267,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.6 =
+Security hardening for restores of TAR backups and of backup SQL. Recommended for everyone.
 
 = 1.1.5 =
 Fixes backups that could miss database rows on busy sites. Recommended for everyone.

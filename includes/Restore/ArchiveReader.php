@@ -177,7 +177,11 @@ class ArchiveReader {
 			}
 		}
 
-		if ( class_exists( '\PharData' ) ) {
+		// A TAR backup (written where ZipArchive is missing). PharData reads
+		// Phar's own metadata from an archive as it opens it, so it only gets
+		// a plain TAR without any (see TarSafety). Every other PharData use in
+		// this class runs after open() has succeeded.
+		if ( class_exists( '\PharData' ) && TarSafety::is_plain_tar( $this->path ) ) {
 			try {
 				new \PharData( $this->path, 0, null, \Phar::TAR );
 				$this->container_format = 'tar';
@@ -583,8 +587,14 @@ class ArchiveReader {
 		try {
 			$phar = new \PharData( $this->path, 0, null, \Phar::TAR );
 
+			// Each item's path is "phar://{archive}/{entry}": keep the entry
+			// name. (Before 1.1.6 the "phar://" stayed in, so a restore from a
+			// TAR backup couldn't find any of its files.)
+			$root = 'phar://' . wp_normalize_path( $phar->getPath() ) . '/';
+
 			foreach ( new \RecursiveIteratorIterator( $phar ) as $file ) {
-				$name = 'files/' . ltrim( str_replace( $phar->getPath(), '', $file->getPathname() ), '/' );
+				$path = wp_normalize_path( $file->getPathname() );
+				$name = Str::starts_with( $path, $root ) ? substr( $path, strlen( $root ) ) : '';
 				if ( Str::starts_with( $name, 'files/' ) ) {
 					$entries[] = $name;
 				}
