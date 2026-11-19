@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.4
+Stable tag: 1.1.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -182,6 +182,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 
 == Changelog ==
 
+= 1.1.5 =
+* Fixed: a backup could miss database rows when the site deleted others while the backup ran (for example WordPress removing its ping notes for new posts, or expired sessions). Tables are now read in the order of their primary key, so rows deleted during a backup no longer make it skip rows that still exist.
+
 = 1.1.4 =
 * Changed: the plugin is now called "Wrensafe – Backup, Restore & Migration".
 * Changed: Wrensafe now needs WordPress 6.2 or later (PHP 7.4 or later, as before). On an older WordPress or PHP it stays inactive and says what it needs instead of stopping the site.
@@ -257,6 +260,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.5 =
+Fixes backups that could miss database rows on busy sites. Recommended for everyone.
 
 = 1.1.4 =
 Security and reliability fixes, WordPress 6.2 or later required. SFTP off-site copies are no longer included; choose FTP/FTPS or S3-compatible storage instead.

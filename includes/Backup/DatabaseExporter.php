@@ -214,27 +214,53 @@ class DatabaseExporter {
 	 * @param int      $offset Row offset to start at.
 	 * @param resource $handle Open, writable file handle.
 	 */
-	public function export_data_chunk( string $table, int $offset, $handle ): int {
+	public function export_data_chunk( string $table, int $offset, $handle, ?array &$cursor = null ): int {
 		global $wpdb;
 
 		$pk = $this->primary_key_columns( $table );
 
-		// Ordered by the primary key (one %i per column) when there is one.
-		$rows = empty( $pk )
-			? $wpdb->get_results(
+		if ( empty( $pk ) ) {
+			// No primary key (rare): page by position.
+			$rows = $wpdb->get_results(
 				$wpdb->prepare( 'SELECT * FROM %i LIMIT %d, %d', $table, $offset, self::rows_per_chunk() ),
 				ARRAY_A
-			)
-			: $wpdb->get_results(
+			);
+		} elseif ( is_array( $cursor ) && count( $cursor ) === count( $pk ) ) {
+			// The rows after the last one exported, by primary key. Paging by
+			// position would skip rows whenever the site deletes some while
+			// the backup runs (WP-Cron removing _pingme meta, expired
+			// sessions…): every later row moves up and the next page starts
+			// past it.
+			$rows = $wpdb->get_results(
+				$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- one %i and one %s per primary-key column; the sniff can't count array_fill() placeholders.
+					'SELECT * FROM %i WHERE (' . implode( ', ', array_fill( 0, count( $pk ), '%i' ) ) . ') > (' . implode( ', ', array_fill( 0, count( $pk ), '%s' ) ) . ') ORDER BY ' . implode( ', ', array_fill( 0, count( $pk ), '%i' ) ) . ' LIMIT %d',
+					array_merge( array( $table ), $pk, array_map( 'strval', array_values( $cursor ) ), $pk, array( self::rows_per_chunk() ) )
+				),
+				ARRAY_A
+			);
+		} else {
+			// The first page, or a job started by an older version part-way
+			// through this table (it kept only a position).
+			$rows = $wpdb->get_results(
 				$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- one %i per primary-key column; the sniff can't count array_fill() placeholders.
 					'SELECT * FROM %i ORDER BY ' . implode( ', ', array_fill( 0, count( $pk ), '%i' ) ) . ' LIMIT %d, %d',
 					array_merge( array( $table ), $pk, array( $offset, self::rows_per_chunk() ) )
 				),
 				ARRAY_A
 			);
+		}
 
 		if ( empty( $rows ) ) {
 			return 0;
+		}
+
+		if ( ! empty( $pk ) ) {
+			$last   = $rows[ count( $rows ) - 1 ];
+			$cursor = array();
+
+			foreach ( $pk as $column ) {
+				$cursor[] = null === $last[ $column ] ? '' : (string) $last[ $column ];
+			}
 		}
 
 		$column_list = implode( ', ', array_map( array( self::class, 'quote_identifier' ), array_keys( $rows[0] ) ) );

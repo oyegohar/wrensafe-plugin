@@ -462,8 +462,11 @@ class BackupManager {
 				fclose( $schema_handle );
 			}
 
+			// The primary key of the last row exported: the next chunk starts
+			// after it (see DatabaseExporter::export_data_chunk()).
+			$cursor      = 0 === $row_offset || ! isset( $payload['row_cursor'] ) || ! is_array( $payload['row_cursor'] ) ? null : $payload['row_cursor'];
 			$data_handle = fopen( $tmp_dir . 'db/data/' . $slug . '.data.sql', 0 === $row_offset ? 'w' : 'a' );
-			$written     = $exporter->export_data_chunk( $table, $row_offset, $data_handle );
+			$written     = $exporter->export_data_chunk( $table, $row_offset, $data_handle, $cursor );
 			fclose( $data_handle );
 
 			if ( $written < DatabaseExporter::rows_per_chunk() ) {
@@ -474,8 +477,10 @@ class BackupManager {
 				);
 				$payload['table_index']   = $table_index + 1;
 				$payload['row_offset']    = 0;
+				$payload['row_cursor']    = null;
 			} else {
 				$payload['row_offset'] = $row_offset + $written;
+				$payload['row_cursor'] = $cursor;
 			}
 		} while ( microtime( true ) < $deadline );
 
