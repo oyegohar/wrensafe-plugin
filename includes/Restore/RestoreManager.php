@@ -942,11 +942,16 @@ class RestoreManager {
 	}
 
 	private function step_maintenance_on( RestoreJob $job, array $payload ): void {
+		// Visitors always get the maintenance notice: the boot guard installed
+		// below runs every request without a theme until the restore is done,
+		// so a page rendered meanwhile would be blank. WooCommerce Safe Mode
+		// also pauses checkout (on top, for requests that bypass the notice).
+		$this->enable_maintenance_mode();
+
 		if ( ! empty( $payload['woo_safe_mode'] ) ) {
 			( new CheckoutMaintenance() )->enable();
-			Logger::info( 'Restore job #' . $job->id() . ' maintenance/custom maintenance enabled (WooCommerce checkout maintenance).', array(), $job->id() );
+			Logger::info( 'Restore job #' . $job->id() . ' maintenance/custom maintenance enabled (Wrensafe site maintenance — front-end only, wp-admin/AJAX unaffected — and WooCommerce checkout maintenance).', array(), $job->id() );
 		} else {
-			$this->enable_maintenance_mode();
 			Logger::info( 'Restore job #' . $job->id() . ' maintenance/custom maintenance enabled (Wrensafe site maintenance — front-end only, wp-admin/AJAX unaffected).', array(), $job->id() );
 		}
 
@@ -970,9 +975,7 @@ class RestoreManager {
 	}
 
 	private function step_restore_db( RestoreJob $job, array $payload ): void {
-		if ( empty( $payload['woo_safe_mode'] ) ) {
-			$this->enable_maintenance_mode(); // refresh the 10-minute window.
-		}
+		$this->enable_maintenance_mode(); // Refresh the maintenance window.
 
 		$tmp_dir = $this->tmp_dir_for_job( $job->id() );
 
@@ -1290,9 +1293,9 @@ class RestoreManager {
 
 		// The maintenance flags lived in the options table that was just
 		// replaced; visitors must not see the site before URLs are rewritten.
-		if ( empty( $payload['woo_safe_mode'] ) ) {
-			$this->enable_maintenance_mode();
-		} else {
+		$this->enable_maintenance_mode();
+
+		if ( ! empty( $payload['woo_safe_mode'] ) ) {
 			( new CheckoutMaintenance() )->enable();
 		}
 
@@ -1388,9 +1391,7 @@ class RestoreManager {
 	}
 
 	private function step_restore_files( RestoreJob $job, array $payload ): void {
-		if ( empty( $payload['woo_safe_mode'] ) ) {
-			$this->enable_maintenance_mode(); // refresh the 10-minute window.
-		}
+		$this->enable_maintenance_mode(); // Refresh the maintenance window.
 
 		$chain_paths  = $payload['chain_paths'] ?? array();
 		$chain_index  = $payload['chain_index'] ?? 0;

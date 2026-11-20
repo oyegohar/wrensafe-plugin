@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.6
+Stable tag: 1.1.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -135,7 +135,7 @@ Yes. Turn it on per backup. The password is never stored or logged — keep it s
 
 = Does it work with WooCommerce? =
 
-Yes. WooCommerce Safe Mode protects orders, customers and stock during a restore, and the checkout is paused only while the store's data is being replaced.
+Yes. WooCommerce Safe Mode protects orders, customers and stock during a restore. While a restore runs, visitors see a short maintenance notice and the checkout is paused; both end as soon as the restore is done.
 
 = Does it support multisite? =
 
@@ -181,6 +181,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 
 == Changelog ==
+
+= 1.1.7 =
+* Fixed: during a restore with WooCommerce Safe Mode, visitors could see blank pages instead of the maintenance notice (only the checkout was paused). Visitors now see the maintenance notice during every restore, and Safe Mode still pauses the checkout.
 
 = 1.1.6 =
 * Security: a TAR backup is checked before PHP opens it, so a crafted file can no longer make PHP 7 create objects from data hidden in the archive. Wrensafe's own TAR backups (made where ZipArchive is missing) open as before.
@@ -267,6 +270,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.1.7 =
+Visitors see the maintenance notice instead of blank pages while a WooCommerce store is being restored.
 
 = 1.1.6 =
 Security hardening for restores of TAR backups and of backup SQL. Recommended for everyone.
