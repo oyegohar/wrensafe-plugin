@@ -15,13 +15,24 @@
  * none of which the per-chunk HMAC signature alone protects against,
  * since a signature only proves authenticity, not sequencing.
  *
+ * Chunks (since 1.2.1) arrive as the raw request body
+ * (application/octet-stream), with the key in the X-Wpbp-Migration-Token
+ * header and the chunk index, offset and signature in the query string.
+ * Senders up to 1.2.0 send each chunk base64-encoded in a form field
+ * ("chunk"); that is still accepted, and a 1.2.1 sender uses it for a
+ * receiving site that doesn't list "raw" in its chunk_formats. The base64
+ * text is read with sodium_base642bin() (PHP's sodium extension, or the
+ * copy bundled with WordPress), the same bytes as before.
+ *
  * @package WPBP\Migration
  */
 
 namespace WPBP\Migration;
 
+use WPBP\Backup\ArchiveChecksum;
 use WPBP\Backup\BackupEncryption;
 use WPBP\Backup\IntegrityChecker;
+use WPBP\Backup\SliceHash;
 use WPBP\Core\Database\BackupsRepository;
 use WPBP\Core\Database\MigrationKeysRepository;
 use WPBP\Core\Settings;
@@ -50,6 +61,12 @@ class TransferServer {
 	private const ROUTE_PREFIX      = '/wpbp/v1/migration/';
 	private const BASE64_CHARS      = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
 
+	/** Header with the migration key on a raw chunk request. */
+	const TOKEN_HEADER = 'X-Wpbp-Migration-Token';
+
+	/** How this site accepts chunks, newest first (see handle_check()). */
+	const CHUNK_FORMATS = array( 'raw', 'base64' );
+
 	/**
 	 * Keys accepted by this request's permission check, by token hash, for
 	 * the endpoint callback that follows.
@@ -69,7 +86,35 @@ class TransferServer {
 
 	public function register_hooks(): void {
 		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+		add_filter( 'rest_pre_dispatch', array( $this, 'token_from_header' ), 10, 3 );
 		add_filter( 'rest_request_after_callbacks', array( $this, 'slow_down_response' ), 10, 3 );
+	}
+
+	/**
+	 * A raw chunk request carries the key in a header (its body is the
+	 * chunk itself, and a key in the address would end up in server logs).
+	 * Copy it into the "token" field before WordPress checks the fields and
+	 * runs the permission check, so both apply exactly as for a form request.
+	 *
+	 * @param mixed            $result  Response to use instead, or null.
+	 * @param \WP_REST_Server  $server  Server instance.
+	 * @param \WP_REST_Request $request The request.
+	 * @return mixed
+	 */
+	public function token_from_header( $result, $server, $request ) {
+		unset( $server );
+
+		if ( null !== $result || ! $request instanceof \WP_REST_Request || self::ROUTE_PREFIX . 'chunk' !== (string) $request->get_route() ) {
+			return $result;
+		}
+
+		$header = (string) $request->get_header( self::TOKEN_HEADER );
+
+		if ( '' !== $header && null === $request->get_param( 'token' ) ) {
+			$request->set_param( 'token', $header );
+		}
+
+		return $result;
 	}
 
 	/**
@@ -168,10 +213,20 @@ class TransferServer {
 						'validate_callback' => 'rest_validate_request_arg',
 						'sanitize_callback' => 'rest_sanitize_request_arg',
 					),
-					// Base64 (the 1.1.3 protocol); decoded and size-checked by handle_chunk().
+					// 1.2.1+ (raw body): where the chunk starts in the archive.
+					'offset'      => array(
+						'type'              => 'integer',
+						'minimum'           => 0,
+						'maximum'           => self::MAX_TOTAL_BYTES,
+						'validate_callback' => 'rest_validate_request_arg',
+						'sanitize_callback' => 'rest_sanitize_request_arg',
+					),
+					// Base64 in a form field (senders up to 1.2.0); a 1.2.1 sender
+					// sends the chunk as the raw body instead. Decoded and
+					// size-checked by handle_chunk().
 					'chunk'       => array(
 						'type'              => 'string',
-						'required'          => true,
+						'required'          => false,
 						'validate_callback' => array( $this, 'validate_chunk' ),
 						'sanitize_callback' => 'rest_sanitize_request_arg',
 					),
@@ -192,6 +247,14 @@ class TransferServer {
 						'type'              => 'string',
 						'required'          => true,
 						'pattern'           => '^[a-f0-9]{64}$',
+						'validate_callback' => 'rest_validate_request_arg',
+						'sanitize_callback' => 'rest_sanitize_request_arg',
+					),
+					// 1.2.1+ senders: check in bounded steps (202 until done).
+					'stepped'  => array(
+						'type'              => 'string',
+						'default'           => '0',
+						'enum'              => array( '0', '1' ),
 						'validate_callback' => 'rest_validate_request_arg',
 						'sanitize_callback' => 'rest_sanitize_request_arg',
 					),
@@ -609,6 +672,8 @@ class TransferServer {
 				'require_https'  => (bool) Settings::get( 'migration_require_https', true ),
 				'accepts'        => $this->accepts_this_connection(),
 				'max_chunk_size' => $this->max_chunk_bytes(),
+				// 1.2.1+: senders send chunks as the raw body when "raw" is listed.
+				'chunk_formats'  => self::CHUNK_FORMATS,
 			),
 			200
 		);
@@ -663,6 +728,7 @@ class TransferServer {
 					array(
 						'success'          => true,
 						'max_chunk_size'   => $this->max_chunk_bytes(),
+						'chunk_formats'    => self::CHUNK_FORMATS,
 						'received_bytes'   => (int) $existing['received_bytes'],
 						'next_chunk_index' => (int) $existing['next_chunk_index'],
 					),
@@ -702,6 +768,7 @@ class TransferServer {
 			array(
 				'success'          => true,
 				'max_chunk_size'   => $this->max_chunk_bytes(),
+				'chunk_formats'    => self::CHUNK_FORMATS,
 				'received_bytes'   => 0,
 				'next_chunk_index' => 0,
 			),
@@ -726,16 +793,16 @@ class TransferServer {
 
 		$chunk_index = (int) $request->get_param( 'chunk_index' );
 		$signature   = (string) $request->get_param( 'signature' );
-		// The 1.1.3 protocol sends each chunk base64-encoded in a form field.
-		$chunk     = base64_decode( (string) $request->get_param( 'chunk' ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decodes a transfer chunk (binary backup data), not code.
-		$chunk     = false === $chunk ? '' : $chunk;
-		$chunk_len = strlen( $chunk );
+		$chunk       = $this->chunk_bytes( $request );
+		$chunk_len   = strlen( $chunk );
 
 		if ( $chunk_len <= 0 || $chunk_len > $this->max_chunk_bytes() ) {
 			return new \WP_REST_Response( array( 'message' => __( 'Chunk exceeds the maximum allowed size.', 'wrensafe' ) ), 400 );
 		}
 
-		if ( $chunk_index !== (int) $meta['next_chunk_index'] ) {
+		$offset = $request->get_param( 'offset' );
+
+		if ( $chunk_index !== (int) $meta['next_chunk_index'] || ( null !== $offset && (int) $offset !== (int) $meta['received_bytes'] ) ) {
 			return new \WP_REST_Response(
 				array(
 					'message'          => __( 'Chunk out of order. Please restart the migration.', 'wrensafe' ),
@@ -804,6 +871,34 @@ class TransferServer {
 		);
 	}
 
+	/**
+	 * The chunk's bytes: the raw body (1.2.1+ senders), or the base64 form
+	 * field of earlier senders. '' when there is none or it isn't valid.
+	 */
+	private function chunk_bytes( \WP_REST_Request $request ): string {
+		if ( self::is_raw_body( $request ) ) {
+			return (string) $request->get_body();
+		}
+
+		$encoded = (string) $request->get_param( 'chunk' );
+
+		if ( '' === $encoded || ! function_exists( 'sodium_base642bin' ) ) {
+			return '';
+		}
+
+		try {
+			return (string) sodium_base642bin( $encoded, SODIUM_BASE64_VARIANT_ORIGINAL );
+		} catch ( \Throwable $e ) {
+			return '';
+		}
+	}
+
+	private static function is_raw_body( \WP_REST_Request $request ): bool {
+		$type = $request->get_content_type();
+
+		return is_array( $type ) && 'application/octet-stream' === strtolower( (string) ( $type['value'] ?? '' ) );
+	}
+
 	/** Check the archive and keep it. The key was checked by permit_finalize(). */
 	public function handle_finalize( \WP_REST_Request $request ) {
 		$token = (string) $request->get_param( 'token' );
@@ -826,9 +921,23 @@ class TransferServer {
 		$checksum = (string) $request->get_param( 'checksum' );
 		$session  = $this->session_path( $token );
 
-		if ( ! hash_equals( $checksum, (string) hash_file( 'sha256', $session ) ) ) {
-			$this->discard_session( $token );
-			return new \WP_REST_Response( array( 'message' => __( 'Archive checksum mismatch — the transfer may have been corrupted.', 'wrensafe' ) ), 400 );
+		// 1.2.1+ senders ask for the check in bounded steps: until it is done
+		// this answers 202 and the sender asks again. Earlier senders wait
+		// for one answer: they get as much as PHP's time limit allows, and if
+		// that isn't enough, a 503 they answer by trying again (5 times,
+		// waiting longer each time), each try continuing the check.
+		$stepped  = '1' === (string) $request->get_param( 'stepped' );
+		$max      = (int) ini_get( 'max_execution_time' );
+		$deadline = $stepped ? self::step_deadline() : ( $max > 0 ? microtime( true ) + max( 4, $max - 8 ) : null );
+		$checking = $this->check_archive( $token, $meta, $checksum, $session, $deadline );
+
+		if ( null !== $checking && ! $stepped && 202 === $checking->get_status() ) {
+			$checking = new \WP_REST_Response( array( 'message' => __( 'The receiving site is still checking the backup. The sending site tries again shortly.', 'wrensafe' ) ), 503 );
+			$checking->header( 'Retry-After', '2' );
+		}
+
+		if ( null !== $checking ) {
+			return $checking;
 		}
 
 		// An encrypted backup can't be opened without its password; the
@@ -844,19 +953,11 @@ class TransferServer {
 		);
 
 		if ( ! $encrypted ) {
-			$reader = new ArchiveReader( $session );
-			$result = $reader->validate();
+			$result = ( new ArchiveReader( $session ) )->validate();
 
 			if ( ! $result['valid'] ) {
 				$this->discard_session( $token );
 				return new \WP_REST_Response( array( 'message' => $result['message'] ), 400 );
-			}
-
-			$integrity = ( new IntegrityChecker() )->verify_archive_contents( $reader, $result['manifest'] );
-
-			if ( ! $integrity['valid'] ) {
-				$this->discard_session( $token );
-				return new \WP_REST_Response( array( 'message' => $integrity['message'] ), 400 );
 			}
 
 			$metadata = array_merge( $metadata, array_filter( (array) ( $result['metadata'] ?? array() ) ) );
@@ -930,6 +1031,99 @@ class TransferServer {
 		do_action( 'wpbp_direct_migration_received', $backup_id, $source_url );
 
 		return new \WP_REST_Response( array( 'success' => true ), 200 );
+	}
+
+	/** Time for one bounded finalize step, inside PHP's own limit. */
+	private static function step_deadline(): float {
+		$max = (int) ini_get( 'max_execution_time' );
+
+		return microtime( true ) + ( ( $max > 0 && $max < 20 ) ? max( 4, $max - 6 ) : 10 );
+	}
+
+	/**
+	 * Check the received archive: the whole-file SHA-256 the sender sent,
+	 * then (unless it is encrypted) its structure and every entry's
+	 * checksum. Returns null once everything passed; a 400 answer (and the
+	 * session discarded) when something didn't; or, with a $deadline that
+	 * arrives first, a 202 answer with the progress kept in the session's
+	 * metadata for the next request.
+	 */
+	private function check_archive( string $token, array $meta, string $checksum, string $session, ?float $deadline ): ?\WP_REST_Response {
+		$state = is_array( $meta['finalize'] ?? null ) && ( $meta['finalize']['checksum'] ?? '' ) === $checksum ? $meta['finalize'] : array(
+			'checksum' => $checksum,
+			'stage'    => 'hash',
+			'hash'     => array(),
+			'cursor'   => array(),
+		);
+
+		if ( 'hash' === $state['stage'] ) {
+			try {
+				$actual = ArchiveChecksum::step( $session, $checksum, $state['hash'], $deadline );
+			} catch ( \Throwable $e ) {
+				$actual = '';
+			}
+
+			if ( null === $actual ) {
+				return $this->still_checking( $token, $meta, $state, 0 );
+			}
+
+			if ( ! SliceHash::equals( $checksum, $actual ) ) {
+				$this->discard_session( $token );
+				return new \WP_REST_Response( array( 'message' => __( 'Archive checksum mismatch — the transfer may have been corrupted.', 'wrensafe' ) ), 400 );
+			}
+
+			$state['stage'] = 'verify';
+			$state['hash']  = array();
+		}
+
+		if ( 'verify' === $state['stage'] && ! ( new BackupEncryption() )->is_encrypted( $session ) ) {
+			$reader = new ArchiveReader( $session );
+			$result = $reader->validate();
+
+			if ( ! $result['valid'] ) {
+				$this->discard_session( $token );
+				return new \WP_REST_Response( array( 'message' => $result['message'] ), 400 );
+			}
+
+			$cursor    = (array) $state['cursor'];
+			$integrity = ( new IntegrityChecker() )->verify_archive_contents_step( $reader, $result['manifest'], $cursor, $deadline );
+
+			if ( null === $integrity ) {
+				$state['cursor'] = $cursor;
+				$in_files        = 'files' === (string) ( $cursor['stage'] ?? '' );
+				$percent         = $in_files ? (int) ( 100 * (int) $cursor['file_index'] / max( 1, (int) ( $cursor['files_total'] ?? 0 ) ) ) : 0;
+
+				return $this->still_checking( $token, $meta, $state, $percent );
+			}
+
+			if ( ! $integrity['valid'] ) {
+				$this->discard_session( $token );
+				return new \WP_REST_Response( array( 'message' => $integrity['message'] ), 400 );
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * 202: the check continues in the sender's next finalize request.
+	 *
+	 * @param array<string,mixed> $state
+	 */
+	private function still_checking( string $token, array $meta, array $state, int $percent ): \WP_REST_Response {
+		$meta['finalize']   = $state;
+		$meta['expires_at'] = time() + self::SESSION_LIFETIME;
+		$this->write_meta( $token, $meta );
+		$this->acquire_lock( $token );
+
+		return new \WP_REST_Response(
+			array(
+				'success'  => true,
+				'checking' => true,
+				'progress' => max( 0, min( 99, $percent ) ),
+			),
+			202
+		);
 	}
 
 	/**

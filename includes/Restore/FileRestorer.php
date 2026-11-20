@@ -286,6 +286,8 @@ class FileRestorer {
 	private static function protected_files(): array {
 		return array(
 			Paths::mu_plugins_dir() . '/' . PluginSafety::GUARD_FILE_NAME,
+			// A full backup made while a Safe Update runs contains its guard.
+			Paths::mu_plugins_dir() . '/' . \WPBP\Updates\SafeUpdates::GUARD_FILE,
 		);
 	}
 

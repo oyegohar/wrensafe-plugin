@@ -15,6 +15,7 @@ use WPBP\Admin\Pages\ImportRestorePage;
 use WPBP\Admin\Pages\LogsPage;
 use WPBP\Admin\Pages\MigrationAssistantPage;
 use WPBP\Admin\Pages\RollbackPage;
+use WPBP\Admin\Pages\SafeUpdatesPage;
 use WPBP\Admin\Pages\SchedulePage;
 use WPBP\Admin\Pages\SearchReplacePage;
 use WPBP\Admin\Pages\SettingsPage;
@@ -99,6 +100,7 @@ class AdminMenu {
 			'wrensafe-schedule'            => array( __( 'Scheduled Backups', 'wrensafe' ), SchedulePage::class, CapabilityManager::MANAGE_SCHEDULES ),
 			'wrensafe-staging'             => array( __( 'Staging', 'wrensafe' ), StagingPage::class, CapabilityManager::MANAGE_STAGING ),
 			'wrensafe-rollback'            => array( __( 'Rollback', 'wrensafe' ), RollbackPage::class, CapabilityManager::RESTORE_BACKUPS ),
+			'wrensafe-safe-updates'        => array( __( 'Safe Updates', 'wrensafe' ), SafeUpdatesPage::class, 'update_plugins' ),
 			'wrensafe-search-replace'      => array( __( 'Search & Replace', 'wrensafe' ), SearchReplacePage::class, CapabilityManager::RESTORE_BACKUPS ),
 			'wrensafe-logs'                => array( __( 'Activity Logs', 'wrensafe' ), LogsPage::class, CapabilityManager::VIEW_LOGS ),
 			'wrensafe-settings'            => array( __( 'Settings', 'wrensafe' ), SettingsPage::class, CapabilityManager::MANAGE_SETTINGS ),

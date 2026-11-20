@@ -564,7 +564,7 @@ class BackupManager {
 	private function step_archive_meta( BackupJob $job, array $payload ): void {
 		( new ArchiveWriter() )->finish( $job, $payload );
 
-		$payload['ck_offset'] = 0;
+		unset( $payload['ck_state'] );
 
 		if ( ! empty( $payload['encrypt'] ) ) {
 			// Encrypt first, then checksum the encrypted file — the encrypted
@@ -587,8 +587,8 @@ class BackupManager {
 
 	/**
 	 * Phase 'checksum': stream-hash the final archive in time-budgeted chunks,
-	 * persisting the rolling hash state between requests so a multi-GB archive
-	 * never needs one long request (the exact spot live jobs died at 90%).
+	 * keeping the progress between requests so a multi-GB archive never needs
+	 * one long request (the exact spot live jobs died at 90%), on any PHP.
 	 */
 	private function step_checksum( BackupJob $job, array $payload ): void {
 		$result = $this->checksum_chunk( $job, $payload );
@@ -610,18 +610,15 @@ class BackupManager {
 	}
 
 	/**
-	 * Hash the next slice of the final archive. Returns the finished hex
-	 * digest, or null when the deadline hit first (state persisted for the
-	 * next request). The rolling HashContext is serialized to a state file in
-	 * the job's tmp dir (supported since PHP 8.1); when serialization isn't
-	 * available the whole remaining file is hashed in this request as a
-	 * fallback.
+	 * Hash the next part of the final archive. Returns the finished checksum,
+	 * or null when the deadline hit first (progress kept in the payload for
+	 * the next request). See ArchiveChecksum: the classic whole-file SHA-256
+	 * whenever this PHP allows it within bounded requests, otherwise (a large
+	 * archive on PHP 7.4/8.0) the sliced checksum. Never one unbounded request.
 	 */
 	private function checksum_chunk( BackupJob $job, array &$payload ): ?string {
-		$path       = (string) $payload['aw_dest'];
-		$state_file = $this->tmp_dir_for_job( $job->id() ) . 'hash.state';
-		$offset     = (int) ( $payload['ck_offset'] ?? 0 );
-		$deadline   = self::request_deadline();
+		$path  = (string) $payload['aw_dest'];
+		$state = is_array( $payload['ck_state'] ?? null ) ? $payload['ck_state'] : array();
 
 		clearstatcache( true, $path );
 
@@ -629,73 +626,28 @@ class BackupManager {
 			throw new \RuntimeException( esc_html__( 'The backup archive disappeared before its checksum could be calculated.', 'wrensafe' ) );
 		}
 
-		// Restore the rolling hash state from the previous request, or start fresh.
-		$context = null;
-		if ( $offset > 0 && file_exists( $state_file ) ) {
-			try {
-				$context = unserialize( (string) file_get_contents( $state_file ), array( 'allowed_classes' => array( \HashContext::class ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- only HashContext may be instantiated.
-			} catch ( \Throwable $e ) {
-				$context = null;
-			}
+		// A job started by an earlier version kept its progress in a file.
+		$old_state = $this->tmp_dir_for_job( $job->id() ) . 'hash.state';
+
+		if ( file_exists( $old_state ) ) {
+			wp_delete_file( $old_state );
 		}
 
-		if ( ! $context instanceof \HashContext ) {
-			$context = hash_init( IntegrityChecker::ALGORITHM );
-			$offset  = 0;
+		$digest = ArchiveChecksum::step( $path, '', $state, self::request_deadline() );
+
+		if ( null === $digest ) {
+			$payload['ck_state'] = $state;
+			return null;
 		}
 
-		$handle = fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-
-		if ( false === $handle ) {
-			throw new \RuntimeException( esc_html__( 'The backup archive could not be opened for its checksum.', 'wrensafe' ) );
-		}
-
-		if ( $offset > 0 ) {
-			fseek( $handle, $offset );
-		}
-
-		while ( ! feof( $handle ) ) {
-			$buffer = fread( $handle, 4194304 ); // 4 MB.
-
-			if ( false === $buffer ) {
-				fclose( $handle );
-				throw new \RuntimeException( esc_html__( 'A read error occurred while calculating the backup checksum.', 'wrensafe' ) );
-			}
-
-			hash_update( $context, $buffer );
-			$offset += strlen( $buffer );
-
-			if ( microtime( true ) >= $deadline && ! feof( $handle ) ) {
-				fclose( $handle );
-
-				// Persist the rolling state; if this PHP build can't serialize
-				// HashContext, finish the rest right now instead of stalling.
-				try {
-					file_put_contents( $state_file, serialize( $context ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize
-					$payload['ck_offset'] = $offset;
-					return null;
-				} catch ( \Throwable $e ) {
-					$whole = IntegrityChecker::streaming_sha256( $path );
-
-					if ( is_wp_error( $whole ) ) {
-						throw new \RuntimeException( esc_html( $whole->get_error_message() ) );
-					}
-
-					return $whole;
-				}
-			}
-		}
-
-		fclose( $handle );
-
-		if ( file_exists( $state_file ) ) {
-			wp_delete_file( $state_file );
-		}
-
-		$digest = hash_final( $context );
+		unset( $payload['ck_state'], $payload['ck_offset'] );
 
 		if ( '' === $digest ) {
 			throw new \RuntimeException( esc_html__( 'The backup checksum could not be calculated.', 'wrensafe' ) );
+		}
+
+		if ( SliceHash::is_sliced( $digest ) ) {
+			Logger::info( 'backup_checksum_sliced: the archive was too large to hash in one request on PHP ' . PHP_VERSION . ', so its checksum was recorded in the sliced format (' . SliceHash::FORMAT . ').', array(), $job->id() );
 		}
 
 		return $digest;
@@ -751,7 +703,7 @@ class BackupManager {
 		unset( $payload['enc_state'] );
 		$payload['encrypted'] = true;
 		$payload['phase']     = 'checksum';
-		$payload['ck_offset'] = 0;
+		unset( $payload['ck_state'] );
 
 		$job->set_payload( $payload );
 		$job->update_progress( 93, __( 'Calculating checksum…', 'wrensafe' ) );
@@ -951,12 +903,29 @@ class BackupManager {
 		/**
 		 * Upload a finished backup to a remote destination.
 		 *
-		 * @param array|null $result      null when no handler took it, else array{success:bool,message?:string}.
+		 * A large upload can continue over several backup steps, so every
+		 * request stays short: return done => false with the upload's state
+		 * (and optionally percent and message for the progress), and the
+		 * filter runs again on the next step with that state.
+		 *
+		 * @since 1.2.1 The $state parameter, and done/state/percent/message in the result.
+		 *
+		 * @param array|null $result      null when no handler took it, else array{success:bool,message?:string,done?:bool,state?:array,percent?:int}.
 		 * @param array      $backup      Backup record.
 		 * @param string     $destination Destination id chosen for the job.
 		 * @param BackupJob  $job
+		 * @param array      $state       What the previous step returned as state ([] on the first step).
 		 */
-		$result = apply_filters( 'wpbp_backup_remote_upload', null, $backup, (string) $payload['destination'], $job );
+		$result = apply_filters( 'wpbp_backup_remote_upload', null, $backup, (string) $payload['destination'], $job, (array) ( $payload['upload_state'] ?? array() ) );
+
+		if ( is_array( $result ) && ! empty( $result['success'] ) && array_key_exists( 'done', $result ) && ! $result['done'] ) {
+			$payload['upload_state'] = is_array( $result['state'] ?? null ) ? $result['state'] : array();
+			$job->set_payload( $payload );
+			$percent = max( 0, min( 100, (int) ( $result['percent'] ?? 0 ) ) );
+			$job->update_progress( 98 + (int) floor( $percent / 100 ), is_string( $result['message'] ?? null ) && '' !== $result['message'] ? $result['message'] : __( 'Uploading to cloud storage…', 'wrensafe' ) );
+			return;
+		}
+
 		$status = null === $result ? null : ( empty( $result['success'] ) ? 'failed' : 'completed' );
 
 		if ( 'failed' === $status ) {

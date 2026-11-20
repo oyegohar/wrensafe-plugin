@@ -89,6 +89,8 @@ class PushToLive {
 		// "discourage search engines", which staging always sets).
 		$payload['live_url']         = untrailingslashit( home_url() );
 		$payload['live_blog_public'] = (string) get_option( 'blog_public', '1' );
+		$payload['live_home']        = (string) get_option( 'home' );
+		$payload['live_siteurl']     = (string) get_option( 'siteurl' );
 		$payload['table_index']      = 0;
 		$payload['content_offset']   = 0;
 		$payload['phase']            = 'push_database';
@@ -105,6 +107,10 @@ class PushToLive {
 		$index  = $payload['table_index'];
 
 		if ( $index >= count( $tables ) ) {
+			// The pushed tables carry the staging site's prefixed keys (roles,
+			// capabilities): back to this site's prefix.
+			( new StagingCreator() )->rename_prefixed_keys( $wpdb->prefix, (string) $payload['staging_prefix'], $wpdb->prefix );
+
 			( new StagingCreator() )->apply_exclusions(
 				$wpdb->prefix,
 				! empty( $payload['exclude_users'] ),
@@ -125,8 +131,46 @@ class PushToLive {
 			return;
 		}
 
+		$suffix   = substr( (string) $tables[ $index ], strlen( (string) $payload['staging_prefix'] ) );
+		$user_id  = get_current_user_id();
+		$sessions = null;
+
+		// The push runs in the administrator's browser: keep their login
+		// across the users' meta being replaced (as a restore does).
+		if ( 'usermeta' === $suffix && $user_id > 0 ) {
+			$sessions = $wpdb->get_var( $wpdb->prepare( 'SELECT meta_value FROM %i WHERE user_id = %d AND meta_key = %s LIMIT 1', $wpdb->usermeta, $user_id, 'session_tokens' ) );
+		}
+
 		( new StagingCreator() )->clone_table( $tables[ $index ], $payload['staging_prefix'], $wpdb->prefix );
 		++$payload['table_index'];
+
+		if ( 'options' === $suffix || 'usermeta' === $suffix ) {
+			// Right away, not at the end: a push that stops half-way must not
+			// leave the live site without its roles.
+			( new StagingCreator() )->rename_prefixed_keys( $wpdb->prefix, (string) $payload['staging_prefix'], $wpdb->prefix );
+		}
+
+		if ( 'options' === $suffix ) {
+			// The copy names the staging address; until the URLs are replaced
+			// at the end, the live site (and the login cookies, named after
+			// its address) would point at the staging copy.
+			foreach ( array(
+				'home'    => (string) ( $payload['live_home'] ?? '' ),
+				'siteurl' => (string) ( $payload['live_siteurl'] ?? '' ),
+			) as $name => $value ) {
+				if ( '' !== $value ) {
+					$wpdb->update( $wpdb->options, array( 'option_value' => $value ), array( 'option_name' => $name ) );
+				}
+			}
+
+			wp_cache_delete( 'alloptions', 'options' );
+		}
+
+		if ( null !== $sessions ) {
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE user_id = %d AND meta_key = %s', $wpdb->usermeta, $user_id, 'session_tokens' ) );
+			$wpdb->query( $wpdb->prepare( 'INSERT INTO %i ( user_id, meta_key, meta_value ) VALUES ( %d, %s, %s )', $wpdb->usermeta, $user_id, 'session_tokens', (string) $sessions ) );
+			wp_cache_delete( $user_id, 'user_meta' );
+		}
 
 		$progress = 5 + (int) ( ( $payload['table_index'] / max( 1, count( $tables ) ) ) * 50 );
 		$job->update_progress( $progress, sprintf( /* translators: %s: database table name */ __( 'Pushing table %s', 'wrensafe' ), $tables[ $index ] ) );
@@ -146,7 +190,8 @@ class PushToLive {
 				);
 
 				foreach ( $iterator as $file_info ) {
-					if ( $file_info->isFile() ) {
+					// The staging site's password guard stays on the staging site.
+					if ( $file_info->isFile() && StagingProtection::GUARD_FILE !== $file_info->getFilename() ) {
 						$files[] = ltrim( substr( $file_info->getPathname(), strlen( $staging_content_dir ) ), '/\\' );
 					}
 				}

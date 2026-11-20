@@ -10,6 +10,7 @@ namespace WPBP\Restore;
 
 use WPBP\Backup\BackupEncryption;
 use WPBP\Backup\ManifestBuilder;
+use WPBP\Backup\SliceHash;
 use WPBP\Utils\ChunkSizeCalculator;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Str;
@@ -492,15 +493,23 @@ class ArchiveReader {
 	}
 
 	/**
-	 * Stream-hash a single archive entry's content (sha256), without ever
-	 * loading the whole entry into memory — needed since data files can be
-	 * as large as the table they were exported from. Returns null if the
-	 * entry doesn't exist in the archive.
+	 * Stream-hash a single archive entry's content, without ever loading the
+	 * whole entry into memory — needed since data files can be as large as
+	 * the table they were exported from. Returns null if the entry doesn't
+	 * exist in the archive.
+	 *
+	 * @param string $like A recorded checksum: the entry is hashed the same
+	 *                     way (its SHA-256, or a sliced checksum, see
+	 *                     SliceHash). '' for its SHA-256.
 	 */
-	public function checksum_entry( string $entry_name ): ?string {
+	public function checksum_entry( string $entry_name, string $like = '' ): ?string {
 		if ( ! $this->opened && ! $this->open() ) {
 			return null;
 		}
+
+		$format = '' !== $like ? SliceHash::parse( $like ) : null;
+		$slices = null !== $format && $format['sliced'] ? new SliceHash( $format['slice'] ) : null;
+		$ctx    = null === $slices ? hash_init( 'sha256' ) : null;
 
 		$chunk_size = ChunkSizeCalculator::bytes_per_chunk();
 
@@ -517,17 +526,16 @@ class ArchiveReader {
 				return null;
 			}
 
-			$ctx = hash_init( 'sha256' );
 			while ( ! feof( $stream ) ) {
 				$chunk = fread( $stream, $chunk_size );
 				if ( false === $chunk || '' === $chunk ) {
 					break;
 				}
-				hash_update( $ctx, $chunk );
+				self::hash_chunk( $ctx, $slices, $chunk );
 			}
 			fclose( $stream );
 
-			return hash_final( $ctx );
+			return null !== $slices ? $slices->result() : hash_final( $ctx );
 		}
 
 		try {
@@ -538,19 +546,27 @@ class ArchiveReader {
 			}
 
 			$file = $phar[ $entry_name ]->openFile( 'rb' );
-			$ctx  = hash_init( 'sha256' );
 
 			while ( ! $file->eof() ) {
 				$chunk = $file->fread( $chunk_size );
 				if ( '' === $chunk ) {
 					break;
 				}
-				hash_update( $ctx, $chunk );
+				self::hash_chunk( $ctx, $slices, $chunk );
 			}
 
-			return hash_final( $ctx );
+			return null !== $slices ? $slices->result() : hash_final( $ctx );
 		} catch ( \Throwable $e ) {
 			return null;
+		}
+	}
+
+	/** @param \HashContext|null $ctx */
+	private static function hash_chunk( $ctx, ?SliceHash $slices, string $chunk ): void {
+		if ( null !== $slices ) {
+			$slices->update( $chunk );
+		} else {
+			hash_update( $ctx, $chunk );
 		}
 	}
 

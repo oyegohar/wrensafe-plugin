@@ -26,6 +26,10 @@ class Deactivator {
 	public static function deactivate(): void {
 		CronHandler::unschedule();
 
+		// A Safe Updates run can't continue without the plugin.
+		wp_unschedule_hook( \WPBP\Updates\SafeUpdates::CONTINUE_HOOK );
+		\WPBP\Updates\SafeUpdates::remove_guard();
+
 		if ( PluginSafety::has_boot_guard() ) {
 			PluginSafety::remove_boot_guard();
 			Logger::warning( __( 'Wrensafe was deactivated during a restore: the temporary restore guard was removed.', 'wrensafe' ) );

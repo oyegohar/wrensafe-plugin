@@ -11,6 +11,7 @@ use WPBP\Core\Database\StagingSitesRepository;
 use WPBP\Core\Settings;
 use WPBP\Utils\ChunkSizeCalculator;
 use WPBP\Utils\Paths;
+use WPBP\Utils\SharedDatabase;
 use WPBP\Utils\Str;
 
 defined( 'ABSPATH' ) || exit;
@@ -41,7 +42,11 @@ class DatabaseExporter {
 	 * are never restored anyway (see DatabaseImporter/RestoreManager).
 	 * Tables left out under Settings → Backup are skipped too, unless $all.
 	 * Staging sites' tables ({prefix}stg_{slug}_…) are never included: they
-	 * belong to the staging copies, not to this site.
+	 * belong to the staging copies, not to this site. Nor are the tables of
+	 * another WordPress site in the same database whose prefix starts with
+	 * this one (wp_shop_ next to wp_; see SharedDatabase): a restore would
+	 * otherwise overwrite that site. A multisite network's subsite tables
+	 * ({prefix}2_…) are kept.
 	 */
 	public function get_tables( bool $all = false ): array {
 		global $wpdb;
@@ -55,11 +60,20 @@ class DatabaseExporter {
 
 		$tables  = array();
 		$staging = self::staging_prefixes();
+		$names   = array();
 
 		foreach ( (array) $rows as $row ) {
 			$table = (string) ( $row[0] ?? '' );
 
-			if ( '' !== $table && 0 === strpos( $table, $wpdb->prefix ) && ! self::is_restore_work_table( $table ) && ! self::has_prefix( $table, $staging ) ) {
+			if ( '' !== $table && 0 === strpos( $table, $wpdb->prefix ) ) {
+				$names[] = $table;
+			}
+		}
+
+		$others = SharedDatabase::other_install_prefixes( $names, $wpdb->prefix, SharedDatabase::subsite_base() );
+
+		foreach ( $names as $table ) {
+			if ( ! self::is_restore_work_table( $table ) && ! self::has_prefix( $table, $staging ) && ! SharedDatabase::belongs_to_other( $table, $others ) ) {
 				$tables[] = $table;
 			}
 		}

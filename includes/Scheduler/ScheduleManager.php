@@ -83,6 +83,9 @@ class ScheduleManager {
 				'backup_type' => $schedule['backup_type'],
 				'note'        => sprintf( 'Scheduled backup: %s', $schedule['title'] ),
 				'schedule_id' => $schedule['id'],
+				// 'local', or the id of an add-on's destination (Wrensafe Pro:
+				// a cloud account), which the job uploads to when it's done.
+				'destination' => (string) ( $schedule['destination'] ?? 'local' ),
 			)
 		);
 	}

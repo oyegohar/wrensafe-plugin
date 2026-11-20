@@ -51,6 +51,15 @@ class StagingAjax {
 
 		$password_protected = ! empty( $_POST['password_protected'] );
 
+		if ( $password_protected ) {
+			$staging_user     = sanitize_user( wp_unslash( $_POST['staging_username'] ?? '' ) );
+			$staging_password = sanitize_text_field( wp_unslash( $_POST['staging_password'] ?? '' ) );
+
+			if ( '' === $staging_user || strlen( $staging_password ) < 8 ) {
+				wp_send_json_error( array( 'message' => __( 'Enter a user name and a password of at least 8 characters for the staging site.', 'wrensafe' ) ), 400 );
+			}
+		}
+
 		$job = StagingJob::create(
 			array(
 				'phase'              => 'init',

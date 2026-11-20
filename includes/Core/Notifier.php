@@ -31,6 +31,11 @@ class Notifier {
 	 * @param string      $status completed | failed
 	 */
 	public static function job_finished( $job, $status ): void {
+		if ( $job instanceof \WPBP\Updates\SafeUpdateJob ) {
+			self::safe_update_finished( $job, (string) $status );
+			return;
+		}
+
 		if ( ! $job instanceof AbstractJob || ! in_array( $job->type(), array( 'backup', 'restore' ), true ) ) {
 			return;
 		}
@@ -147,6 +152,89 @@ class Notifier {
 		$lines[] = sprintf( __( '— Wrensafe on %s', 'wrensafe' ), home_url() );
 
 		wp_mail( $to, sprintf( '[%1$s] %2$s', $site, __( 'Off-site copy failed', 'wrensafe' ) ), implode( "\n\n", $lines ), self::HEADERS );
+	}
+
+	/**
+	 * Safe Updates: a failure email when an update was rolled back or
+	 * failed (or the run stopped), a success email when everything updated.
+	 */
+	private static function safe_update_finished( \WPBP\Updates\SafeUpdateJob $job, string $status ): void {
+		$payload = $job->payload();
+		$summary = \WPBP\Updates\SafeUpdateManager::summary( $payload );
+		$failed  = 'failed' === $status || $summary['rolled_back'] > 0 || $summary['failed'] > 0;
+
+		if ( ! $failed && 0 === $summary['updated'] ) {
+			return;
+		}
+
+		if ( ! Settings::get( $failed ? 'notify_on_failure' : 'notify_on_success', false ) ) {
+			return;
+		}
+
+		/** This filter is documented in includes/Core/Notifier.php */
+		if ( ! apply_filters( 'wpbp_send_notification_email', true, 'safe_update', $failed ? 'failed' : 'completed', $job ) ) {
+			return;
+		}
+
+		$to = (string) Settings::get( 'notification_email', '' );
+		$to = is_email( $to ) ? $to : (string) get_option( 'admin_email' );
+
+		if ( ! is_email( $to ) ) {
+			return;
+		}
+
+		$site    = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
+		$items   = (array) ( $payload['items'] ?? array() );
+		$plugins = true;
+
+		foreach ( $items as $item ) {
+			$plugins = $plugins && 'plugin' === (string) ( $item['type'] ?? 'plugin' );
+		}
+
+		if ( $plugins ) {
+			$subject = $failed ? __( 'Plugin update rolled back or failed', 'wrensafe' ) : __( 'Plugins updated', 'wrensafe' );
+		} else {
+			$subject = $failed ? __( 'Update rolled back or failed', 'wrensafe' ) : __( 'Updates installed', 'wrensafe' );
+		}
+
+		$lines = array( \WPBP\Updates\SafeUpdateManager::summary_text( $summary ) );
+
+		if ( '' !== $job->error_message() ) {
+			/* translators: %s: error message */
+			$lines[] = sprintf( __( 'Reason: %s', 'wrensafe' ), $job->error_message() );
+		}
+
+		$labels = array(
+			'updated'     => __( 'updated', 'wrensafe' ),
+			'rolled_back' => __( 'rolled back', 'wrensafe' ),
+			'failed'      => __( 'failed', 'wrensafe' ),
+			'skipped'     => __( 'not updated', 'wrensafe' ),
+			'cancelled'   => __( 'not updated', 'wrensafe' ),
+		);
+
+		foreach ( $items as $item ) {
+			/* translators: 1: name of the plugin (or theme), 2: old version, 3: new version, 4: what happened */
+			$line = sprintf( __( '%1$s %2$s → %3$s: %4$s', 'wrensafe' ), $item['name'], $item['from'], $item['to'], $labels[ $item['state'] ] ?? $item['state'] );
+
+			if ( 'updated' !== $item['state'] && '' !== (string) $item['message'] ) {
+				$line .= "\n" . $item['message'];
+			}
+
+			$lines[] = $line;
+		}
+
+		/* translators: %s: link to the Safe Updates page */
+		$lines[] = sprintf( __( 'Details: %s', 'wrensafe' ), admin_url( 'admin.php?page=wrensafe-safe-updates' ) );
+		/* translators: %s: site address */
+		$lines[] = sprintf( __( '— Wrensafe on %s', 'wrensafe' ), home_url() );
+
+		// A plain-text email: every value as text (messages may hold escaped characters).
+		wp_mail(
+			$to,
+			\WPBP\Utils\Errors::plain( sprintf( '[%1$s] %2$s', $site, $subject ) ),
+			\WPBP\Utils\Errors::plain( wp_strip_all_tags( implode( "\n\n", $lines ) ) ),
+			array( 'Content-Type: text/plain; charset=UTF-8' )
+		);
 	}
 
 	private static function reason( AbstractJob $job ): string {

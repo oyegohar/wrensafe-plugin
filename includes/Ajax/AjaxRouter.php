@@ -74,6 +74,14 @@ class AjaxRouter {
 			'backup_compare'             => array( BackupCompareAjax::class, 'compare' ),
 			'migration_assistant_scan'   => array( MigrationAssistantAjax::class, 'scan' ),
 			'migration_templates'        => array( MigrationAssistantAjax::class, 'templates' ),
+			'safe_update_start'          => array( SafeUpdateAjax::class, 'start' ),
+			'safe_update_process'        => array( SafeUpdateAjax::class, 'process' ),
+			'safe_update_status'         => array( SafeUpdateAjax::class, 'status' ),
+			'safe_update_cancel'         => array( SafeUpdateAjax::class, 'cancel' ),
+			'safe_update_decide'         => array( SafeUpdateAjax::class, 'decide' ),
+			'safe_update_rollback'       => array( SafeUpdateAjax::class, 'rollback' ),
+			'safe_update_quick'          => array( SafeUpdateAjax::class, 'quick' ),
+			'safe_update_refresh'        => array( SafeUpdateAjax::class, 'refresh' ),
 		);
 	}
 

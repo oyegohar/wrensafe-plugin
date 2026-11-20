@@ -12,7 +12,7 @@ defined( 'ABSPATH' ) || exit;
 class Schema {
 
 	const DB_VERSION_OPTION = 'wpbp_db_version';
-	const DB_VERSION        = '1.5.0';
+	const DB_VERSION        = '1.6.0';
 
 	/**
 	 * Create or upgrade every Wrensafe table using dbDelta.
@@ -83,6 +83,7 @@ class Schema {
 				wp_version varchar(20) NOT NULL default '',
 				php_version varchar(20) NOT NULL default '',
 				checksum varchar(128) NOT NULL default '',
+				sliced_checksum varchar(128) NOT NULL default '',
 				is_locked tinyint(1) unsigned NOT NULL default '0',
 				note text,
 				tags varchar(255) NOT NULL default '',

@@ -57,6 +57,7 @@ class SettingsPage extends AbstractPage {
 		$tabs = array(
 			'general'          => __( 'General', 'wrensafe' ),
 			'backup'           => __( 'Backup', 'wrensafe' ),
+			'updates'          => __( 'Updates', 'wrensafe' ),
 			'remote'           => __( 'Remote storage', 'wrensafe' ),
 			'direct-migration' => __( 'Direct Migration', 'wrensafe' ),
 			'woocommerce'      => __( 'WooCommerce Safe Mode', 'wrensafe' ),
@@ -120,7 +121,7 @@ class SettingsPage extends AbstractPage {
 		?>
 		<?php
 		$groups = array(
-			__( 'Backups', 'wrensafe' )           => array( 'general', 'backup', 'remote', 'cloud' ),
+			__( 'Backups', 'wrensafe' )           => array( 'general', 'backup', 'updates', 'remote', 'cloud' ),
 			__( 'Migration', 'wrensafe' )         => array( 'direct-migration', 'woocommerce' ),
 			__( 'Reporting', 'wrensafe' )         => array( 'notifications', 'reports' ),
 			__( 'Access & security', 'wrensafe' ) => array( 'security', 'team-access' ),
@@ -332,7 +333,7 @@ class SettingsPage extends AbstractPage {
 					<td>
 						<label>
 							<input type="checkbox" name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[delete_data_on_uninstall]" value="1" <?php checked( ! empty( $settings['delete_data_on_uninstall'] ) ); ?> />
-							<?php esc_html_e( 'Delete Wrensafe\'s data from the database when the plugin is deleted (settings, activity logs, job history, the backup list, schedules, rollback points, staging records and migration keys).', 'wrensafe' ); ?>
+							<?php esc_html_e( 'Delete Wrensafe\'s data when the plugin is deleted: settings, activity logs, job history, the backup list, schedules, rollback points and migration keys, the plugin copies Safe Updates saved, and the staging sites Wrensafe made (their folders and database tables).', 'wrensafe' ); ?>
 						</label>
 						<p class="description"><?php esc_html_e( 'Backup files are never deleted this way. Remove the backup folder (Settings → Backup) yourself if you no longer need them.', 'wrensafe' ); ?></p>
 					</td>
@@ -492,21 +493,17 @@ class SettingsPage extends AbstractPage {
 				</tr>
 
 				<?php
-				$field( 'ftp', 'host', __( 'Server', 'wrensafe' ), 'text', '', 'ftp.example.com' );
-				$field( 'ftp', 'port', __( 'Port', 'wrensafe' ), 'number' );
-				$field( 'ftp', 'username', __( 'Username', 'wrensafe' ) );
-				$field( 'ftp', 'password', __( 'Password', 'wrensafe' ), 'password' );
-				$field( 'ftp', 'folder', __( 'Folder', 'wrensafe' ), 'text', __( 'Inside the folder you log in to, unless it starts with / (a full path). Created if it doesn’t exist. Use a folder only for these backups.', 'wrensafe' ) );
-				$checkbox( 'ftp', 'ftps', __( 'Use TLS (FTPS)', 'wrensafe' ), __( 'Recommended: without TLS the password and the backup travel unencrypted. Turn it off only if your server doesn’t support it.', 'wrensafe' ) );
-				$checkbox( 'ftp', 'passive', __( 'Passive mode', 'wrensafe' ), __( 'Works behind most firewalls. Turn it off only if your FTP host asks you to.', 'wrensafe' ) );
-
-				$field( 's3', 'endpoint', __( 'Endpoint', 'wrensafe' ), 'url', __( 'The storage service’s S3 address, for example https://s3.us-west-004.backblazeb2.com, https://s3.wasabisys.com or https://ACCOUNT.r2.cloudflarestorage.com. For Amazon S3, use the endpoint of your bucket’s region from the list at docs.aws.amazon.com/general/latest/gr/s3.html.', 'wrensafe' ), 'https://s3.example.com' );
-				$field( 's3', 'region', __( 'Region', 'wrensafe' ), 'text', __( 'As shown by the service, for example us-east-1 or eu-central-003 (Cloudflare R2: auto).', 'wrensafe' ) );
-				$field( 's3', 'bucket', __( 'Bucket', 'wrensafe' ) );
-				$field( 's3', 'access_key', __( 'Access key', 'wrensafe' ) );
-				$field( 's3', 'secret_key', __( 'Secret key', 'wrensafe' ), 'password' );
-				$field( 's3', 'folder', __( 'Folder in the bucket', 'wrensafe' ), 'text', __( 'Optional. Backups are stored under this prefix.', 'wrensafe' ) );
-				$checkbox( 's3', 'path_style', __( 'Path-style addresses', 'wrensafe' ), __( 'Needed for MinIO and some other self-hosted services. Leave it off for Amazon S3, Backblaze B2, Wasabi and Cloudflare R2.', 'wrensafe' ) );
+				// The fields of every type (built-in or from an add-on), in
+				// rows that admin.js shows for the chosen type.
+				foreach ( \WPBP\Remote\RemoteStorage::registry() as $kind => $definition ) {
+					foreach ( $definition['fields'] as $key => $spec ) {
+						if ( 'checkbox' === $spec['type'] ) {
+							$checkbox( $kind, $key, $spec['label'], $spec['help'] );
+						} else {
+							$field( $kind, $key, $spec['label'], $spec['type'], $spec['help'], $spec['placeholder'] );
+						}
+					}
+				}
 				?>
 
 				<tr data-wpbp-remote="any">
@@ -552,10 +549,8 @@ class SettingsPage extends AbstractPage {
 	private function render_tab_backup(): void {
 		\WPBP\Admin\Onboarding::page_viewed( 'folder' );
 
-		$s        = (array) get_option( 'wpbp_backup_before_updates', array() );
 		$settings = Settings::get_all();
 		$name     = Settings::OPTION_NAME;
-		$type     = 'full' === ( $s['backup_type'] ?? '' ) ? 'full' : 'database'; // Not saved yet on a new or restored site.
 		$default  = \WPBP\Utils\FileSystem::default_storage_dir();
 		$chosen   = (string) ( $settings['backup_dir'] ?? '' );
 		$in_use   = \WPBP\Utils\FileSystem::storage_dir();
@@ -605,38 +600,10 @@ class SettingsPage extends AbstractPage {
 				</tr>
 			</table>
 
-			<h2><?php esc_html_e( 'Back up before updates', 'wrensafe' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Wrensafe makes a backup just before WordPress, a plugin or a theme updates, so you can roll back if an update breaks something.', 'wrensafe' ); ?></p>
-
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row"><?php esc_html_e( 'Automatic updates', 'wrensafe' ); ?></th>
-					<td>
-						<fieldset class="wpbp-checkbox-list">
-							<legend class="screen-reader-text"><?php esc_html_e( 'Back up before these automatic updates', 'wrensafe' ); ?></legend>
-							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][auto_core]" value="1" <?php checked( ! empty( $s['auto_core'] ) ); ?> /> <?php esc_html_e( 'WordPress core', 'wrensafe' ); ?></label>
-							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][auto_plugins]" value="1" <?php checked( ! empty( $s['auto_plugins'] ) ); ?> /> <?php esc_html_e( 'Plugins', 'wrensafe' ); ?></label>
-							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][auto_themes]" value="1" <?php checked( ! empty( $s['auto_themes'] ) ); ?> /> <?php esc_html_e( 'Themes', 'wrensafe' ); ?></label>
-						</fieldset>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><?php esc_html_e( 'Updates you start', 'wrensafe' ); ?></th>
-					<td>
-						<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][manual_updates]" value="1" <?php checked( ! empty( $s['manual_updates'] ) ); ?> /> <?php esc_html_e( 'Plugin, theme and WordPress updates you start from the dashboard', 'wrensafe' ); ?></label>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="wpbp-bbu-type"><?php esc_html_e( 'What to back up', 'wrensafe' ); ?></label></th>
-					<td>
-						<select id="wpbp-bbu-type" name="<?php echo esc_attr( $name ); ?>[bbu][backup_type]">
-							<option value="database" <?php selected( $type, 'database' ); ?>><?php esc_html_e( 'Database only (recommended)', 'wrensafe' ); ?></option>
-							<option value="full" <?php selected( $type, 'full' ); ?>><?php esc_html_e( 'Full website (database and files)', 'wrensafe' ); ?></option>
-						</select>
-						<p class="description"><?php esc_html_e( 'The backup runs before the update starts. A database backup takes seconds; a full backup of a large site can make the update take several minutes.', 'wrensafe' ); ?></p>
-					</td>
-				</tr>
-			</table>
+			<p class="description wpbp-settings-pointer">
+				<?php esc_html_e( 'Backups before updates are set under Updates.', 'wrensafe' ); ?>
+				<a href="<?php echo esc_url( self::page_url( self::MENU_SLUG, array( 'tab' => 'updates' ) ) ); ?>"><?php esc_html_e( 'Open Updates settings', 'wrensafe' ); ?></a>
+			</p>
 
 			<h2><?php esc_html_e( 'Checks', 'wrensafe' ); ?></h2>
 			<p class="description"><?php esc_html_e( 'The same check as Verify in the Backup Browser: the archive, its database files and every file’s checksum.', 'wrensafe' ); ?></p>
@@ -716,6 +683,139 @@ class SettingsPage extends AbstractPage {
 					<th scope="row"><?php esc_html_e( 'Database tables', 'wrensafe' ); ?></th>
 					<td>
 						<?php $this->render_table_exclusions( (array) ( $settings['excluded_tables'] ?? array() ) ); ?>
+					</td>
+				</tr>
+			</table>
+
+			<?php submit_button(); ?>
+		</form>
+		<?php
+	}
+
+	private function render_tab_updates(): void {
+		$s        = (array) get_option( 'wpbp_backup_before_updates', array() );
+		$settings = Settings::get_all();
+		$name     = Settings::OPTION_NAME;
+		$type     = 'full' === ( $s['backup_type'] ?? '' ) ? 'full' : 'database'; // Not saved yet on a new or restored site.
+		$modes    = \WPBP\Updates\SafeUpdates::modes();
+		$mode     = \WPBP\Updates\SafeUpdates::default_mode();
+		$order    = \WPBP\Updates\SafeUpdates::default_order();
+		$blocked  = \WPBP\Updates\SafeUpdates::blocked_reason();
+		?>
+		<form method="post" action="options.php" class="wpbp-card">
+			<?php settings_fields( Settings::OPTION_GROUP ); ?>
+			<input type="hidden" name="<?php echo esc_attr( $name ); ?>[_tab]" value="updates" />
+
+			<h2><?php esc_html_e( 'Safe Updates', 'wrensafe' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'When you update a plugin on the Plugins or Updates screen, Wrensafe asks how. Safe Update saves a copy of the plugin, checks your site after the update and puts the previous version back if the site shows an error.', 'wrensafe' ); ?>
+				<?php if ( '' === $blocked && current_user_can( 'update_plugins' ) ) : ?>
+					<a href="<?php echo esc_url( self::page_url( \WPBP\Updates\SafeUpdates::PAGE_SLUG ) ); ?>"><?php esc_html_e( 'Open Safe Updates', 'wrensafe' ); ?></a>
+				<?php endif; ?>
+			</p>
+
+			<?php if ( '' !== $blocked ) : ?>
+				<div class="notice notice-warning inline wpbp-notice"><p><?php echo esc_html( $blocked ); ?> <?php esc_html_e( 'The Safe Updates page isn’t available until then.', 'wrensafe' ); ?></p></div>
+			<?php elseif ( ! current_user_can( 'update_plugins' ) ) : ?>
+				<div class="notice notice-info inline wpbp-notice"><p><?php esc_html_e( 'Your account can’t update plugins, so the Safe Updates page isn’t available to you.', 'wrensafe' ); ?></p></div>
+			<?php endif; ?>
+
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Update window', 'wrensafe' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="<?php echo esc_attr( $name ); ?>[safe_updates_prompt]" value="1" <?php checked( ! empty( $settings['safe_updates_prompt'] ) ); ?> />
+							<?php esc_html_e( 'Ask how to update when I update a plugin', 'wrensafe' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'When this is off, the Plugins and Updates screens update the usual WordPress way. Safe Updates stay available under Wrensafe → Safe Updates.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Default choice', 'wrensafe' ); ?></th>
+					<td>
+						<fieldset class="wpbp-checkbox-list wpbp-radio-list">
+							<legend class="screen-reader-text"><?php esc_html_e( 'The way to update chosen by default', 'wrensafe' ); ?></legend>
+							<?php foreach ( $modes as $key => $item ) : ?>
+								<label>
+									<input type="radio" name="<?php echo esc_attr( $name ); ?>[safe_updates_mode]" value="<?php echo esc_attr( $key ); ?>" <?php checked( $mode, $key ); ?> />
+									<span><strong><?php echo esc_html( $item['label'] ); ?></strong> &mdash; <?php echo esc_html( $item['description'] ); ?></span>
+								</label>
+							<?php endforeach; ?>
+						</fieldset>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Several plugins', 'wrensafe' ); ?></th>
+					<td>
+						<fieldset class="wpbp-checkbox-list wpbp-radio-list">
+							<legend class="screen-reader-text"><?php esc_html_e( 'How several plugins are updated', 'wrensafe' ); ?></legend>
+							<label>
+								<input type="radio" name="<?php echo esc_attr( $name ); ?>[safe_updates_order]" value="one_by_one" <?php checked( $order, 'one_by_one' ); ?> />
+								<span><strong><?php esc_html_e( 'One by one', 'wrensafe' ); ?></strong> &mdash; <?php esc_html_e( 'Each plugin is updated and checked before the next one. Safest.', 'wrensafe' ); ?></span>
+							</label>
+							<label>
+								<input type="radio" name="<?php echo esc_attr( $name ); ?>[safe_updates_order]" value="all_at_once" <?php checked( $order, 'all_at_once' ); ?> />
+								<span><strong><?php esc_html_e( 'All at once', 'wrensafe' ); ?></strong> &mdash; <?php esc_html_e( 'Every plugin is updated, then the site is checked once. Faster.', 'wrensafe' ); ?></span>
+							</label>
+						</fieldset>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Cache', 'wrensafe' ); ?></th>
+					<td>
+						<label>
+							<input type="checkbox" name="<?php echo esc_attr( $name ); ?>[safe_updates_clear_cache]" value="1" <?php checked( ! empty( $settings['safe_updates_clear_cache'] ) ); ?> />
+							<?php esc_html_e( 'Clear the cache after updating', 'wrensafe' ); ?>
+						</label>
+						<p class="description"><?php esc_html_e( 'Empties the page cache of your caching plugin (WP Rocket, W3 Total Cache, LiteSpeed Cache, WP Super Cache and others) and WordPress’s object cache. You can change it for each update.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wpbp-su-keep-days"><?php esc_html_e( 'Saved copies', 'wrensafe' ); ?></label></th>
+					<td>
+						<?php
+						printf(
+							/* translators: %s: number input for days */
+							esc_html__( 'Keep the copies saved before updates for %s days', 'wrensafe' ),
+							'<input type="number" id="wpbp-su-keep-days" class="small-text" min="1" max="90" step="1" name="' . esc_attr( $name ) . '[safe_updates_keep_days]" value="' . esc_attr( (string) (int) ( $settings['safe_updates_keep_days'] ?? 14 ) ) . '" />'
+						);
+						?>
+						<p class="description"><?php esc_html_e( 'Until then, each update can be rolled back from the Safe Updates page.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+			</table>
+
+			<h2><?php esc_html_e( 'Back up before updates', 'wrensafe' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Wrensafe makes a backup just before WordPress, a plugin or a theme updates, so you can roll back if an update breaks something.', 'wrensafe' ); ?></p>
+
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Automatic updates', 'wrensafe' ); ?></th>
+					<td>
+						<fieldset class="wpbp-checkbox-list">
+							<legend class="screen-reader-text"><?php esc_html_e( 'Back up before these automatic updates', 'wrensafe' ); ?></legend>
+							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][auto_core]" value="1" <?php checked( ! empty( $s['auto_core'] ) ); ?> /> <?php esc_html_e( 'WordPress core', 'wrensafe' ); ?></label>
+							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][auto_plugins]" value="1" <?php checked( ! empty( $s['auto_plugins'] ) ); ?> /> <?php esc_html_e( 'Plugins', 'wrensafe' ); ?></label>
+							<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][auto_themes]" value="1" <?php checked( ! empty( $s['auto_themes'] ) ); ?> /> <?php esc_html_e( 'Themes', 'wrensafe' ); ?></label>
+						</fieldset>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Updates you start', 'wrensafe' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="<?php echo esc_attr( $name ); ?>[bbu][manual_updates]" value="1" <?php checked( ! empty( $s['manual_updates'] ) ); ?> /> <?php esc_html_e( 'Plugin, theme and WordPress updates you start from the dashboard', 'wrensafe' ); ?></label>
+						<p class="description"><?php esc_html_e( 'A Safe Updates run makes one backup before its first plugin.', 'wrensafe' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wpbp-bbu-type"><?php esc_html_e( 'What to back up', 'wrensafe' ); ?></label></th>
+					<td>
+						<select id="wpbp-bbu-type" name="<?php echo esc_attr( $name ); ?>[bbu][backup_type]">
+							<option value="database" <?php selected( $type, 'database' ); ?>><?php esc_html_e( 'Database only (recommended)', 'wrensafe' ); ?></option>
+							<option value="full" <?php selected( $type, 'full' ); ?>><?php esc_html_e( 'Full website (database and files)', 'wrensafe' ); ?></option>
+						</select>
+						<p class="description"><?php esc_html_e( 'The backup runs before the update starts. A database backup takes seconds; a full backup of a large site can make the update take several minutes.', 'wrensafe' ); ?></p>
 					</td>
 				</tr>
 			</table>

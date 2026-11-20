@@ -184,7 +184,7 @@ class BackupBrowserAjax {
 		// recorded when the backup was written — still a genuine integrity
 		// signal, just not one that can name a specific corrupted entry.
 		if ( ! $result['valid'] && ! empty( $result['requires_password'] ) ) {
-			$is_valid = $checker->verify( $backup['file_path'], $backup['checksum'] );
+			$is_valid = $checker->verify( $backup['file_path'], \WPBP\Backup\VerifyManager::recorded_checksum( $backup ) );
 
 			$result = array(
 				'valid'   => $is_valid,

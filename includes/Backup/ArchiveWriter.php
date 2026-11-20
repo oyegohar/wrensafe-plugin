@@ -472,7 +472,14 @@ class ArchiveWriter {
 				$parts = explode( "\t", rtrim( $line, "\n" ), 2 );
 
 				if ( 2 === count( $parts ) && '' !== $parts[0] ) {
-					$checksums['files'][ $parts[0] ] = $parts[1];
+					// A sliced checksum (a huge file packed across requests on
+					// PHP before 8.1) goes in its own map, which versions before
+					// 1.2.1 don't read (they'd report it as a mismatch).
+					if ( SliceHash::is_sliced( $parts[1] ) ) {
+						$checksums['files_sliced'][ $parts[0] ] = $parts[1];
+					} else {
+						$checksums['files'][ $parts[0] ] = $parts[1];
+					}
 				}
 
 				$line = fgets( $handle );
@@ -524,6 +531,11 @@ class ArchiveWriter {
 	/**
 	 * Insert the completed backup's database record. Runs after the final
 	 * whole-file checksum has been verified by the chunked checksum phase.
+	 *
+	 * A sliced checksum (see SliceHash) goes in its own column and the
+	 * classic one stays empty: Wrensafe 1.2.0 and older (after a downgrade)
+	 * then skip the whole-file check of that backup instead of reporting a
+	 * mismatch and marking it corrupted.
 	 */
 	public function create_record( BackupJob $job, array $payload, string $checksum ): int {
 		clearstatcache( true, $payload['aw_dest'] );
@@ -540,7 +552,8 @@ class ArchiveWriter {
 				'source_url'         => home_url(),
 				'wp_version'         => get_bloginfo( 'version' ),
 				'php_version'        => PHP_VERSION,
-				'checksum'           => $checksum,
+				'checksum'           => SliceHash::is_sliced( $checksum ) ? '' : $checksum,
+				'sliced_checksum'    => SliceHash::is_sliced( $checksum ) ? $checksum : '',
 				'note'               => (string) ( $payload['note'] ?? '' ),
 				'tags'               => (string) ( $payload['tag'] ?? '' ),
 				'destination'        => 'local',

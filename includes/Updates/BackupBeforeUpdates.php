@@ -24,6 +24,17 @@ class BackupBeforeUpdates {
 	private const LOCK_TRANSIENT = 'wpbp_pre_update_backup_running';
 	private const MAX_STEPS      = 8000;
 
+	/** True while Safe Updates updates plugins: the run makes its own backup first. */
+	private static bool $paused = false;
+
+	/**
+	 * Skip the backup per plugin while a Safe Updates run updates plugins
+	 * (the run backs up once, before the first update).
+	 */
+	public static function pause( bool $paused ): void {
+		self::$paused = $paused;
+	}
+
 	public function register_hooks(): void {
 		if ( ! FeatureManager::is_enabled( 'backup_before_updates' ) ) {
 			return;
@@ -66,7 +77,7 @@ class BackupBeforeUpdates {
 	public function handle_manual_update( $response, array $hook_extra ) {
 		$settings = get_option( 'wpbp_backup_before_updates', array() );
 
-		if ( empty( $settings['manual_updates'] ) ) {
+		if ( self::$paused || empty( $settings['manual_updates'] ) ) {
 			return $response;
 		}
 

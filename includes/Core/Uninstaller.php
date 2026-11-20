@@ -96,11 +96,18 @@ class Uninstaller {
 		self::delete_work_folders( (string) ( $settings['backup_dir'] ?? '' ) );
 	}
 
+	/**
+	 * The temporary must-use guards an interrupted restore or Safe Updates
+	 * run may have left behind. Always removed: without Wrensafe they would
+	 * keep filtering the site's plugins and theme.
+	 */
 	private static function remove_restore_guard(): void {
-		$guard = trailingslashit( WPMU_PLUGIN_DIR ) . self::GUARD_FILE_NAME;
+		foreach ( array( self::GUARD_FILE_NAME, 'wpbp-safe-update-guard.php' ) as $file ) {
+			$guard = trailingslashit( WPMU_PLUGIN_DIR ) . $file;
 
-		if ( file_exists( $guard ) ) {
-			wp_delete_file( $guard );
+			if ( file_exists( $guard ) ) {
+				wp_delete_file( $guard );
+			}
 		}
 	}
 
@@ -165,6 +172,8 @@ class Uninstaller {
 			}
 		}
 
+		wp_unschedule_hook( 'wpbp_safe_update_continue' );
+
 		wp_cache_flush();
 	}
 
@@ -214,7 +223,9 @@ class Uninstaller {
 	 * Remove the work folders in Wrensafe's storage folders (the default one
 	 * and the one chosen in Settings → Backup): tmp/ (restore and backup
 	 * scratch files, database dumps among them), uploads/ (unfinished
-	 * uploads) and logs/. backups/ is kept.
+	 * uploads), logs/ and safe-updates/ (the plugin copies Safe Updates saved
+	 * before updates, and the folders add-ons keep there with a run). They
+	 * aren't backups: backups/ is kept.
 	 */
 	private static function delete_work_folders( string $custom_dir ): void {
 		$bases = array( trailingslashit( wp_normalize_path( WP_CONTENT_DIR ) ) . self::STORAGE_DIR_NAME );
@@ -229,7 +240,7 @@ class Uninstaller {
 		}
 
 		foreach ( array_unique( $bases ) as $base ) {
-			foreach ( array( 'tmp', 'uploads', 'logs' ) as $folder ) {
+			foreach ( array( 'tmp', 'uploads', 'logs', 'safe-updates' ) as $folder ) {
 				self::delete_folder( $base . '/' . $folder );
 			}
 		}

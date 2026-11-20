@@ -31,6 +31,13 @@ class StagingPage extends AbstractPage {
 	protected function render_content(): void {
 		$sites          = StagingSitesRepository::list_all();
 		$layout_problem = \WPBP\Staging\StagingCreator::layout_problem();
+
+		// Opening the page brings each staging site's password protection up
+		// to date (the guard of this version; .htaccess-only sites of earlier
+		// versions move to it).
+		foreach ( $sites as $site ) {
+			( new \WPBP\Staging\StagingProtection() )->upgrade( (array) $site );
+		}
 		?>
 		<?php if ( empty( $sites ) ) : ?>
 			<div class="wpbp-card">
@@ -52,10 +59,10 @@ class StagingPage extends AbstractPage {
 						<th scope="row"><?php esc_html_e( 'Password protection', 'wrensafe' ); ?></th>
 						<td>
 							<label><input type="checkbox" id="wpbp-stg-password-protect" /> <?php esc_html_e( 'Require a login to view the staging site', 'wrensafe' ); ?></label>
-							<p class="wpbp-limit-note"><?php esc_html_e( 'Uses HTTP Basic Auth via .htaccess (Apache/LiteSpeed). Nginx hosts need a server-level rule instead.', 'wrensafe' ); ?></p>
+							<p class="wpbp-limit-note"><?php esc_html_e( 'Works on every web server (Apache, LiteSpeed, nginx): everyone, administrators included, sees a password form before any page of the staging site and enters the password once a day. WP-CLI and the site’s own scheduled tasks get through, and page caching is turned off on the staging site. Files the web server sends directly, such as images in the uploads folder, are not covered.', 'wrensafe' ); ?></p>
 							<div id="wpbp-stg-password-fields" hidden>
 								<input type="text" id="wpbp-stg-username" placeholder="<?php esc_attr_e( 'Username', 'wrensafe' ); ?>" /><br />
-								<input type="text" id="wpbp-stg-password" placeholder="<?php esc_attr_e( 'Password', 'wrensafe' ); ?>" />
+								<input type="text" id="wpbp-stg-password" placeholder="<?php esc_attr_e( 'Password (at least 8 characters)', 'wrensafe' ); ?>" minlength="8" />
 							</div>
 						</td>
 					</tr>

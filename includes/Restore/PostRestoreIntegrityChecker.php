@@ -241,8 +241,7 @@ class PostRestoreIntegrityChecker {
 			return array();
 		}
 
-		$checksums = ( new ArchiveReader( $archive_path ) )->read_json( 'checksums.json' );
-		$files     = is_array( $checksums['files'] ?? null ) ? $checksums['files'] : array();
+		$files = \WPBP\Backup\IntegrityChecker::file_checksums( ( new ArchiveReader( $archive_path ) )->read_json( 'checksums.json' ) );
 
 		$by_slug = array();
 

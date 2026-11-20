@@ -355,15 +355,17 @@
 
 		$( '#wpbp-backup-dir-check' ).on( 'click', checkDir );
 
-		// Settings → Remote storage: show the fields of the chosen storage,
-		// and test the connection with what's in the form.
+		// Settings → Remote storage: show the fields of the chosen storage
+		// (rows marked data-wpbp-remote="{type}", for any registered type, or
+		// "any" for every type), and test the connection with what's in the form.
 		var $remoteType = $( '#wpbp-remote-type' );
 
 		function showRemoteFields() {
-			var type = $remoteType.val();
+			var type = String( $remoteType.val() || '' );
 
 			$( '#wpbp-remote-form [data-wpbp-remote]' ).each( function () {
-				var kind = $( this ).data( 'wpbp-remote' );
+				// The attribute as written: .data() would turn a key like "123" into a number.
+				var kind = String( $( this ).attr( 'data-wpbp-remote' ) );
 				$( this ).prop( 'hidden', 'any' === kind ? ! type : kind !== type );
 			} );
 		}

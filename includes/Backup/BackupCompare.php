@@ -71,8 +71,8 @@ class BackupCompare {
 
 		// File diff — checksums.json is {"files": {entry_name: checksum}, "database": ""},
 		// so the per-file map (not the "files"/"database" top-level keys) is what's compared.
-		$files_a = is_array( $checksums_a['files'] ?? null ) ? $checksums_a['files'] : array();
-		$files_b = is_array( $checksums_b['files'] ?? null ) ? $checksums_b['files'] : array();
+		$files_a = IntegrityChecker::file_checksums( $checksums_a );
+		$files_b = IntegrityChecker::file_checksums( $checksums_b );
 
 		$keys_a = array_keys( $files_a );
 		$keys_b = array_keys( $files_b );
@@ -84,6 +84,9 @@ class BackupCompare {
 		$modified        = array();
 		$unchanged_count = 0;
 
+		// A file recorded in two formats (a SHA-256, or a sliced checksum when
+		// PHP before 8.1 packed it across requests) can't be compared and is
+		// listed as modified.
 		foreach ( $common as $file ) {
 			if ( $files_a[ $file ] !== $files_b[ $file ] ) {
 				$modified[] = $file;

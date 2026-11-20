@@ -208,6 +208,93 @@ class StagingCreator {
 		}
 	}
 
+	/**
+	 * Rename the keys WordPress looks up by table prefix — the roles option
+	 * ({prefix}user_roles) and the users' {prefix}capabilities,
+	 * {prefix}user_level and other {prefix}… meta keys — from $from to $to,
+	 * in the options and usermeta tables that start with $tables_prefix.
+	 *
+	 * A copy keeps the original's keys, so without this nobody has a role
+	 * on the staging site (WordPress: "Sorry, you are not allowed…"), and a
+	 * push would bring the staging keys back to the live site.
+	 */
+	public function rename_prefixed_keys( string $tables_prefix, string $from, string $to ): void {
+		global $wpdb;
+
+		if ( '' === $from || '' === $to || $from === $to ) {
+			return;
+		}
+
+		$options  = $tables_prefix . 'options';
+		$usermeta = $tables_prefix . 'usermeta';
+
+		if ( $this->table_exists( $options ) && (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE option_name = %s', $options, $from . 'user_roles' ) ) > 0 ) {
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name = %s', $options, $to . 'user_roles' ) );
+			$wpdb->query( $wpdb->prepare( 'UPDATE %i SET option_name = %s WHERE option_name = %s', $options, $to . 'user_roles', $from . 'user_roles' ) );
+		}
+
+		if ( ! $this->table_exists( $usermeta ) ) {
+			return;
+		}
+
+		// When the new prefix extends the old one (wp_ → wp_stg_…_), keys that
+		// already have the new prefix stay as they are.
+		$from_like = $wpdb->esc_like( $from ) . '%';
+		$keep_like = 0 === strpos( $to, $from ) ? $wpdb->esc_like( $to ) . '%' : '';
+
+		// Drop rows the rename would duplicate (same user, same new key).
+		$wpdb->query(
+			$wpdb->prepare(
+				'DELETE dest FROM %i dest JOIN %i src ON src.user_id = dest.user_id AND dest.meta_key = CONCAT( %s, SUBSTRING( src.meta_key, %d ) ) WHERE src.meta_key LIKE %s AND ( %s = %s OR src.meta_key NOT LIKE %s )',
+				$usermeta,
+				$usermeta,
+				$to,
+				strlen( $from ) + 1,
+				$from_like,
+				$keep_like,
+				'',
+				$keep_like
+			)
+		);
+		$wpdb->query(
+			$wpdb->prepare(
+				'UPDATE %i SET meta_key = CONCAT( %s, SUBSTRING( meta_key, %d ) ) WHERE meta_key LIKE %s AND ( %s = %s OR meta_key NOT LIKE %s )',
+				$usermeta,
+				$to,
+				strlen( $from ) + 1,
+				$from_like,
+				$keep_like,
+				'',
+				$keep_like
+			)
+		);
+	}
+
+	/**
+	 * A staging site made before 1.2.1 still has the live site's keys:
+	 * rename them once (when its roles option still has the live prefix).
+	 */
+	public function repair_prefixed_keys( string $staging_prefix, string $live_prefix ): void {
+		global $wpdb;
+
+		$options = $staging_prefix . 'options';
+
+		if ( ! $this->table_exists( $options )
+			|| (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE option_name = %s', $options, $staging_prefix . 'user_roles' ) ) > 0
+			|| 0 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE option_name = %s', $options, $live_prefix . 'user_roles' ) ) ) {
+			return;
+		}
+
+		$this->rename_prefixed_keys( $staging_prefix, $live_prefix, $staging_prefix );
+	}
+
+	private function table_exists( string $table ): bool {
+		global $wpdb;
+
+		// esc_like(): "_" in a table name is a LIKE wildcard otherwise.
+		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) === $table;
+	}
+
 	private function truncate_if_exists( string $table ): void {
 		global $wpdb;
 

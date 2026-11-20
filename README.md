@@ -6,16 +6,20 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 
 **Free · GPL v2 or later · WordPress 6.2+ · PHP 7.4+**
 
-> Wrensafe is waiting for approval in the WordPress.org plugin directory. Until then, download it from this page.
+Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wrensafe](https://wordpress.org/plugins/wrensafe/)**. This repository has the same code for every release.
 
 ## Download and install
+
+**From WordPress (recommended):** go to **Plugins → Add New Plugin**, search for **Wrensafe**, click **Install Now**, then **Activate**. Updates then arrive in your dashboard like any other plugin.
+
+**From this page:**
 
 1. Download **`wrensafe-<version>.zip`** from the **Assets** of the [latest release](https://github.com/oyegohar/wrensafe-plugin/releases/latest).
    Don't use **Source code (zip)** or the green **Code → Download ZIP** button: those are GitHub's copies of the repository, not the plugin package, and WordPress won't install them.
 2. In WordPress go to **Plugins → Add New Plugin → Upload Plugin**, choose the zip, click **Install Now**, then **Activate**.
 3. Open **Wrensafe** in the admin menu and click **Create backup**.
 
-**Updating:** upload the newer `wrensafe-<version>.zip` the same way. WordPress says the plugin is already installed; choose **Replace current with uploaded**. Your settings and backups stay. Once Wrensafe is on WordPress.org, updates arrive in your dashboard automatically.
+**Updating a zip install:** upload the newer `wrensafe-<version>.zip` the same way and choose **Replace current with uploaded**. Your settings and backups stay. After that, WordPress offers new versions from WordPress.org automatically.
 
 **Installed twice?** An older "Source code" download installed Wrensafe in a folder such as `wrensafe-plugin-1.1.0`, so later uploads were added as a second plugin. Fix it once: upload `wrensafe-<version>.zip` from the Assets, activate it, then deactivate and delete the other Wrensafe copies on the Plugins screen. Settings and backups are kept (Wrensafe 1.1.2 and later never remove shared data while another copy is installed; for older copies, check that **Settings → Advanced → Uninstall** is off before deleting them).
 
@@ -39,7 +43,7 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 <td><img src=".wordpress-org/screenshot-8.png" alt="Migration Assistant"><br><sub><b>Migration Assistant</b>: readiness score, recommended method, next steps.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-9.png" alt="Settings"><br><sub><b>Settings</b> grouped by task: backup folder, exclusions, notifications.</sub></td>
+<td><img src=".wordpress-org/screenshot-9.png" alt="Settings"><br><sub><b>Settings</b> grouped by task: backup folder, exclusions, updates, notifications.</sub></td>
 <td><img src=".wordpress-org/screenshot-10.png" alt="Restore backups from other plugins"><br><sub><b>Restore backups made by 10 other plugins</b>, just as they saved them.</sub></td>
 </tr>
 <tr>
@@ -48,6 +52,10 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 </tr>
 <tr>
 <td><img src=".wordpress-org/screenshot-13.png" alt="Dashboard widget"><br><sub><b>Dashboard widget</b>: newest backup, next run, off-site copy and Back up now.</sub></td>
+<td><img src=".wordpress-org/screenshot-14.png" alt="Quick or Safe Update"><br><sub><b>Quick or Safe Update</b>: Safe Update checks your site and rolls a breaking update back.</sub></td>
+</tr>
+<tr>
+<td><img src=".wordpress-org/screenshot-15.png" alt="Safe Updates"><br><sub><b>Safe Updates</b>: update several plugins, follow the progress, roll back later.</sub></td>
 <td></td>
 </tr>
 </table>
@@ -77,11 +85,16 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 - WooCommerce Safe Mode keeps new orders, customers and stock.
 - Restore backups made by **All-in-One WP Migration, UpdraftPlus, Duplicator, WPvivid, BackWPup, Backup Migration, Total Upkeep, Solid Backups, WP Migrate and Jetpack VaultPress Backup**, or a plain `.sql` / `.zip` / `.tar`.
 
+### Update safely
+- When you update a plugin, choose **Quick Update** (WordPress's standard update) or **Safe Update**: Wrensafe saves a copy, updates, checks the home page and admin area, and puts the previous version back if the update causes a fatal error, a server error or an empty page. You can turn the question off.
+- Update several plugins one by one or all at once, in the background; roll an update back later from the saved copy (kept 14 days by default).
+- Optionally clear the page cache and object cache after updating.
+
 ### Migrate
 - Move a site to a new domain or server; URLs and paths are rewritten safely, including serialized and page-builder data.
 - Direct Migration: send a backup straight to another site with a one-time key.
 - Migration Assistant: readiness score, server checks, recommended method and a checklist.
-- Staging: a private copy with its own tables and keys, optional password protection, push to live.
+- Staging: a private copy with its own tables and keys, optional password protection that works on every web server, push to live.
 - Search & Replace with a dry run, safe for serialized and JSON data.
 
 ### Stay informed
@@ -95,7 +108,7 @@ Back up, restore and migrate WordPress with checks at every step. Nothing on you
 
 ## Privacy
 
-Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP/FTPS or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, or Direct Migration to another site.
+Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP/FTPS or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, Direct Migration to another site, or a plugin update (through WordPress's own updater and update check; the site check after an update only loads your own site).
 
 ## Found a problem?
 

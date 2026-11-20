@@ -26,6 +26,7 @@ use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
 use WPBP\Utils\Paths;
+use WPBP\Utils\SharedDatabase;
 use WPBP\Utils\Str;
 use WPBP\WooCommerce\CheckoutMaintenance;
 use WPBP\WooCommerce\OrderSync;
@@ -177,7 +178,8 @@ class RestoreManager {
 	 * that starts with this one (wp_ and wp_shop_, or a staging copy's
 	 * wp_stg_…_), and run a restore of its own. Its tables match the pattern
 	 * too, so a table is left alone when it starts with such a prefix (one
-	 * with both an options and a posts table that isn't this site's).
+	 * with both an options and a posts table that isn't this site's, see
+	 * SharedDatabase — the same rule the backup's table list uses).
 	 *
 	 * @return string[]
 	 */
@@ -185,38 +187,18 @@ class RestoreManager {
 		global $wpdb;
 
 		$prefix = $wpdb->prefix;
-		$all    = (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $prefix ) . '%' ) );
-		$index  = array_flip( $all );
-		$others = array();
+		$all    = array_map( 'strval', (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $prefix ) . '%' ) ) );
+		$others = SharedDatabase::other_install_prefixes( $all, $prefix, SharedDatabase::subsite_base() );
+		$found  = array();
 
 		foreach ( $all as $table ) {
-			$table = (string) $table;
-
-			if ( Str::ends_with( $table, 'options' ) && strlen( $table ) > strlen( $prefix . 'options' ) ) {
-				$other = substr( $table, 0, -strlen( 'options' ) );
-
-				if ( isset( $index[ $other . 'posts' ] ) ) {
-					$others[] = $other;
-				}
-			}
-		}
-
-		$found = array();
-
-		foreach ( $all as $table ) {
-			$table = (string) $table;
-
 			if ( ! Str::ends_with( $table, self::TEMP_TABLE_SUFFIX ) && ! Str::ends_with( $table, self::OLD_TABLE_SUFFIX ) ) {
 				continue;
 			}
 
-			foreach ( $others as $other ) {
-				if ( Str::starts_with( $table, $other ) ) {
-					continue 2;
-				}
+			if ( ! SharedDatabase::belongs_to_other( $table, $others ) ) {
+				$found[] = $table;
 			}
-
-			$found[] = $table;
 		}
 
 		return $found;
@@ -1102,6 +1084,8 @@ class RestoreManager {
 		$is_selective = 'selected_tables' === ( $payload['restore_mode'] ?? 'full' );
 		$table_filter = $is_selective ? array_flip( (array) ( $payload['selected_tables'] ?? array() ) ) : null;
 		$excluded     = ! empty( $payload['woo_safe_mode'] ) ? array_flip( WooSafeMode::get_protected_tables() ) : array();
+		$others       = $this->other_install_prefixes( $db_manifest, $dest_prefix );
+		$skipped      = array();
 
 		$tables = array();
 
@@ -1143,6 +1127,13 @@ class RestoreManager {
 				continue;
 			}
 
+			// Another WordPress site's table (a backup made before 1.2.1 could
+			// include one): restoring it would overwrite that site.
+			if ( SharedDatabase::belongs_to_other( $dest_table, $others ) ) {
+				$skipped[] = $dest_table;
+				continue;
+			}
+
 			$tables[] = array(
 				'source_table' => $source_table,
 				'dest_table'   => $dest_table,
@@ -1152,7 +1143,45 @@ class RestoreManager {
 			);
 		}
 
+		if ( $skipped ) {
+			Logger::warning( 'restore_tables_of_other_site_skipped: ' . count( $skipped ) . ' tables belong to another WordPress site in this database (table prefix ' . implode( ', ', $others ) . ') and were not restored: ' . implode( ', ', array_slice( $skipped, 0, 20 ) ) . ( count( $skipped ) > 20 ? ', …' : '' ) . '.', array(), $job_id );
+		}
+
 		return $tables;
+	}
+
+	/**
+	 * The table prefixes of other WordPress sites a restore must leave
+	 * alone (see SharedDatabase): those in this database, and those the
+	 * backup itself holds tables of (a backup made before 1.2.1 took in
+	 * every table that started with its site's prefix).
+	 *
+	 * @return string[]
+	 */
+	private function other_install_prefixes( array $db_manifest, string $dest_prefix ): array {
+		global $wpdb;
+
+		$existing = array_map( 'strval', (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $dest_prefix ) . '%' ) ) );
+		$incoming = array();
+
+		foreach ( $db_manifest as $entry ) {
+			$normalized = is_array( $entry ) ? (string) ( $entry['normalized_table'] ?? $entry['source_table'] ?? '' ) : '';
+
+			if ( '' !== $normalized ) {
+				$incoming[] = $dest_prefix . $normalized;
+			}
+		}
+
+		$base = SharedDatabase::subsite_base();
+
+		return array_values(
+			array_unique(
+				array_merge(
+					SharedDatabase::other_install_prefixes( $existing, $dest_prefix, $base ),
+					SharedDatabase::other_install_prefixes( $incoming, $dest_prefix, $base )
+				)
+			)
+		);
 	}
 
 	/** A table name of letters, digits, "_", "$" and "-", at most 64 bytes. */

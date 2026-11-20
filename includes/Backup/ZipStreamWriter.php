@@ -10,11 +10,19 @@
  *
  * This writer only ever appends to the archive and keeps the central
  * directory in a sidecar file until finish(). Each entry is streamed in
- * 1 MB slices, so memory stays flat, and on PHP 8.1+ (serializable
- * HashContext) a single huge file can be paused at a request deadline and
- * resumed in the next request. Compressed entries survive the pause because
- * every pause ends on a deflate SYNC_FLUSH (byte-aligned, no back-references
- * across it), so a fresh deflate context can continue the same entry.
+ * 1 MB slices, so memory stays flat, and a single huge file can be paused
+ * at a request deadline and resumed in the next request. Compressed entries
+ * survive the pause because every pause ends on a deflate SYNC_FLUSH
+ * (byte-aligned, no back-references across it), so a fresh deflate context
+ * can continue the same entry.
+ *
+ * The CRC-32 and SHA-256 of a paused entry are carried over: on PHP 8.1+ as
+ * saved hash states (serializable HashContext). Older PHP can't save those,
+ * so there each request's CRC-32 is combined with the earlier part's
+ * (crc32_combine(), the zlib algorithm) and the entry's checksum becomes a
+ * sliced one (see SliceHash), which pauses at 8 MB boundaries. A file that
+ * can still be finished shortly after the deadline is finished instead, so
+ * it keeps the classic SHA-256 that older versions of Wrensafe check.
  *
  * The output is a standard ZIP (ZIP64 when sizes, offsets or entry counts
  * need it), read back by ArchiveReader through ZipArchive like before.
@@ -155,12 +163,12 @@ class ZipStreamWriter {
 	}
 
 	/**
-	 * Whether this PHP build can pause a single file mid-way (needs a
-	 * serializable HashContext, PHP 8.1+). Older builds finish each file
-	 * in the request that started it.
+	 * Whether a single file can be paused mid-way. Always, since 1.2.1: PHP
+	 * 8.1+ saves the hash states, older PHP combines CRC-32s and records a
+	 * sliced checksum (see the class description).
 	 */
 	public static function can_pause_mid_file(): bool {
-		return PHP_VERSION_ID >= 80100;
+		return true;
 	}
 
 	/** @return array<string,mixed> The state to persist for the next request. */
@@ -176,9 +184,11 @@ class ZipStreamWriter {
 	/**
 	 * Add (or continue adding) a file.
 	 *
-	 * Returns the SHA-256 of the file's contents once the entry is complete,
-	 * or null when the deadline arrived first — the partial entry is kept in
-	 * the state and the next call with the same entry name continues it.
+	 * Returns the checksum of the file's contents once the entry is complete
+	 * (its SHA-256, or a sliced checksum for a file paused mid-way on PHP
+	 * before 8.1, see SliceHash), or null when the deadline arrived first —
+	 * the partial entry is kept in the state and the next call with the same
+	 * entry name continues it.
 	 *
 	 * @param float|null $deadline microtime(true) value to pause at, or null to never pause.
 	 */
@@ -204,15 +214,43 @@ class ZipStreamWriter {
 		}
 
 		if ( ! is_array( $pending ) ) {
-			$size    = (int) filesize( $source_path );
-			$mtime   = (int) filemtime( $source_path );
-			$pending = $this->begin_entry( $entry_name, $size, $mtime, $this->choose_method( $entry_name, $size ) );
+			$size            = (int) filesize( $source_path );
+			$mtime           = (int) filemtime( $source_path );
+			$pending         = $this->begin_entry( $entry_name, $size, $mtime, $this->choose_method( $entry_name, $size ) );
+			$pending['size'] = $size;
+			$pending['mode'] = SliceHash::can_save_hash_state() ? 'context' : 'combine';
 		} elseif ( $pending['read'] > 0 ) {
 			fseek( $source, (int) $pending['read'] );
 		}
 
-		$crc     = $this->restore_hash( $pending['crc'], 'crc32b' );
-		$sha     = $this->restore_hash( $pending['sha'], 'sha256' );
+		// An entry paused by an earlier version kept saved hash states.
+		$mode = (string) ( $pending['mode'] ?? 'context' );
+		$size = (int) ( $pending['size'] ?? filesize( $source_path ) );
+
+		$started    = microtime( true );
+		$first_byte = (int) $pending['read'];
+
+		if ( 'combine' === $mode ) {
+			// CRC-32 of this request's part, combined with the earlier part's.
+			$crc = hash_init( 'crc32b' );
+			// The classic SHA-256 only while the file is in its first request.
+			$sha    = 0 === $first_byte ? hash_init( 'sha256' ) : null;
+			$slices = null;
+
+			if ( $size > SliceHash::SLICE_BYTES ) {
+				$slices = 0 === $first_byte ? new SliceHash() : SliceHash::resume( (array) ( $pending['slices'] ?? array() ) );
+			}
+
+			if ( null === $sha && ( null === $slices || $slices->length() !== $first_byte ) ) {
+				fclose( $source );
+				throw new \RuntimeException( esc_html__( 'The backup archive couldn’t be continued: the saved progress of a large file is unreadable. Start the backup again.', 'wrensafe' ) );
+			}
+		} else {
+			$crc    = $this->restore_hash( (string) $pending['crc'], 'crc32b' );
+			$sha    = $this->restore_hash( (string) $pending['sha'], 'sha256' );
+			$slices = null;
+		}
+
 		$deflate = self::METHOD_DEFLATE === $pending['method'] ? deflate_init( ZLIB_ENCODING_RAW, array( 'level' => 6 ) ) : null;
 
 		$this->open();
@@ -241,10 +279,18 @@ class ZipStreamWriter {
 			}
 
 			hash_update( $crc, $slice );
-			hash_update( $sha, $slice );
+
+			if ( null !== $sha ) {
+				hash_update( $sha, $slice );
+			}
+
+			if ( null !== $slices ) {
+				$slices->update( $slice );
+			}
+
 			$pending['read'] += strlen( $slice );
 
-			$pause = null !== $deadline && microtime( true ) >= $deadline && self::can_pause_mid_file() && ! feof( $source );
+			$pause = null !== $deadline && microtime( true ) >= $deadline && ! feof( $source ) && $this->may_pause( $mode, $slices, $size - (int) $pending['read'], (int) $pending['read'] - $first_byte, $started, $deadline );
 
 			// The pause point must be flushed together with the last slice:
 			// deflate_add() ignores a flush request that has no input.
@@ -264,10 +310,16 @@ class ZipStreamWriter {
 			// The SYNC_FLUSH above left the compressed run byte-aligned with
 			// no back-references across it, so the next request's fresh
 			// deflate context can append to the same entry.
-			// Hex: the serialized hash state holds raw block bytes, and the job
-			// payload it is stored in is JSON.
-			$pending['crc']         = bin2hex( serialize( $crc ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- HashContext state, read back with allowed_classes limited to HashContext.
-			$pending['sha']         = bin2hex( serialize( $sha ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- see above.
+			if ( 'combine' === $mode ) {
+				$pending['crc_value'] = self::crc32_combine( (int) ( $pending['crc_value'] ?? 0 ), (int) hexdec( hash_final( $crc ) ), (int) $pending['read'] - $first_byte );
+				$pending['slices']    = $slices->state();
+			} else {
+				// Hex: the serialized hash state holds raw block bytes, and the job
+				// payload it is stored in is JSON.
+				$pending['crc'] = bin2hex( serialize( $crc ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- HashContext state, read back with allowed_classes limited to HashContext.
+				$pending['sha'] = bin2hex( serialize( $sha ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- see above.
+			}
+
 			$this->state['pending'] = $pending;
 			$this->flush_handle();
 
@@ -281,9 +333,113 @@ class ZipStreamWriter {
 		}
 
 		$crc_value = (int) hexdec( hash_final( $crc ) );
+
+		if ( 'combine' === $mode ) {
+			$crc_value = self::crc32_combine( (int) ( $pending['crc_value'] ?? 0 ), $crc_value, (int) $pending['read'] - $first_byte );
+		}
+
 		$this->complete_entry( $pending, $crc_value );
 
-		return hash_final( $sha );
+		return null !== $sha ? hash_final( $sha ) : $slices->result();
+	}
+
+	/**
+	 * Past the deadline, whether the file in progress may stop here. With
+	 * saved hash states (PHP 8.1+) anywhere. Otherwise only at a slice
+	 * boundary of its sliced checksum, and, while the file is still in its
+	 * first request, only when it can't be finished within the grace period
+	 * (finishing it keeps the classic SHA-256 that older versions check).
+	 */
+	private function may_pause( string $mode, ?SliceHash $slices, int $remaining, int $done, float $started, float $deadline ): bool {
+		if ( 'combine' !== $mode ) {
+			return true;
+		}
+
+		if ( null === $slices || ! $slices->at_boundary() ) {
+			return false;
+		}
+
+		return $slices->length() > $done || SliceHash::too_long_to_finish( $remaining, $done, $started, $deadline );
+	}
+
+	/**
+	 * The CRC-32 of two parts of data from the CRC-32 of each and the length
+	 * of the second: zlib's crc32_combine() (GF(2) matrix method), which PHP
+	 * doesn't provide. Lets a file's CRC be carried across requests on PHP
+	 * versions that can't save a hash state.
+	 */
+	public static function crc32_combine( int $crc1, int $crc2, int $len2 ): int {
+		$crc1 &= self::MAX_32;
+
+		if ( $len2 <= 0 ) {
+			return $crc1;
+		}
+
+		$odd = array( 0xEDB88320 ); // The CRC-32 polynomial.
+		$row = 1;
+
+		for ( $n = 1; $n < 32; $n++ ) {
+			$odd[ $n ] = $row;
+			$row     <<= 1;
+		}
+
+		$even = self::gf2_matrix_square( $odd );  // Two zero bits.
+		$odd  = self::gf2_matrix_square( $even ); // Four zero bits.
+
+		do {
+			$even = self::gf2_matrix_square( $odd );
+
+			if ( $len2 & 1 ) {
+				$crc1 = self::gf2_matrix_times( $even, $crc1 );
+			}
+
+			$len2 >>= 1;
+
+			if ( 0 === $len2 ) {
+				break;
+			}
+
+			$odd = self::gf2_matrix_square( $even );
+
+			if ( $len2 & 1 ) {
+				$crc1 = self::gf2_matrix_times( $odd, $crc1 );
+			}
+
+			$len2 >>= 1;
+		} while ( 0 !== $len2 );
+
+		return ( $crc1 ^ $crc2 ) & self::MAX_32;
+	}
+
+	/** @param int[] $matrix */
+	private static function gf2_matrix_times( array $matrix, int $vector ): int {
+		$sum = 0;
+		$i   = 0;
+
+		while ( 0 !== $vector ) {
+			if ( $vector & 1 ) {
+				$sum ^= $matrix[ $i ];
+			}
+
+			$vector >>= 1;
+			++$i;
+		}
+
+		return $sum;
+	}
+
+	/**
+	 * @param int[] $matrix
+	 * @return int[]
+	 */
+	private static function gf2_matrix_square( array $matrix ): array {
+		$square = array();
+
+		for ( $n = 0; $n < 32; $n++ ) {
+			$square[ $n ] = self::gf2_matrix_times( $matrix, $matrix[ $n ] );
+		}
+
+		return $square;
 	}
 
 	/**

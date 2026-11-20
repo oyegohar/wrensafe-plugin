@@ -41,7 +41,10 @@ class VerifyManager {
 	/** Content-file checksums verified per step. */
 	private const FILE_BATCH = 200;
 
-	/** Skip the whole-file checksum above this size to avoid request timeouts. */
+	/**
+	 * Above this size the whole-file checksum is skipped where it can't be
+	 * checked across requests (a classic SHA-256 on PHP before 8.1).
+	 */
 	private const WHOLE_FILE_LIMIT = 1073741824; // 1 GB.
 
 	private const STATUS_PENDING   = 'pending';
@@ -147,7 +150,7 @@ class VerifyManager {
 			'backup_id'              => $backup_id,
 			'file_path'              => $backup['file_path'] ?? '',
 			'file_name'              => $backup['file_name'] ?? '',
-			'expected_checksum'      => $backup['checksum'] ?? '',
+			'expected_checksum'      => self::recorded_checksum( (array) $backup ),
 			'encrypted'              => false,
 			'needs_password'         => false,
 			'work_path'              => $backup['file_path'] ?? '',
@@ -540,7 +543,7 @@ class VerifyManager {
 			return;
 		}
 
-		$files_map = is_array( $checksums['files'] ?? null ) ? $checksums['files'] : array();
+		$files_map = IntegrityChecker::file_checksums( $checksums );
 
 		self::set_check( $state, 'checksums_json', self::STATUS_PASSED, __( 'checksums.json exists and is valid JSON.', 'wrensafe' ) );
 		$state['file_total']   = count( $files_map );
@@ -557,8 +560,7 @@ class VerifyManager {
 
 	private static function step_backup_files( array &$state ): void {
 		$reader    = new ArchiveReader( $state['work_path'] );
-		$checksums = $reader->read_json( 'checksums.json' );
-		$files_map = is_array( $checksums['files'] ?? null ) ? $checksums['files'] : array();
+		$files_map = IntegrityChecker::file_checksums( $reader->read_json( 'checksums.json' ) );
 		$names     = array_keys( $files_map );
 		$total     = count( $names );
 
@@ -641,16 +643,47 @@ class VerifyManager {
 
 		$size = file_exists( $state['file_path'] ) ? (int) filesize( $state['file_path'] ) : 0;
 
-		if ( $size > self::WHOLE_FILE_LIMIT ) {
+		if ( null === SliceHash::parse( $expected ) ) {
+			self::set_check( $state, 'whole_archive_checksum', self::STATUS_SKIPPED, __( 'The recorded whole-file checksum is in a format this version doesn’t know; per-entry checksums were verified instead.', 'wrensafe' ) );
+			$state['warnings'][] = __( 'Whole-file checksum not checked (unknown format).', 'wrensafe' );
+			$state['phase']      = 'final';
+			return;
+		}
+
+		// A sliced checksum, or a classic one on PHP 8.1+, is checked across
+		// requests; a classic one on older PHP only in one go.
+		if ( $size > self::WHOLE_FILE_LIMIT && ! ArchiveChecksum::can_pause( $expected ) ) {
 			self::set_check( $state, 'whole_archive_checksum', self::STATUS_SKIPPED, __( 'Skipped — backup is very large; per-entry checksums were verified instead.', 'wrensafe' ) );
 			$state['warnings'][] = __( 'Whole-file checksum skipped for a very large backup.', 'wrensafe' );
 			$state['phase']      = 'final';
 			return;
 		}
 
-		$actual = ( new IntegrityChecker() )->compute( $state['file_path'] );
+		$progress = is_array( $state['whole_state'] ?? null ) ? $state['whole_state'] : array();
+		$max_time = (int) ini_get( 'max_execution_time' );
+		$deadline = microtime( true ) + ( ( $max_time > 0 && $max_time < 20 ) ? max( 4, $max_time - 6 ) : 10 );
 
-		if ( '' === $actual || ! hash_equals( $expected, $actual ) ) {
+		try {
+			$actual = ArchiveChecksum::step( $state['file_path'], $expected, $progress, $deadline );
+		} catch ( \Throwable $e ) {
+			$actual = '';
+		}
+
+		if ( null === $actual ) {
+			$state['whole_state']  = $progress;
+			$done                  = (int) ( $progress['offset'] ?? ( $progress['slices']['length'] ?? 0 ) );
+			$state['progress']     = 90 + (int) ( 5 * $done / max( 1, $size ) );
+			$state['current_step'] = sprintf(
+				/* translators: %d: percent of the backup file checked */
+				__( 'Verifying whole-file checksum… %d%%', 'wrensafe' ),
+				(int) ( 100 * $done / max( 1, $size ) )
+			);
+			return;
+		}
+
+		unset( $state['whole_state'] );
+
+		if ( '' === $actual || ! SliceHash::equals( $expected, $actual ) ) {
 			self::set_check( $state, 'whole_archive_checksum', self::STATUS_FAILED, __( 'The backup file has changed since it was created (whole-file checksum mismatch).', 'wrensafe' ) );
 			$state['errors'][] = __( 'Whole-file checksum mismatch.', 'wrensafe' );
 		} else {
@@ -708,7 +741,7 @@ class VerifyManager {
 	 * Returns null when fine, or a human-readable problem naming the entry.
 	 */
 	private static function check_entry( ArchiveReader $reader, string $entry_name, string $expected_checksum ): ?string {
-		$actual = $reader->checksum_entry( $entry_name );
+		$actual = $reader->checksum_entry( $entry_name, $expected_checksum );
 
 		if ( null === $actual ) {
 			return sprintf(
@@ -718,7 +751,7 @@ class VerifyManager {
 			);
 		}
 
-		if ( '' === $expected_checksum || ! hash_equals( $expected_checksum, $actual ) ) {
+		if ( ! SliceHash::equals( $expected_checksum, $actual ) ) {
 			return sprintf(
 				/* translators: %s: archive entry path */
 				__( '%s checksum mismatch.', 'wrensafe' ),
@@ -815,6 +848,18 @@ class VerifyManager {
 		} else {
 			Logger::info( 'Verification passed for backup #' . $state['backup_id'] . ' (' . $state['file_name'] . ').' );
 		}
+	}
+
+	/**
+	 * The whole-file checksum recorded for a backup: the classic SHA-256, or
+	 * since 1.2.1 a sliced one (see ArchiveWriter::create_record()).
+	 *
+	 * @param array<string,mixed> $backup Backup record.
+	 */
+	public static function recorded_checksum( array $backup ): string {
+		$classic = (string) ( $backup['checksum'] ?? '' );
+
+		return '' !== $classic ? $classic : (string) ( $backup['sliced_checksum'] ?? '' );
 	}
 
 	private static function fail_fast( array $state, string $message ): array {

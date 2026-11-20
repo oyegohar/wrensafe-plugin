@@ -11,6 +11,12 @@
  * of failing, and starting again with the same key continues where the
  * last attempt stopped.
  *
+ * Chunks go as the raw request body (application/octet-stream) to a
+ * receiving site that lists "raw" in its chunk_formats (1.2.1+), and
+ * base64-encoded in a form field, as before, to older ones (and when
+ * something in front of the receiving site, such as a firewall, refuses
+ * the raw body). The signature is the same HMAC over the chunk's bytes.
+ *
  * Requests use wp_remote_post(), not wp_safe_remote_post(): the receiving
  * site is the administrator's own other site, which can legitimately be on
  * the local network or this server (a staging copy, a site moving between
@@ -298,7 +304,13 @@ class TransferClient {
 				(string) ( $body['version'] ?? '' )
 			),
 			'rest_style' => $style,
+			'raw_chunks' => self::accepts_raw( $body ),
 		);
+	}
+
+	/** Whether the receiving site's answer says it takes chunks as the raw body (1.2.1+). */
+	private static function accepts_raw( array $body ): bool {
+		return in_array( 'raw', (array) ( $body['chunk_formats'] ?? array() ), true );
 	}
 
 	/**
@@ -413,6 +425,10 @@ class TransferClient {
 		$local_preference      = max( 1, (int) Settings::get( 'migration_chunk_size_mb', 2 ) ) * 1024 * 1024;
 		$payload['chunk_size'] = $server_max > 0 ? min( $server_max, $local_preference ) : $local_preference;
 
+		// How to send the chunks: as the raw body when the receiving site
+		// says it takes them (as its pre-flight check did), else as before.
+		$payload['raw_chunks'] = self::accepts_raw( $body );
+
 		$payload['file_path']   = $backup['file_path'];
 		$payload['total_size']  = (int) $backup['size'];
 		$payload['offset']      = max( 0, min( (int) ( $body['received_bytes'] ?? 0 ), (int) $backup['size'] ) );
@@ -453,24 +469,28 @@ class TransferClient {
 		}
 
 		$signature = ( new MigrationKey() )->sign_chunk( $payload['token'], $chunk_index, $chunk );
+		$raw       = ! empty( $payload['raw_chunks'] );
+		$response  = $raw ? $this->send_raw( $payload, $chunk_index, $signature, $chunk ) : $this->send_encoded( $payload, $chunk_index, $signature, $chunk );
 
-		$response = wp_remote_post(
-			$this->endpoint( $payload, 'chunk' ),
-			array(
-				'body'        => array(
-					'token'       => $payload['token'],
-					'chunk_index' => (string) $chunk_index,
-					'signature'   => $signature,
-					// Binary backup data in a form field (the 1.1.3 protocol).
-					'chunk'       => base64_encode( $chunk ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- encodes a transfer chunk, not code.
-				),
-				'timeout'     => 60,
-				'sslverify'   => ! empty( $payload['verify_ssl'] ),
-				'redirection' => 0,
-			)
-		);
+		if ( null === $response ) {
+			$job->mark_failed( __( 'This server can’t send the backup to a receiving site with Wrensafe 1.2.0 or older: PHP’s sodium functions are missing. Update Wrensafe on the receiving site and try again.', 'wrensafe' ) );
+			return;
+		}
 
 		$code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+
+		// Something in front of the receiving site refused the raw body
+		// before WordPress saw it (a firewall that only allows form posts),
+		// or dropped the key's header (a proxy): send this and the next
+		// chunks as a form instead.
+		$answer = $raw ? self::body( $response ) : array();
+
+		if ( $raw && in_array( $code, array( 400, 403, 406, 411, 415, 501 ), true ) && ( ! array_key_exists( 'message', $answer ) || 'rest_missing_callback_param' === ( $answer['code'] ?? '' ) ) ) {
+			$payload['raw_chunks'] = false;
+			$job->set_payload( $payload );
+			Logger::warning( 'Migration transfer #' . $job->id() . ': the receiving site refused a chunk sent as the raw request body (HTTP ' . $code . '); sending the chunks as a form instead.', array(), $job->id() );
+			return;
+		}
 
 		// Out of step with the receiving site (a request was retried after
 		// it had already arrived): continue from where that site is.
@@ -507,6 +527,70 @@ class TransferClient {
 		$job->set_payload( $payload );
 	}
 
+	/**
+	 * Send a chunk as the raw request body (to 1.2.1+). The key goes in a
+	 * header, the rest in the query string.
+	 *
+	 * @return array|\WP_Error
+	 */
+	private function send_raw( array $payload, int $chunk_index, string $signature, string $chunk ) {
+		$url = add_query_arg(
+			array(
+				'chunk_index' => $chunk_index,
+				'offset'      => (int) $payload['offset'],
+				'signature'   => $signature,
+			),
+			$this->endpoint( $payload, 'chunk' )
+		);
+
+		return wp_remote_post(
+			$url,
+			array(
+				'body'        => $chunk,
+				'headers'     => array(
+					'Content-Type'               => 'application/octet-stream',
+					TransferServer::TOKEN_HEADER => (string) $payload['token'],
+				),
+				'timeout'     => 60,
+				'sslverify'   => ! empty( $payload['verify_ssl'] ),
+				'redirection' => 0,
+			)
+		);
+	}
+
+	/**
+	 * Send a chunk base64-encoded in a form field, the way receiving sites
+	 * up to 1.2.0 expect it. Null when this server can't encode it.
+	 *
+	 * @return array|\WP_Error|null
+	 */
+	private function send_encoded( array $payload, int $chunk_index, string $signature, string $chunk ) {
+		if ( ! function_exists( 'sodium_bin2base64' ) ) {
+			return null;
+		}
+
+		try {
+			$encoded = sodium_bin2base64( $chunk, SODIUM_BASE64_VARIANT_ORIGINAL );
+		} catch ( \Throwable $e ) {
+			return null;
+		}
+
+		return wp_remote_post(
+			$this->endpoint( $payload, 'chunk' ),
+			array(
+				'body'        => array(
+					'token'       => $payload['token'],
+					'chunk_index' => (string) $chunk_index,
+					'signature'   => $signature,
+					'chunk'       => $encoded,
+				),
+				'timeout'     => 60,
+				'sslverify'   => ! empty( $payload['verify_ssl'] ),
+				'redirection' => 0,
+			)
+		);
+	}
+
 	private function step_finalize( MigrationTransferJob $job, array $payload ): void {
 		$response = wp_remote_post(
 			$this->endpoint( $payload, 'finalize' ),
@@ -514,8 +598,11 @@ class TransferClient {
 				'body'        => array(
 					'token'    => $payload['token'],
 					'checksum' => $payload['checksum'],
+					// 1.2.1+ receiving sites check the archive in bounded steps
+					// and answer 202 until they are done; older ones ignore this
+					// and check it all before answering.
+					'stepped'  => '1',
 				),
-				// The receiving site checks the whole archive before answering.
 				'timeout'     => 300,
 				'sslverify'   => ! empty( $payload['verify_ssl'] ),
 				'redirection' => 0,
@@ -523,6 +610,16 @@ class TransferClient {
 		);
 
 		$code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+
+		// Still checking the archive: ask again with the next step.
+		if ( 202 === $code ) {
+			$body                = self::body( $response );
+			$payload['attempts'] = 0;
+			$job->set_payload( $payload );
+			/* translators: %d: percent of the backup the receiving site has checked */
+			$job->update_progress( 96, sprintf( __( 'The receiving site is checking the backup (%d%%)…', 'wrensafe' ), (int) ( $body['progress'] ?? 0 ) ) );
+			return;
+		}
 
 		// A retry after the receiving site had already saved the backup (the
 		// first answer was lost): its session is gone.

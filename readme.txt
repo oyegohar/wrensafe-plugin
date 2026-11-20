@@ -4,11 +4,11 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.7
+Stable tag: 1.2.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Back up, restore and migrate WordPress: full or partial backups, off-site copies (FTP, S3), schedules, staging and guided restores.
+Back up, restore and migrate WordPress: full or partial backups, off-site copies (FTP, S3), schedules, staging and safe plugin updates.
 
 == Description ==
 
@@ -34,6 +34,14 @@ Wrensafe backs up your WordPress site and restores it — on the same server or 
 * **Your server settings stay yours:** `wp-config.php` is never put in a backup or overwritten, so your database password and security keys stay on the server. Wrensafe itself is never overwritten, and server-specific files (`.htaccess`, `.user.ini`, cache drop-ins) are kept when you move a site to another server.
 * **Plugin safety:** after a restore, Wrensafe loads the site once. Any plugin that is incomplete, needs a newer PHP or WordPress than this server has, or stops the site from loading is turned off instead of breaking the site, and you're told which one and why.
 * **WooCommerce Safe Mode** keeps new orders, customers and stock untouched while the rest of the store is restored.
+
+### Update safely
+
+* **Choose how to update:** when you update a plugin on the Plugins or Updates screen, Wrensafe asks how. **Quick Update** is WordPress's standard update; **Safe Update** adds a safety net.
+* **Safe Update:** Wrensafe saves a copy of the plugin, updates it, then loads your home page and admin area. If the update causes a fatal error, a server error or an empty page, the previous version is put back within seconds and stays active (if it can't be put back, the plugin is turned off so the site keeps working). You see what went wrong, down to the file and line.
+* **Several plugins at once:** update them one by one (each is checked before the next) or all at once (one check; if the site breaks and the error names one of them, only that one is rolled back, otherwise all of them are). The updates continue in the background, through WP-Cron, when you close the page. If a run stops for six minutes with a plugin installed but not yet checked (the request installing it was cut off, or WP-Cron doesn't run), visitors' pages load without that plugin until the run has checked it, and put the previous version back if needed.
+* **Roll back later:** the copy saved before each update is kept for 14 days (you choose how long), so an update can be undone from Wrensafe → Safe Updates even when the site check passed.
+* **Clear caches after updating:** the page cache of the common caching plugins and WordPress's object cache, so visitors see pages built with the new versions.
 
 ### Migrate
 
@@ -71,6 +79,18 @@ Wrensafe includes the Manrope typeface by The Manrope Project Authors (github.co
 To move a site: create a full backup on the old site, download it from the **Backup Browser**, install Wrensafe on the new site and upload the file under **Import / Restore**.
 
 == Frequently Asked Questions ==
+
+= How does Safe Update know an update broke my site? =
+
+Before the first update, Wrensafe loads your home page and admin area the same way WordPress checks a plugin you edit in the plugin editor, and it does the same after each update. A new fatal error, a server error (HTTP 500 or higher), a page that no longer loads, or a home page that comes back empty means the update is rolled back. Problems the site already had before the update don't count.
+
+= What if my server can't load its own pages? =
+
+Some hosts block these "loopback" requests (Tools → Site Health tells you). Safe Update then still saves a copy of each plugin, so you can roll an update back from Wrensafe → Safe Updates, but it can't check the site for you, and the result says so.
+
+= Does Safe Update work with premium plugins? =
+
+Yes, whenever WordPress itself can update the plugin: an update is listed on the Plugins screen and its download is available (premium plugins usually need an active license for that). Wrensafe uses WordPress's own updater.
 
 = Where are my backups stored? =
 
@@ -143,7 +163,11 @@ Not yet. Wrensafe is built and tested for single-site WordPress. Restoring a mul
 
 = What happens when I uninstall the plugin? =
 
-Nothing is deleted unless you turn on **Settings → Advanced → Uninstall**. Even then, only Wrensafe's settings and records are removed from the database — your backup files are always kept.
+Nothing is deleted unless you turn on **Settings → Advanced → Uninstall**. Then Wrensafe removes its settings and records from the database, its work folders (unfinished uploads, logs and the plugin copies Safe Updates saved before updates) and the staging sites it made (their folders and database tables). Your backup files are always kept.
+
+= Does Wrensafe add files outside its plugin folder? =
+
+Only while it needs them. During a restore or a Safe Update it adds a small file to `wp-content/mu-plugins` (`wpbp-restore-plugin-guard.php` or `wpbp-safe-update-guard.php`) and removes it when it finishes, when Wrensafe is deactivated and when it is deleted. A staging site is a copy in a `staging-…` folder inside your WordPress folder, with its own database tables; a password-protected one gets `wrensafe-staging-guard.php` in its own `mu-plugins` folder, and page caching is turned off in its own `wp-config.php` (WP_CACHE). Backups, logs and temporary files are kept in the `wrensafe-storage` folder (or the folder you chose).
 
 = What are the minimum requirements? =
 
@@ -162,6 +186,7 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * **Direct Migration** — when an administrator sends a backup, sends it to the other WordPress site they pair with a one-time migration key, and only to that site. Data sent: the migration key, the backup archive (in signed parts), its file name, size, type and checksum, and this site's address, which is shown in the receiving site's backup list.
 * **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice: no service is preset (the providers named in the settings are only examples), and Wrensafe has no service of its own.
 * **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. It runs when Tools → Site Health is opened and during WordPress's own weekly Site Health check. No other server is contacted.
+* **Plugin updates (Safe Updates)** — updates run through WordPress's own updater, which downloads each update from the address WordPress lists for it (WordPress.org, or the author's server for a premium plugin). "Check again" on the Safe Updates page runs WordPress's own update check with WordPress.org. To check the site after an update, Wrensafe loads the site's own home page and admin area; no other server is contacted.
 * **Email notifications** — backup, restore and copy results are sent with WordPress's own `wp_mail()` to the addresses set under Settings → Notifications, through whatever mail service the site uses.
 
 == Screenshots ==
@@ -174,13 +199,36 @@ Wrensafe only contacts the services below, and only after a site administrator c
 6. Integrity verification checks the archive, manifest, database files and checksums before you restore.
 7. Automatic backups: the whole site and the database on separate schedules, keeping only the newest copies.
 8. Migration Assistant scores how ready the site is to move, recommends the safest method and lists the next steps.
-9. Settings grouped by task: the backup folder, backups before updates, exclusions, notifications, migration and WooCommerce Safe Mode.
+9. Settings grouped by task: the backup folder, exclusions, updates, remote storage, notifications, migration and WooCommerce Safe Mode.
 10. Restore backups made by other backup plugins: upload the files just as that plugin saved them.
 11. Off-site copies: copy each backup to FTP/FTPS or S3-compatible storage, and test the connection before saving.
 12. Search & Replace: a dry run shows how many rows would change in each table before anything is saved.
 13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
+14. When you update a plugin, choose Quick Update or Safe Update, which checks your site and rolls a breaking update back.
+15. Safe Updates: update several plugins one by one or all at once, follow the progress, and roll an update back later.
 
 == Changelog ==
+
+= 1.2.4 =
+The first 1.2 release on WordPress.org. Versions 1.2.0 to 1.2.3 were tested on a few sites first; everything they added is listed here, and the 1.1.5 to 1.1.7 fixes are included.
+
+* New: Safe Updates. When you update a plugin on the Plugins or Updates screen, Wrensafe asks how: Quick Update (WordPress's standard update) or Safe Update, which saves a copy of the plugin, updates it, checks the home page and admin area, and puts the previous version back automatically if the update causes a fatal error, a server error or an empty page. To update without being asked, turn the question off under Settings → Updates.
+* New: Wrensafe → Safe Updates. Update several plugins one by one or all at once, in the background (it continues through WP-Cron when you close the page), follow the progress, and roll an update back from the copy saved before it for 14 days (you choose how long). If a run stops for six minutes with a plugin installed but not yet checked (the request installing it was cut off, or WP-Cron doesn't run), visitors' pages load without that plugin until the run has checked it, so an update that breaks the site doesn't keep it down; the run then puts the previous version back if needed.
+* New: "Clear the cache after updating" empties the page cache of the common caching plugins and WordPress's object cache. It is ticked by default; untick it in the update window or under Settings → Updates.
+* New: Settings → Updates: the update question (on or off), the way chosen by default, the cache option, how long saved copies are kept, and "Back up before updates" (moved here from Settings → Backup). A Safe Updates run makes one backup before its first plugin instead of one per plugin.
+* New: failure emails (Settings → Notifications) also report updates that were rolled back.
+* New: for add-ons, Safe Updates can run other kinds of updates and add their own checks and report details (the wpbp_safe_update_types, wpbp_safe_update_baseline, wpbp_safe_update_check and wpbp_safe_update_item_report filters), and Settings → Remote storage can offer more kinds of off-site storage (wpbp_remote_storage_types).
+* Security: staging password protection now works on every web server, nginx included. It used .htaccess, which nginx (and Apache without AllowOverride) ignores, so such a staging site could be open. Visitors now get a password form before any page, and the staging site's plugins don't run for them. After 10 wrong passwords from one address (or 100 in all) the form pauses for 15 minutes, also for passwords sent as HTTP Basic credentials. Pages shown after the password are marked as not cacheable, and page caching (WP_CACHE) is turned off on password-protected staging sites, whose cached pages are deleted, so a cache can't show them without the password. Caches your host runs in front of WordPress that ignore "do not cache" headers aren't covered. Everyone, administrators included, enters the password once a day; WP-CLI and the site's own scheduled tasks get through. The password's hash is no longer kept in a .htpasswd file that could be downloaded. Existing staging sites switch over automatically and keep their user name and password; new ones need a password of at least 8 characters.
+* Security: the temporary Safe Updates guard takes effect for Wrensafe's own requests (a secret for each run, WordPress's own cron requests, WP-CLI) and, once a run has stalled for six minutes with a plugin update not checked yet, for WP-Cron and visitors' page views (never admin screens, WP-CLI or form posts). It only refreshes PHP's opcode cache for real site checks, is installed through WP_Filesystem, and a restore never puts it back. Saved copies have unguessable file names.
+* Fixed: on PHP 7.4 and 8.0, very large backups no longer need one long request. The backup's checksum, and a single very large file inside it, are now handled in short steps like the rest of the backup, so hosts with a 30-second limit don't stop it at "Calculating checksum". When a file or archive is too large for one step there, its checksum is recorded in a new format (8 MB slices, chained). Backups made by earlier versions are checked and restored as before.
+* Fixed: Verify checks the whole-file checksum of a very large backup too, in short steps (it was skipped above 1 GB).
+* Changed: Direct Migration sends each part of the backup as it is instead of as base64 text: a quarter less data, and nothing that hosting malware scanners flag. It still works in both directions with sites running Wrensafe 1.1.3 or later, and an interrupted transfer still continues where it stopped.
+* Fixed: the receiving site of a Direct Migration checks the backup in short steps, so a large full-site backup no longer ends with "The receiving site had an error (HTTP 500)" on hosts with a 30-second limit.
+* Fixed: staging sites have a working administrator again: the copy's roles and capabilities now use the staging site's table prefix (WordPress said "Sorry, you are not allowed to access this page"). Existing staging sites are repaired, and Push to Live turns them back into the live site's.
+* Fixed: Push to Live no longer stops half-way, logging you out, after copying the staging site's settings: the live site keeps its address and your login while the push runs.
+* Fixed: backups, staging copies and Search & Replace no longer include the tables of another WordPress site that shares the database with a longer table prefix (for example wp_shop_ next to wp_), and a restore leaves those tables alone, also when the backup was made by an earlier version. A multisite network's own site tables are still included in its backups.
+* Fixed: the Plugins and Updates screens no longer connect to the file system (FTP on some hosts) on every visit; that check runs when updates start.
+* Changed: with "Delete Wrensafe's data" on, uninstalling also removes the copies Safe Updates saved, wherever the storage folder is. The setting and this readme now list everything it removes.
 
 = 1.1.7 =
 * Fixed: during a restore with WooCommerce Safe Mode, visitors could see blank pages instead of the maintenance notice (only the checkout was paused). Visitors now see the maintenance notice during every restore, and Safe Mode still pauses the checkout.
@@ -270,6 +318,9 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.2.4 =
+Adds Safe Updates, a safety net for plugin updates (turn its question off under Settings → Updates), makes staging password protection work on every web server, and keeps very large backups in short steps on PHP 7.4. Recommended for everyone.
 
 = 1.1.7 =
 Visitors see the maintenance notice instead of blank pages while a WooCommerce store is being restored.

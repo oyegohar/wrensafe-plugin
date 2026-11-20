@@ -1,7 +1,8 @@
 <?php
 /**
- * Verifies .wbp archive integrity: a whole-file SHA-256 checksum (the
- * original, coarse check), and a deeper check of the archive's internal
+ * Verifies .wbp archive integrity: a whole-file checksum (the original,
+ * coarse check: a SHA-256, or since 1.2.1 on old PHP a sliced checksum, see
+ * SliceHash and ArchiveChecksum), and a deeper check of the archive's internal
  * structure — manifest/metadata presence, archive format version, and a
  * per-entry checksum of every database schema/data file and every backed
  * up content file. The deep check is what guards against a corrupted or
@@ -160,14 +161,40 @@ class IntegrityChecker {
 	}
 
 	/**
-	 * Whether a file's current checksum matches the expected value.
+	 * Whether a file's current checksum matches the expected value (a
+	 * whole-file SHA-256 or a sliced checksum, calculated the same way).
 	 */
 	public function verify( string $file_path, string $expected_checksum ): bool {
 		if ( '' === $expected_checksum || ! file_exists( $file_path ) ) {
 			return false;
 		}
 
-		return hash_equals( $expected_checksum, $this->compute( $file_path ) );
+		return ArchiveChecksum::matches( $file_path, $expected_checksum );
+	}
+
+	/**
+	 * The per-file checksums of an archive's checksums.json: entry name =>
+	 * recorded checksum. "files" holds the SHA-256 of each file (what every
+	 * version reads); "files_sliced" (1.2.1+) the files whose checksum is a
+	 * sliced one (a huge file packed across requests on PHP before 8.1),
+	 * kept apart so that older versions, which can't check them, skip them
+	 * instead of reporting a mismatch.
+	 *
+	 * @param mixed $checksums Decoded checksums.json.
+	 * @return array<string,string>
+	 */
+	public static function file_checksums( $checksums ): array {
+		$map = array();
+
+		foreach ( array( 'files', 'files_sliced' ) as $key ) {
+			if ( is_array( $checksums ) && is_array( $checksums[ $key ] ?? null ) ) {
+				foreach ( $checksums[ $key ] as $name => $checksum ) {
+					$map[ (string) $name ] = (string) $checksum;
+				}
+			}
+		}
+
+		return $map;
 	}
 
 	/**
@@ -295,8 +322,7 @@ class IntegrityChecker {
 			}
 		}
 
-		$checksums = $reader->read_json( 'checksums.json' ) ?? array();
-		$files_map = is_array( $checksums['files'] ?? null ) ? $checksums['files'] : array();
+		$files_map = self::file_checksums( $reader->read_json( 'checksums.json' ) );
 		$names     = array_keys( $files_map );
 		$total     = count( $names );
 
@@ -333,7 +359,7 @@ class IntegrityChecker {
 	 * message naming the failing entry when it isn't.
 	 */
 	private function verify_entry( ArchiveReader $reader, string $entry_name, string $expected_checksum ): ?string {
-		$actual = $reader->checksum_entry( $entry_name );
+		$actual = $reader->checksum_entry( $entry_name, $expected_checksum );
 
 		if ( null === $actual ) {
 			return sprintf(
@@ -343,7 +369,7 @@ class IntegrityChecker {
 			);
 		}
 
-		if ( '' === $expected_checksum || ! hash_equals( $expected_checksum, $actual ) ) {
+		if ( ! SliceHash::equals( $expected_checksum, $actual ) ) {
 			return sprintf(
 				/* translators: %s: archive entry path */
 				__( '%s checksum mismatch.', 'wrensafe' ),

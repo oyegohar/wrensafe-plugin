@@ -87,7 +87,8 @@ class StagingManager {
 				'status'             => 'creating',
 				'password_protected' => ! empty( $payload['password_protected'] ) ? 1 : 0,
 				'staging_username'   => $payload['staging_username'] ?? '',
-				// Never stored: only its hash, in the staging site's .htpasswd.
+				// Never stored: only its hash, in the staging site's folder
+				// (see StagingProtection).
 				'staging_password'   => '',
 			)
 		);
@@ -177,6 +178,9 @@ class StagingManager {
 				! empty( $payload['exclude_orders'] )
 			);
 
+			// The staging site reads roles and capabilities under its own prefix.
+			( new StagingCreator() )->rename_prefixed_keys( $payload['staging_prefix'], $wpdb->prefix, $payload['staging_prefix'] );
+
 			$payload['phase'] = 'search_replace';
 			$job->update_progress( 80, __( 'Database cloned.', 'wrensafe' ) );
 			$job->set_payload( $payload );
@@ -244,16 +248,21 @@ class StagingManager {
 	}
 
 	private function step_protect( StagingJob $job, array $payload ): void {
-		if ( ! empty( $payload['password_protected'] ) ) {
-			( new StagingProtection() )->password_protect(
-				$payload['staging_dir'],
-				$payload['staging_username'],
-				$payload['staging_password']
-			);
-		}
+		$protected = empty( $payload['password_protected'] ) || ( new StagingProtection() )->password_protect(
+			$payload['staging_dir'],
+			(string) $payload['staging_username'],
+			(string) $payload['staging_password']
+		);
 
-		// The password was only needed to write .htpasswd; don't keep it in the job.
+		// The password was only needed to write its hash; don't keep it in the job.
 		unset( $payload['staging_password'] );
+		$job->set_payload( $payload );
+
+		// A staging site that was asked to be password protected and isn't
+		// must not be left open.
+		if ( ! $protected ) {
+			throw new \RuntimeException( esc_html__( 'The staging site couldn’t be password protected: its folder or wp-config.php isn’t writable. Delete the staging site, check the folder permissions and create it again.', 'wrensafe' ) );
+		}
 
 		$payload['phase'] = 'finalize';
 		$job->update_progress( 96, __( 'Staging site protected.', 'wrensafe' ) );

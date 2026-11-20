@@ -63,6 +63,14 @@ class Settings {
 			'exclude_larger_than_mb'        => 0,
 			// Database tables left out of backups, without the table prefix (1.1.0).
 			'excluded_tables'               => array(),
+			// Safe Updates (1.2.0): the update window on the Plugins and
+			// Updates screens, its default choices, and how long the copies
+			// saved before updates are kept.
+			'safe_updates_prompt'           => true,
+			'safe_updates_mode'             => 'safe',
+			'safe_updates_order'            => 'one_by_one',
+			'safe_updates_clear_cache'      => true,
+			'safe_updates_keep_days'        => 14,
 		);
 	}
 
@@ -169,7 +177,16 @@ class Settings {
 
 			// Issue 09: these tabs rendered fields whose keys were never
 			// persisted — every save silently discarded them.
-			case 'backup':
+			case 'updates':
+				$modes = \WPBP\Updates\SafeUpdates::modes();
+				$mode  = sanitize_key( (string) ( $value['safe_updates_mode'] ?? '' ) );
+
+				$current['safe_updates_prompt']      = ! empty( $value['safe_updates_prompt'] );
+				$current['safe_updates_mode']        = isset( $modes[ $mode ] ) ? $mode : 'safe';
+				$current['safe_updates_order']       = 'all_at_once' === ( $value['safe_updates_order'] ?? '' ) ? 'all_at_once' : 'one_by_one';
+				$current['safe_updates_clear_cache'] = ! empty( $value['safe_updates_clear_cache'] );
+				$current['safe_updates_keep_days']   = max( 1, min( 90, absint( $value['safe_updates_keep_days'] ?? 14 ) ) );
+
 				// "Back up before updates" keeps its own option (read by
 				// Updates\BackupBeforeUpdates); it is saved with this form.
 				$bbu = isset( $value['bbu'] ) && is_array( $value['bbu'] ) ? $value['bbu'] : array();
@@ -184,7 +201,9 @@ class Settings {
 					),
 					false
 				);
+				break;
 
+			case 'backup':
 				if ( array_key_exists( 'backup_dir', $value ) ) {
 					$current['backup_dir'] = self::save_backup_dir( (string) $value['backup_dir'], (string) ( $current['backup_dir'] ?? '' ) );
 				}

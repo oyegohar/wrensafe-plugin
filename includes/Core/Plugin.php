@@ -67,6 +67,12 @@ class Plugin {
 
 		Schema::maybe_upgrade();
 		\WPBP\Utils\FileSystem::adopt_legacy_storage();
+
+		// After an update: staging sites get the current password guard
+		// (and those made before 1.2.1 move off .htaccess, see StagingProtection).
+		if ( is_admin() || wp_doing_cron() ) {
+			\WPBP\Staging\StagingProtection::maybe_upgrade_all();
+		}
 		CapabilityManager::register();
 		Notifier::register();
 
@@ -83,6 +89,8 @@ class Plugin {
 		$this->container->get( CheckoutMaintenance::class )->register_hooks();
 		$this->container->get( RestoreSiteMaintenance::class )->register_hooks();
 		$this->container->get( BackupBeforeUpdates::class )->register_hooks();
+		// Safe Updates: the update window, the site check's ping and WP-Cron continuation.
+		( new \WPBP\Updates\SafeUpdates() )->register_hooks();
 		// Site Health also runs its checks from WP-Cron, outside wp-admin.
 		( new \WPBP\Admin\SiteHealth() )->register_hooks();
 

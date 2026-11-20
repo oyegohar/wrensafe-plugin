@@ -2,8 +2,9 @@
 /**
  * Off-site copies of backups (Settings → Remote storage).
  *
- * One destination (FTP/FTPS or S3-compatible storage). Right after a
- * backup is made, the backup job copies it there in short steps (see
+ * One destination: FTP/FTPS, S3-compatible storage, or a storage type an
+ * add-on registers (see registry()). Right after a backup is made, the
+ * backup job copies it there in short steps (see
  * BackupManager::step_remote_copy()) and then keeps only the newest copies
  * there. Passwords and secret keys are stored encrypted (SecretBox).
  *
@@ -23,58 +24,291 @@ final class RemoteStorage {
 
 	public const OPTION = 'wpbp_remote_storage';
 
-	/** Fields stored encrypted, per type. */
-	private const SECRETS = array(
-		'ftp' => array( 'password' ),
-		's3'  => array( 'secret_key' ),
+	/** Settings shared by every type (a type can't use these keys). */
+	private const COMMON = array(
+		'type'           => '',
+		'copy_automatic' => true,
+		'copy_manual'    => false,
+		'keep'           => 10,
 	);
 
-	/** @return array<string,mixed> */
-	public static function defaults(): array {
+	/** Kinds of form field a type can have. */
+	private const FIELD_TYPES = array( 'text', 'number', 'password', 'url', 'checkbox' );
+
+	/**
+	 * The built-in types, in the same form as a type an add-on registers.
+	 *
+	 * @return array<string,array<string,mixed>>
+	 */
+	private static function builtin_types(): array {
+		$folder_help = __( 'Inside the folder you log in to, unless it starts with / (a full path). Created if it doesn’t exist. Use a folder only for these backups.', 'wrensafe' );
+
 		return array(
-			'type'           => '',
-			'copy_automatic' => true,
-			'copy_manual'    => false,
-			'keep'           => 10,
-			'ftp'            => array(
-				'host'     => '',
-				'port'     => 21,
-				'username' => '',
-				'password' => '',
-				'folder'   => 'wrensafe',
-				'ftps'     => true,
-				'passive'  => true,
+			'ftp' => array(
+				'label'    => __( 'FTP / FTPS', 'wrensafe' ),
+				'class'    => FtpTarget::class,
+				'defaults' => array(
+					'host'     => '',
+					'port'     => 21,
+					'username' => '',
+					'password' => '',
+					'folder'   => 'wrensafe',
+					'ftps'     => true,
+					'passive'  => true,
+				),
+				'secrets'  => array( 'password' ),
+				'fields'   => array(
+					'host'     => array(
+						'label'       => __( 'Server', 'wrensafe' ),
+						'placeholder' => 'ftp.example.com',
+					),
+					'port'     => array(
+						'label' => __( 'Port', 'wrensafe' ),
+						'type'  => 'number',
+						'min'   => 1,
+						'max'   => 65535,
+					),
+					'username' => array( 'label' => __( 'Username', 'wrensafe' ) ),
+					'password' => array(
+						'label' => __( 'Password', 'wrensafe' ),
+						'type'  => 'password',
+					),
+					'folder'   => array(
+						'label' => __( 'Folder', 'wrensafe' ),
+						'help'  => $folder_help,
+					),
+					'ftps'     => array(
+						'label' => __( 'Use TLS (FTPS)', 'wrensafe' ),
+						'type'  => 'checkbox',
+						'help'  => __( 'Recommended: without TLS the password and the backup travel unencrypted. Turn it off only if your server doesn’t support it.', 'wrensafe' ),
+					),
+					'passive'  => array(
+						'label' => __( 'Passive mode', 'wrensafe' ),
+						'type'  => 'checkbox',
+						'help'  => __( 'Works behind most firewalls. Turn it off only if your FTP host asks you to.', 'wrensafe' ),
+					),
+				),
 			),
-			's3'             => array(
-				'endpoint'   => '',
-				'region'     => 'us-east-1',
-				'bucket'     => '',
-				'access_key' => '',
-				'secret_key' => '',
-				'folder'     => 'wrensafe',
-				'path_style' => false,
+			's3'  => array(
+				'label'    => __( 'S3-compatible storage', 'wrensafe' ),
+				'class'    => S3Target::class,
+				'defaults' => array(
+					'endpoint'   => '',
+					'region'     => 'us-east-1',
+					'bucket'     => '',
+					'access_key' => '',
+					'secret_key' => '',
+					'folder'     => 'wrensafe',
+					'path_style' => false,
+				),
+				'secrets'  => array( 'secret_key' ),
+				'fields'   => array(
+					'endpoint'   => array(
+						'label'       => __( 'Endpoint', 'wrensafe' ),
+						'type'        => 'url',
+						'help'        => __( 'The storage service’s S3 address, for example https://s3.us-west-004.backblazeb2.com, https://s3.wasabisys.com or https://ACCOUNT.r2.cloudflarestorage.com. For Amazon S3, use the endpoint of your bucket’s region from the list at docs.aws.amazon.com/general/latest/gr/s3.html.', 'wrensafe' ),
+						'placeholder' => 'https://s3.example.com',
+					),
+					'region'     => array(
+						'label' => __( 'Region', 'wrensafe' ),
+						'help'  => __( 'As shown by the service, for example us-east-1 or eu-central-003 (Cloudflare R2: auto).', 'wrensafe' ),
+					),
+					'bucket'     => array( 'label' => __( 'Bucket', 'wrensafe' ) ),
+					'access_key' => array( 'label' => __( 'Access key', 'wrensafe' ) ),
+					'secret_key' => array(
+						'label' => __( 'Secret key', 'wrensafe' ),
+						'type'  => 'password',
+					),
+					'folder'     => array(
+						'label' => __( 'Folder in the bucket', 'wrensafe' ),
+						'help'  => __( 'Optional. Backups are stored under this prefix.', 'wrensafe' ),
+					),
+					'path_style' => array(
+						'label' => __( 'Path-style addresses', 'wrensafe' ),
+						'type'  => 'checkbox',
+						'help'  => __( 'Needed for MinIO and some other self-hosted services. Leave it off for Amazon S3, Backblaze B2, Wasabi and Cloudflare R2.', 'wrensafe' ),
+					),
+				),
 			),
 		);
 	}
 
+	/**
+	 * Every storage type offered under Settings → Remote storage: the
+	 * built-in ones first, then those add-ons register.
+	 *
+	 * @return array<string,array{label:string,class:string,defaults:array<string,mixed>,secrets:string[],fields:array<string,array{label:string,type:string,help:string,placeholder:string,min:?int,max:?int}>}>
+	 */
+	public static function registry(): array {
+		$builtin = self::builtin_types();
+
+		/**
+		 * Filters the storage types backups can be copied to (Settings →
+		 * Remote storage), so an add-on can offer another one.
+		 *
+		 * Add an entry under a new key (lowercase letters, digits and
+		 * underscores). The key is saved as the chosen type, names the
+		 * type's settings in the wpbp_remote_storage option, and is shown
+		 * in the backup list ("remote:{key}"). The built-in "ftp" and "s3"
+		 * entries are passed in for reference but can't be replaced or
+		 * removed, and "type", "copy_automatic", "copy_manual" and "keep"
+		 * are reserved. An entry that doesn't follow this contract is left
+		 * out.
+		 *
+		 * Each entry is an array with:
+		 *
+		 * - label    (string) Name shown in the list, the backup list and the
+		 *            Activity Log.
+		 * - class    (string) A class implementing WPBP\Remote\RemoteTarget.
+		 *            Its static unavailable_reason() returns '' when the
+		 *            server can use it, otherwise why not (the type is then
+		 *            listed as not available, with the reason). Its
+		 *            constructor receives the type's settings as an array,
+		 *            with secrets decrypted.
+		 * - defaults (array)  Setting key => default value. Stored values
+		 *            keep these keys only.
+		 * - secrets  (string[]) Keys stored encrypted with the site's own
+		 *            keys and never printed in the form; an empty field
+		 *            keeps the saved value. Password fields always are.
+		 * - fields   (array)  The form, in order: setting key => array with
+		 *            label (string), type (text, number, password, url or
+		 *            checkbox; default text), help (string, optional),
+		 *            placeholder (string, optional), and for a number, min
+		 *            and max (int, optional). Each value is cleaned for its
+		 *            type when the form is saved or tested: text with
+		 *            sanitize_text_field(), a URL with esc_url_raw() (http
+		 *            or https), a number as a whole number within min and
+		 *            max, a checkbox as true or false, a password exactly as
+		 *            typed less control characters. A key in defaults
+		 *            without a field keeps its stored value.
+		 *
+		 * The settings of a type that is no longer registered (its add-on
+		 * was deactivated) are kept, and used again once it's back.
+		 *
+		 * @since 1.2.0
+		 *
+		 * @param array<string,array<string,mixed>> $types Storage types by key.
+		 */
+		$filtered = apply_filters( 'wpbp_remote_storage_types', $builtin );
+		$types    = $builtin + array_diff_key( is_array( $filtered ) ? $filtered : array(), $builtin );
+		$registry = array();
+
+		foreach ( $types as $key => $type ) {
+			$entry = self::normalize_type( $key, $type );
+
+			if ( null !== $entry ) {
+				$registry[ $key ] = $entry;
+			}
+		}
+
+		return $registry;
+	}
+
+	/**
+	 * A registered type in a dependable shape, or null when it can't be
+	 * used (see the wpbp_remote_storage_types filter).
+	 *
+	 * @param mixed $key
+	 * @param mixed $type
+	 * @return array<string,mixed>|null
+	 */
+	private static function normalize_type( $key, $type ): ?array {
+		if ( ! is_string( $key ) || ! preg_match( '/^[a-z0-9_]+$/', $key ) || array_key_exists( $key, self::COMMON ) || ! is_array( $type ) ) {
+			return null;
+		}
+
+		$class = is_string( $type['class'] ?? null ) ? $type['class'] : '';
+
+		if ( '' === $class || ! class_exists( $class ) || ! is_subclass_of( $class, RemoteTarget::class ) ) {
+			return null;
+		}
+
+		$defaults = array();
+
+		foreach ( is_array( $type['defaults'] ?? null ) ? $type['defaults'] : array() as $field => $default ) {
+			if ( is_string( $field ) && preg_match( '/^[a-z0-9_]+$/', $field ) && ( is_scalar( $default ) || null === $default ) ) {
+				$defaults[ $field ] = $default;
+			}
+		}
+
+		$secrets = array();
+
+		foreach ( is_array( $type['secrets'] ?? null ) ? $type['secrets'] : array() as $field ) {
+			if ( is_string( $field ) && array_key_exists( $field, $defaults ) ) {
+				$secrets[] = $field;
+			}
+		}
+
+		$fields = array();
+
+		foreach ( is_array( $type['fields'] ?? null ) ? $type['fields'] : array() as $field => $definition ) {
+			if ( ! is_string( $field ) || ! preg_match( '/^[a-z0-9_]+$/', $field ) || ! is_array( $definition ) ) {
+				continue;
+			}
+
+			$kind = $definition['type'] ?? 'text';
+			$kind = in_array( $kind, self::FIELD_TYPES, true ) ? $kind : 'text';
+			$kind = in_array( $field, $secrets, true ) ? 'password' : $kind;
+
+			if ( ! array_key_exists( $field, $defaults ) ) {
+				$defaults[ $field ] = 'checkbox' === $kind ? false : ( 'number' === $kind ? 0 : '' );
+			}
+
+			if ( 'password' === $kind && ! in_array( $field, $secrets, true ) ) {
+				$secrets[] = $field;
+			}
+
+			$fields[ $field ] = array(
+				'label'       => is_scalar( $definition['label'] ?? null ) ? (string) $definition['label'] : $field,
+				'type'        => $kind,
+				'help'        => is_scalar( $definition['help'] ?? null ) ? (string) $definition['help'] : '',
+				'placeholder' => is_scalar( $definition['placeholder'] ?? null ) ? (string) $definition['placeholder'] : '',
+				'min'         => is_numeric( $definition['min'] ?? null ) ? (int) $definition['min'] : null,
+				'max'         => is_numeric( $definition['max'] ?? null ) ? (int) $definition['max'] : null,
+			);
+		}
+
+		foreach ( $secrets as $field ) {
+			$defaults[ $field ] = '';
+		}
+
+		$label = is_scalar( $type['label'] ?? null ) ? trim( (string) $type['label'] ) : '';
+
+		return array(
+			'label'    => '' !== $label ? $label : $key,
+			'class'    => $class,
+			'defaults' => $defaults,
+			'secrets'  => $secrets,
+			'fields'   => $fields,
+		);
+	}
+
+	/** @return array<string,mixed> */
+	public static function defaults(): array {
+		$defaults = self::COMMON;
+
+		foreach ( self::registry() as $type => $definition ) {
+			$defaults[ $type ] = $definition['defaults'];
+		}
+
+		return $defaults;
+	}
+
 	/** Display names. */
 	public static function types(): array {
-		return array(
-			'ftp' => __( 'FTP / FTPS', 'wrensafe' ),
-			's3'  => __( 'S3-compatible storage', 'wrensafe' ),
-		);
+		return wp_list_pluck( self::registry(), 'label' );
 	}
 
 	/**
 	 * Whether the saved destination is SFTP, which Wrensafe 1.1.4 no longer
 	 * offers (its connection needed PHP's ssh2 stream wrapper, which many
-	 * hosts block). The settings are kept; copies stop until another
-	 * destination is chosen.
+	 * hosts block), and no add-on offers it either. The settings are kept;
+	 * copies stop until another destination is chosen.
 	 */
 	public static function has_retired_sftp(): bool {
 		$saved = get_option( self::OPTION, array() );
 
-		return is_array( $saved ) && 'sftp' === ( $saved['type'] ?? '' );
+		return is_array( $saved ) && 'sftp' === ( $saved['type'] ?? '' ) && ! isset( self::types()['sftp'] );
 	}
 
 	/** Saved settings (secrets still sealed). */
@@ -84,7 +318,7 @@ final class RemoteStorage {
 		$defaults = self::defaults();
 		$settings = array_merge( $defaults, array_intersect_key( $saved, $defaults ) );
 
-		foreach ( array_keys( self::types() ) as $type ) {
+		foreach ( array_keys( array_diff_key( $defaults, self::COMMON ) ) as $type ) {
 			$settings[ $type ] = array_merge( $defaults[ $type ], is_array( $saved[ $type ] ?? null ) ? array_intersect_key( $saved[ $type ], $defaults[ $type ] ) : array() );
 		}
 
@@ -112,24 +346,27 @@ final class RemoteStorage {
 	public static function sanitize( array $posted ): array {
 		$current  = self::get();
 		$settings = $current;
+		$registry = self::registry();
 		$type     = sanitize_key( (string) ( $posted['type'] ?? '' ) );
 
-		$settings['type']           = isset( self::types()[ $type ] ) ? $type : '';
+		$settings['type']           = isset( $registry[ $type ] ) ? $type : '';
 		$settings['copy_automatic'] = ! empty( $posted['copy_automatic'] );
 		$settings['copy_manual']    = ! empty( $posted['copy_manual'] );
 		$settings['keep']           = min( 1000, absint( $posted['keep'] ?? 10 ) );
 
-		foreach ( array_keys( self::types() ) as $kind ) {
+		foreach ( $registry as $kind => $definition ) {
 			$in = is_array( $posted[ $kind ] ?? null ) ? $posted[ $kind ] : array();
 
 			if ( ! $in ) {
 				continue;
 			}
 
-			foreach ( self::defaults()[ $kind ] as $field => $default ) {
-				if ( in_array( $field, self::SECRETS[ $kind ], true ) ) {
+			foreach ( $definition['fields'] as $field => $spec ) {
+				$raw = $in[ $field ] ?? null;
+
+				if ( 'password' === $spec['type'] ) {
 					// Kept exactly as typed (and stored encrypted), less control characters.
-					$value = (string) preg_replace( '/[\x00-\x1F\x7F]/', '', is_scalar( $in[ $field ] ?? '' ) ? (string) $in[ $field ] : '' );
+					$value = (string) preg_replace( '/[\x00-\x1F\x7F]/', '', is_scalar( $raw ) ? (string) $raw : '' );
 
 					if ( '' !== $value ) {
 						$settings[ $kind ][ $field ] = SecretBox::seal( $value );
@@ -137,14 +374,24 @@ final class RemoteStorage {
 					continue;
 				}
 
-				if ( is_bool( $default ) ) {
-					$settings[ $kind ][ $field ] = ! empty( $in[ $field ] );
-				} elseif ( is_int( $default ) ) {
-					$settings[ $kind ][ $field ] = max( 1, min( 65535, absint( $in[ $field ] ?? $default ) ) );
-				} elseif ( 'endpoint' === $field ) {
-					$settings[ $kind ][ $field ] = esc_url_raw( trim( (string) ( $in[ $field ] ?? '' ) ), array( 'https', 'http' ) );
-				} else {
-					$settings[ $kind ][ $field ] = trim( sanitize_text_field( (string) ( $in[ $field ] ?? '' ) ) );
+				switch ( $spec['type'] ) {
+					case 'checkbox':
+						$settings[ $kind ][ $field ] = ! empty( $raw );
+						break;
+
+					case 'number':
+						$number = absint( is_scalar( $raw ) ? $raw : $definition['defaults'][ $field ] );
+						$number = null !== $spec['min'] ? max( $spec['min'], $number ) : $number;
+
+						$settings[ $kind ][ $field ] = null !== $spec['max'] ? min( $spec['max'], $number ) : $number;
+						break;
+
+					case 'url':
+						$settings[ $kind ][ $field ] = esc_url_raw( trim( is_scalar( $raw ) ? (string) $raw : '' ), array( 'https', 'http' ) );
+						break;
+
+					default:
+						$settings[ $kind ][ $field ] = trim( sanitize_text_field( is_scalar( $raw ) ? (string) $raw : '' ) );
 				}
 			}
 		}
@@ -152,7 +399,19 @@ final class RemoteStorage {
 		return $settings;
 	}
 
+	/**
+	 * Save the settings. The settings of a type no longer registered (its
+	 * add-on isn't active now) are kept for when it's back.
+	 */
 	public static function save( array $settings ): void {
+		$stored = get_option( self::OPTION, array() );
+
+		foreach ( is_array( $stored ) ? $stored : array() as $key => $value ) {
+			if ( is_array( $value ) && ! array_key_exists( $key, $settings ) ) {
+				$settings[ $key ] = $value;
+			}
+		}
+
 		update_option( self::OPTION, $settings, false );
 	}
 
@@ -162,20 +421,21 @@ final class RemoteStorage {
 	public static function target( ?array $settings = null ): RemoteTarget {
 		$settings = $settings ?? self::get();
 		$type     = (string) $settings['type'];
-		$config   = (array) ( $settings[ $type ] ?? array() );
+		$registry = self::registry();
 
-		foreach ( self::SECRETS[ $type ] ?? array() as $field ) {
+		if ( ! isset( $registry[ $type ] ) ) {
+			throw new \RuntimeException( esc_html__( 'No remote storage is set up.', 'wrensafe' ) );
+		}
+
+		$config = (array) ( $settings[ $type ] ?? array() );
+
+		foreach ( $registry[ $type ]['secrets'] as $field ) {
 			$config[ $field ] = SecretBox::open( (string) ( $config[ $field ] ?? '' ) );
 		}
 
-		switch ( $type ) {
-			case 'ftp':
-				return new FtpTarget( $config );
-			case 's3':
-				return new S3Target( $config );
-		}
+		$class = $registry[ $type ]['class'];
 
-		throw new \RuntimeException( esc_html__( 'No remote storage is set up.', 'wrensafe' ) );
+		return new $class( $config );
 	}
 
 	/**
@@ -189,12 +449,9 @@ final class RemoteStorage {
 
 	/** Why a type can't be used on this server ('' when it can). */
 	public static function unavailable_reason( string $type ): string {
-		$classes = array(
-			'ftp' => FtpTarget::class,
-			's3'  => S3Target::class,
-		);
+		$registry = self::registry();
 
-		return isset( $classes[ $type ] ) ? $classes[ $type ]::unavailable_reason() : '';
+		return isset( $registry[ $type ] ) ? (string) $registry[ $type ]['class']::unavailable_reason() : '';
 	}
 
 	/**

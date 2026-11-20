@@ -100,6 +100,8 @@ class MigrationAjax {
 				'token'           => $token,
 				'verify_ssl'      => Str::starts_with( strtolower( $destination_url ), 'https://' ),
 				'rest_style'      => $preflight['rest_style'],
+				// 1.2.1+ receiving sites take chunks as the raw body (confirmed again by init).
+				'raw_chunks'      => ! empty( $preflight['raw_chunks'] ),
 			)
 		);
 
