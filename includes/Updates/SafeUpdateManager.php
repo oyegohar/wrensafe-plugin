@@ -40,6 +40,7 @@ namespace WPBP\Updates;
 use WPBP\Backup\BackupJob;
 use WPBP\Backup\BackupManager;
 use WPBP\Core\Database\JobsRepository;
+use WPBP\Restore\RestoreManager;
 use WPBP\Utils\Errors;
 use WPBP\Utils\Logger;
 
@@ -100,10 +101,35 @@ class SafeUpdateManager {
 	/** When the work of this request should stop (microtime), 0 when none was set. */
 	private static float $deadline = 0.0;
 
+	/**
+	 * WP-Cron: seconds a step may run past its budget so it doesn't end with
+	 * updates installed but not checked ("all at once" updates in groups and
+	 * checks after). Visitors would otherwise run the unchecked plugins until
+	 * the next cron run, which on a host with a system cron may be minutes
+	 * away. PHP is given 300 seconds per step (prepare()).
+	 */
+	private const FINISH_CHECK_SECONDS = 150;
+
+	/**
+	 * Steps in a row that may be cut off (a fatal error, PHP's time limit,
+	 * the host ending the request) with the run still at the same point.
+	 * The next one stops the run safely instead of starting it again.
+	 */
+	private const MAX_CUT_OFF_STEPS = 3;
+
+	/** Where the last step started: run, position and how many times in a row. */
+	const CUT_OFF_OPTION = 'wpbp_safe_update_cut_offs';
+
 	/** The lock value this request holds ('' when none). */
 	private static string $lock = '';
 
 	private static bool $shutdown_registered = false;
+
+	/** Another request took over this request's lock: nothing more is saved. */
+	private static bool $lock_lost = false;
+
+	/** Exception code for a save refused after the lock was taken over. */
+	private const LOCK_LOST = 4091;
 
 	public static function is_running_here(): bool {
 		return self::$updating;
@@ -414,18 +440,88 @@ class SafeUpdateManager {
 	 *
 	 * @param bool $from_browser The request comes from the administrator's browser
 	 *                           (their login is used for the Plugins screen check).
+	 * @return bool False when nothing ran: the run is over or waiting for a
+	 *              decision, or another request holds its lock.
 	 */
-	public static function process( SafeUpdateJob $job, bool $from_browser, int $seconds = 20 ): void {
+	public static function process( SafeUpdateJob $job, bool $from_browser, int $seconds = 20 ): bool {
 		if ( $job->is_finished() || SafeUpdateJob::STATUS_PAUSED === $job->status() || ! self::lock() ) {
-			return;
+			return false;
 		}
 
 		try {
 			self::prepare();
 
+			// A step that dies at the same point every time would otherwise be
+			// started again forever, running the site check (and an add-on's
+			// paid screenshots) each time. The safety stop then puts the updates
+			// back; if that is cut off too, the run ends without touching files,
+			// and if even that is cut off, the run is marked failed.
+			$starts = self::note_step_start( $job );
+
+			if ( $starts > self::MAX_CUT_OFF_STEPS + 2 ) {
+				// Marked failed first, so nothing after this can start the run again.
+				Logger::critical( 'Safe Updates run #' . $job->id() . ' marked failed: its steps were cut off at the same point again and again, also while it was stopping.', array(), $job->id() );
+				$job->mark_failed( __( 'The run stopped: its steps were cut off at the same point again and again. Check the updates on the Plugins, Themes and Updates screens.', 'wrensafe' ) );
+				delete_option( self::CUT_OFF_OPTION );
+
+				$p           = self::without_rollback( $job );
+				$interrupted = false;
+
+				foreach ( $p['items'] as $i => $item ) {
+					if ( in_array( $item['state'], self::DONE_STATES, true ) ) {
+						continue;
+					}
+
+					$interrupted = $interrupted || ( 'rolling_back' === $item['state'] && ! empty( $item['point']['restore'] ) );
+
+					// No file work here: an own copy part-way back stays as it is.
+					$before                      = in_array( $item['state'], array( 'waiting', 'saving', 'ready' ), true );
+					$p['items'][ $i ]['state']   = $before ? 'skipped' : 'failed';
+					$p['items'][ $i ]['message'] = $before ? __( 'Not updated: the run stopped.', 'wrensafe' ) : ( 'rolling_back' === $item['state']
+						? __( 'The run stopped while the previous version was being put back. Check this update on the Plugins, Themes or Updates screen.', 'wrensafe' )
+						: __( 'The run stopped before this update could be checked. Check it on the Plugins, Themes or Updates screen.', 'wrensafe' ) );
+				}
+
+				$job->set_payload( $p );
+				SafeUpdates::remove_guard();
+
+				// An own copy's restore left part-way (WordPress core in Wrensafe Pro): its
+				// lock and maintenance page are cleared, as settling it would. Nothing is restored.
+				if ( $interrupted ) {
+					try {
+						RestoreManager::clear_restore_locks_and_maintenance();
+					} catch ( \Throwable $e ) {
+						Logger::warning( 'Safe Updates run #' . $job->id() . ': the restore lock couldn’t be cleared: ' . Errors::text( $e ), array(), $job->id() );
+					}
+				}
+
+				/** This action is documented in finish(). */
+				do_action( 'wpbp_safe_update_finished', $job, self::summary( $p ) );
+
+				return true;
+			}
+
+			if ( $starts > self::MAX_CUT_OFF_STEPS + 1 ) {
+				$error = __( 'its steps were cut off at the same point again and again, also while putting updates back', 'wrensafe' );
+
+				Logger::error( 'Safe Updates run #' . $job->id() . ' stopped: ' . $error, array(), $job->id() );
+				self::finish( $job, self::without_rollback( $job ), $error );
+				delete_option( self::CUT_OFF_OPTION );
+
+				return true;
+			}
+
+			if ( $starts > self::MAX_CUT_OFF_STEPS ) {
+				throw new \RuntimeException( esc_html__( 'its steps were cut off at the same point three times in a row: PHP’s time or memory limit, or the host ending the request', 'wrensafe' ) );
+			}
+
 			$deadline       = microtime( true ) + max( 5, $seconds );
 			$steps          = 0;
 			self::$deadline = $deadline;
+
+			// The lock is kept while a step waits for a download or a site check.
+			add_filter( 'upgrader_pre_download', array( self::class, 'keep_lock_filter' ), 1 );
+			add_action( 'http_api_debug', array( self::class, 'keep_lock' ), 10, 0 );
 
 			SafeUpdates::touch_guard();
 
@@ -434,24 +530,46 @@ class SafeUpdateManager {
 				++$steps;
 				SafeUpdates::touch_guard();
 
+				// Lost here or during the step (keep_lock()): the lock is then no longer this request's.
+				if ( ! self::renew_lock() || '' === self::$lock ) {
+					// Another request took over a lock this step outlived: it carries on with the run.
+					Logger::warning( 'Safe Updates run #' . $job->id() . ': a step took longer than its lock; another request continues the run.', array(), $job->id() );
+					break;
+				}
+
 				// WP-Cron: an add-on's check isn't done yet; wait here rather than for the next visit.
 				if ( ! $more && ! $from_browser && ! $job->is_finished() && ! empty( $job->payload()['wait'] ) && microtime( true ) < $deadline - 8 ) {
 					sleep( 3 );
 					$more = true;
 				}
-			} while ( $more && ! $job->is_finished() && SafeUpdateJob::STATUS_PAUSED !== $job->status() && microtime( true ) < $deadline - 3 && $steps < 500 );
+			} while (
+				$more && ! $job->is_finished() && SafeUpdateJob::STATUS_PAUSED !== $job->status() && $steps < 500
+				&& ( microtime( true ) < $deadline - 3 || ( ! $from_browser && microtime( true ) < $deadline + self::FINISH_CHECK_SECONDS && self::has_unchecked( $job ) ) )
+			);
 		} catch ( \Throwable $e ) {
-			$error = Errors::text( $e );
+			if ( self::$lock_lost ) {
+				// The run belongs to the request that took the lock over: leave it to that one.
+				Logger::warning( 'Safe Updates run #' . $job->id() . ': a step took longer than its lock; another request continues the run.', array(), $job->id() );
+			} else {
+				$error = Errors::text( $e );
 
-			Logger::error( 'Safe Updates run #' . $job->id() . ' stopped: ' . $error, array(), $job->id() );
-			self::finish( $job, self::safety_stop( $job, $error ), $error );
+				Logger::error( 'Safe Updates run #' . $job->id() . ' stopped: ' . $error, array(), $job->id() );
+				self::finish( $job, self::safety_stop( $job, $error ), $error );
+			}
 		} finally {
+			remove_filter( 'upgrader_pre_download', array( self::class, 'keep_lock_filter' ), 1 );
+			remove_action( 'http_api_debug', array( self::class, 'keep_lock' ), 10 );
 			self::unlock();
 		}
+
+		// The step returned: the next one starts counting again.
+		delete_option( self::CUT_OFF_OPTION );
 
 		if ( ! $job->is_finished() && SafeUpdateJob::STATUS_PAUSED !== $job->status() ) {
 			SafeUpdates::schedule_continue( $job->id() );
 		}
+
+		return true;
 	}
 
 	/**
@@ -1573,6 +1691,7 @@ class SafeUpdateManager {
 				}
 			} elseif ( 'rolling_back' === $item['state'] ) {
 				$items[ $i ]['state']   = 'failed';
+				$items[ $i ]['version'] = null !== $handler ? $handler->installed_version( UpdateTypes::id_of( $item ) ) : (string) $item['version'];
 				$items[ $i ]['message'] = __( 'The run stopped while the previous version was being put back. Check this update on the Plugins or Themes screen.', 'wrensafe' );
 			} elseif ( ! in_array( $item['state'], self::DONE_STATES, true ) ) {
 				// The run stopped with an error between the update and the check.
@@ -1593,8 +1712,9 @@ class SafeUpdateManager {
 
 			unset( $items[ $i ]['late'] );
 
-			// A copy is only kept for an item that now runs its new version.
-			if ( 'updated' !== $items[ $i ]['state'] && ! empty( $items[ $i ]['point'] ) ) {
+			// A copy is only kept for an item that now runs its new version, or
+			// whose folder is gone (the copy is then the only one left).
+			if ( 'updated' !== $items[ $i ]['state'] && ! empty( $items[ $i ]['point'] ) && '' !== (string) ( $items[ $i ]['version'] ?? '' ) ) {
 				self::delete_copy( $items[ $i ] );
 				$items[ $i ]['point'] = array();
 			}
@@ -1821,6 +1941,11 @@ class SafeUpdateManager {
 	// ---------------------------------------------------------------------
 	// Helpers.
 	// ---------------------------------------------------------------------
+
+	/** Whether updates of this run are installed but not checked yet. */
+	private static function has_unchecked( SafeUpdateJob $job ): bool {
+		return array() !== self::indexes( (array) $job->payload(), array( 'installed' ) );
+	}
 
 	/** When this request's work should stop (microtime). */
 	private static function deadline(): float {
@@ -2176,6 +2301,16 @@ class SafeUpdateManager {
 	}
 
 	private static function save( SafeUpdateJob $job, array $p, string $step = '' ): void {
+		// Past the renewal window (keep_lock()), a takeover may not have been noticed yet.
+		if ( ! self::$lock_lost && '' !== self::$lock && microtime( true ) > self::$deadline + self::FINISH_CHECK_SECONDS + self::ROLLBACK_SECONDS && ! self::holds_lock() ) {
+			self::$lock      = '';
+			self::$lock_lost = true;
+		}
+
+		if ( self::$lock_lost ) {
+			throw new \RuntimeException( esc_html( 'Safe Updates: this request no longer holds the run lock.' ), (int) self::LOCK_LOST );
+		}
+
 		$job->set_payload( $p );
 		$job->update_progress( self::progress( $p ), '' !== $step ? $step : self::describe( $p ) );
 	}
@@ -2314,6 +2449,154 @@ class SafeUpdateManager {
 	}
 
 	/**
+	 * Count a step starting at the run's current position. The position is
+	 * everything a step that gets further changes: the run's saved data and
+	 * progress text (an add-on's check reports its progress there), and the
+	 * state of the jobs it works through (the backup before the updates, an
+	 * own copy's restore). A step that returns resets the count (process()).
+	 *
+	 * @return int How many steps in a row started at this position.
+	 */
+	private static function note_step_start( SafeUpdateJob $job ): int {
+		$payload = $job->payload();
+		$own     = JobsRepository::find( $job->id() );
+		$ids     = array( (int) ( $payload['backup_job'] ?? 0 ) );
+
+		foreach ( (array) ( $payload['items'] ?? array() ) as $item ) {
+			$ids[] = (int) ( ( (array) ( $item['point'] ?? array() ) )['restore'] ?? 0 );
+		}
+
+		$jobs = array();
+
+		foreach ( array_unique( array_filter( $ids ) ) as $id ) {
+			$row = JobsRepository::find( $id );
+
+			if ( null !== $row ) {
+				$jobs[ $id ] = array( $row['status'] ?? '', $row['progress'] ?? '', $row['current_step'] ?? '', $row['payload'] ?? '', $row['result'] ?? '' );
+			}
+		}
+
+		$where = md5( (string) wp_json_encode( array( $payload, (string) ( $own['current_step'] ?? '' ), $jobs ) ) );
+		$seen  = get_option( self::CUT_OFF_OPTION, array() );
+		$count = is_array( $seen ) && (int) ( $seen['run'] ?? 0 ) === $job->id() && (string) ( $seen['where'] ?? '' ) === $where ? (int) ( $seen['count'] ?? 0 ) + 1 : 1;
+
+		update_option(
+			self::CUT_OFF_OPTION,
+			array(
+				'run'   => $job->id(),
+				'where' => $where,
+				'count' => $count,
+			),
+			false
+		);
+
+		return $count;
+	}
+
+	/**
+	 * The run's items for a stop after the safety stop itself was cut off.
+	 * An update being put back isn't put back again: as when a rollback
+	 * fails, the last resort keeps the site working (plugins: deactivated),
+	 * and the saved copy stays on disk until saved copies expire. An own copy
+	 * part-way back (WordPress core in Wrensafe Pro) is left as it is: when
+	 * finish() runs next, it finishes or undoes the part done without starting
+	 * it over (the last stop step marks it failed instead).
+	 */
+	private static function without_rollback( SafeUpdateJob $job ): array {
+		$p = self::normalize( $job->payload() );
+
+		foreach ( $p['items'] as $i => $item ) {
+			if ( 'rolling_back' !== $item['state'] || ( null !== self::own_point( $item ) && ! empty( $item['point']['done'] ) ) ) {
+				continue;
+			}
+
+			$handler = UpdateTypes::get( UpdateTypes::key_of( $item ) );
+
+			try {
+				$done = null !== $handler ? $handler->last_resort( $item, $job->id() ) : '';
+			} catch ( \Throwable $e ) {
+				$done = '';
+			}
+
+			$p['items'][ $i ]['state']   = 'failed';
+			$p['items'][ $i ]['message'] = trim( __( 'The run stopped while the previous version was being put back: that was cut off again and again.', 'wrensafe' ) . ' ' . $done . ' ' . __( 'Install the previous version again by hand.', 'wrensafe' ) );
+			$p['items'][ $i ]['point']   = array();
+
+			Logger::warning( 'Safe Updates: ' . self::item_label( $item ) . ' was not put back: the rollback was cut off again and again. ' . $done, array(), $job->id() );
+		}
+
+		return $p;
+	}
+
+	/**
+	 * While a step runs: after each HTTP request (a download, a site check),
+	 * up to the longest a step may take, so a step that hangs doesn't keep
+	 * the run locked.
+	 */
+	public static function keep_lock(): void {
+		if ( microtime( true ) < self::$deadline + self::FINISH_CHECK_SECONDS + self::ROLLBACK_SECONDS ) {
+			self::renew_lock();
+		} elseif ( '' !== self::$lock && ! self::holds_lock() ) {
+			// Past that, the lock isn't renewed, but a takeover is still noticed.
+			self::$lock      = '';
+			self::$lock_lost = true;
+		}
+	}
+
+	/** The lock row still holds this request's value. */
+	private static function holds_lock(): bool {
+		global $wpdb;
+
+		return (string) $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM %i WHERE option_name = %s', $wpdb->options, self::LOCK_OPTION ) ) === self::$lock;
+	}
+
+	/**
+	 * While a step runs: before a package download (upgrader_pre_download).
+	 *
+	 * @param mixed $reply Passed on unchanged.
+	 * @return mixed
+	 */
+	public static function keep_lock_filter( $reply ) {
+		self::keep_lock();
+
+		return $reply;
+	}
+
+	/**
+	 * A long step (a check, a rollback, or a WP-Cron step finishing its
+	 * checks) keeps the lock: its expiry moves forward, only while this
+	 * request still holds it, and PHP gets its time again.
+	 *
+	 * @return bool False when another request has taken the lock over.
+	 */
+	private static function renew_lock(): bool {
+		global $wpdb;
+
+		if ( '' === self::$lock || false === strpos( self::$lock, '|' ) ) {
+			return true;
+		}
+
+		$value = ( time() + self::LOCK_SECONDS ) . substr( self::$lock, strpos( self::$lock, '|' ) );
+
+		if ( $wpdb->query( $wpdb->prepare( 'UPDATE %i SET option_value = %s WHERE option_name = %s AND option_value = %s', $wpdb->options, $value, self::LOCK_OPTION, self::$lock ) ) ) {
+			self::$lock = $value;
+			wp_cache_delete( self::LOCK_OPTION, 'options' );
+		} elseif ( $value !== self::$lock && ! self::holds_lock() ) {
+			// Not changed and not ours any more (a same-second renewal changes nothing and is still ours).
+			self::$lock      = '';
+			self::$lock_lost = true;
+
+			return false;
+		}
+
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_set_time_limit, Squiz.PHP.DiscouragedFunctions.Discouraged -- as in prepare(): a step and its checks need time on slow hosts.
+		}
+
+		return true;
+	}
+
+	/**
 	 * Take the run's lock ("expiry|token"). It is released when the step
 	 * ends, and also on shutdown, so a request that dies (an update that
 	 * exits, a fatal error, the time limit) doesn't hold up the next one;
@@ -2358,7 +2641,8 @@ class SafeUpdateManager {
 		}
 
 		if ( $taken ) {
-			self::$lock = $value;
+			self::$lock      = $value;
+			self::$lock_lost = false;
 
 			if ( ! self::$shutdown_registered ) {
 				self::$shutdown_registered = true;

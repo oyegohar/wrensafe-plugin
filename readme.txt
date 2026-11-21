@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.4
+Stable tag: 1.2.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -13,6 +13,8 @@ Back up, restore and migrate WordPress: full or partial backups, off-site copies
 == Description ==
 
 Wrensafe backs up your WordPress site and restores it — on the same server or on a completely different one — without guesswork. Every backup is a single `.wbp` archive with its own manifest and checksums, every restore starts with an integrity check, and the dashboard tells you plainly whether your site is protected.
+
+https://www.youtube.com/watch?v=uYh1AkgG6Kk
 
 ### Back up
 
@@ -137,6 +139,10 @@ Yes, without installing that plugin. Go to **Import / Restore → Other Backup P
 
 Password-protected backups from other plugins can't be read; make an unencrypted backup in that plugin first. WordPress core files are not restored (this site keeps its own), only `wp-content` and the database.
 
+= Does a restore remove files added after the backup? =
+
+No. A restore puts back the files in the backup and leaves newer files where they are. After a hack, that means it won't remove files an attacker added, so clean the site first or restore onto a fresh WordPress install.
+
 = Will restoring log me out? =
 
 A database restore replaces the users table with the one from the backup, so you will be asked to log in again at the end — with the usernames and passwords from the site the backup came from.
@@ -167,7 +173,7 @@ Nothing is deleted unless you turn on **Settings → Advanced → Uninstall**. T
 
 = Does Wrensafe add files outside its plugin folder? =
 
-Only while it needs them. During a restore or a Safe Update it adds a small file to `wp-content/mu-plugins` (`wpbp-restore-plugin-guard.php` or `wpbp-safe-update-guard.php`) and removes it when it finishes, when Wrensafe is deactivated and when it is deleted. A staging site is a copy in a `staging-…` folder inside your WordPress folder, with its own database tables; a password-protected one gets `wrensafe-staging-guard.php` in its own `mu-plugins` folder, and page caching is turned off in its own `wp-config.php` (WP_CACHE). Backups, logs and temporary files are kept in the `wrensafe-storage` folder (or the folder you chose).
+Only while it needs them. During a restore or a Safe Update it adds a small file to `wp-content/mu-plugins` (`wpbp-restore-plugin-guard.php` or `wpbp-safe-update-guard.php`) and removes it when it finishes, when Wrensafe is deactivated and when it is deleted. A staging site is a copy in a `staging-…` folder inside your WordPress folder, with its own database tables; a password-protected one gets `wrensafe-staging-guard.php` in its own `mu-plugins` folder, and page caching is turned off in its own `wp-config.php` (WP_CACHE). Where that can't be done, the staging site's cache folder is emptied and the Activity Log says how to turn caching off. Backups, logs and temporary files are kept in the `wrensafe-storage` folder (or the folder you chose).
 
 = What are the minimum requirements? =
 
@@ -208,6 +214,18 @@ Wrensafe only contacts the services below, and only after a site administrator c
 15. Safe Updates: update several plugins one by one or all at once, follow the progress, and roll an update back later.
 
 == Changelog ==
+
+= 1.2.6 =
+The 1.2.5 fixes below come to WordPress.org with this version (1.2.5 was a private test release).
+
+* Changed: the plugin's WordPress.org page now has a short overview video.
+* Changed: the FAQ now explains that a restore leaves files added after the backup in place.
+
+= 1.2.5 =
+* Fixed: with "All at once", a Safe Updates run continued in the background (WP-Cron) could stop after installing updates and before checking them. On hosts where WP-Cron only runs every few minutes, visitors then got the site without those plugins until the next run. A background step now keeps going for up to 150 seconds more so it can check what it installed, and keeps its lock while it runs, also while it waits for a download or a site check.
+* Fixed: if a background Safe Updates step ended early (PHP's time or memory limit, or an exit), nothing continued the run. It now continues on the next WP-Cron run, usually within about a minute, or about six minutes later if the host killed the request outright. If steps are cut off at the same point three times in a row, the run stops and puts back any update it couldn't check (if that is cut off too, the run stops without trying again: an update being rolled back is handled as when a rollback fails, which keeps the site working and deactivates a plugin if needed, and every update left unchecked is named for you to check).
+* Fixed: a background run waiting for your decision (when an add-on asks for it) or for another request's step no longer starts a WP-Cron request on every page view; it waits until you decide, or looks again every 30 seconds.
+* Fixed: on a password-protected staging site whose page caching couldn't be turned off automatically (WP_CACHE set in an unusual way or outside its wp-config.php), pages cached earlier were kept. They are deleted now, and the Activity Log says how to turn caching off.
 
 = 1.2.4 =
 The first 1.2 release on WordPress.org. Versions 1.2.0 to 1.2.3 were tested on a few sites first; everything they added is listed here, and the 1.1.5 to 1.1.7 fixes are included.
@@ -318,6 +336,12 @@ The first 1.2 release on WordPress.org. Versions 1.2.0 to 1.2.3 were tested on a
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.2.6 =
+Safe Updates in the background get more time to check what they installed and continue after a step is cut off, and protected staging sites delete pages cached earlier.
+
+= 1.2.5 =
+Safe Updates in the background get more time to check what they installed and continue after a step is cut off, and protected staging sites delete pages cached earlier.
 
 = 1.2.4 =
 Adds Safe Updates, a safety net for plugin updates (turn its question off under Settings → Updates), makes staging password protection work on every web server, and keeps very large backups in short steps on PHP 7.4. Recommended for everyone.

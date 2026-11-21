@@ -271,29 +271,50 @@ class StagingProtection {
 	 * WP_CACHE is on) would show a page saved for someone who entered the
 	 * password to visitors who didn't. Turns WP_CACHE off in the staging
 	 * site's own wp-config.php and, when it was on, empties the staging site's
-	 * page cache folder (the Staging page calls this on every visit, so the
-	 * folder isn't emptied again while caching stays off).
+	 * page cache folder. When WP_CACHE may still be on but can't be changed
+	 * here, the folder is emptied and a warning logged once per Wrensafe
+	 * version (the Staging page calls this on every visit).
 	 */
 	private function disable_page_cache( string $staging_path ): void {
 		$config = $staging_path . 'wp-config.php';
 
-		if ( ! is_file( $config ) || ! wp_is_writable( $config ) ) {
+		if ( ! is_file( $config ) ) {
 			return;
 		}
 
-		$php = (string) file_get_contents( $config );
-		$new = preg_replace( '/define\(\s*([\'"])WP_CACHE\1\s*,\s*(?:true|1|([\'"])(?:1|true)\2)\s*\)/i', "define( 'WP_CACHE', false )", $php );
+		$php  = (string) file_get_contents( $config );
+		$new  = preg_replace( '/define\s*\(\s*([\'"])WP_CACHE\1\s*,\s*(?:true|1|([\'"])(?:1|true)\2)\s*\)/i', "define( 'WP_CACHE', false )", $php );
+		$off  = is_string( $new ) && $new !== $php && wp_is_writable( $config ) && false !== file_put_contents( $config, $new );
+		$name = basename( untrailingslashit( $staging_path ) );
 
-		if ( ! is_string( $new ) || $new === $php || false === file_put_contents( $config, $new ) ) {
+		if ( $off ) {
+			Logger::info( 'staging_page_cache_off: page caching turned off on the password-protected staging site ' . $name . ' (WP_CACHE in its wp-config.php) and its cached pages deleted.' );
+		} elseif ( preg_match( '/define\s*\(\s*([\'"])WP_CACHE\1\s*,\s*false\s*\)/i', $php )
+			|| ( false === stripos( $php, 'WP_CACHE' ) && ! is_file( untrailingslashit( StagingCreator::staging_content_dir( $staging_path ) ) . '/advanced-cache.php' ) ) ) {
+			// Page caching is off, or never set and no page-cache drop-in: nothing to delete.
 			return;
 		}
-
-		Logger::info( 'staging_page_cache_off: page caching turned off on the password-protected staging site ' . basename( untrailingslashit( $staging_path ) ) . ' (WP_CACHE in its wp-config.php) and its cached pages deleted.' );
 
 		$cache = untrailingslashit( StagingCreator::staging_content_dir( $staging_path ) ) . '/cache';
 
-		if ( is_dir( $cache ) && ! is_link( $cache ) ) {
-			\WPBP\Utils\FileSystem::delete_directory( $cache );
+		if ( ! is_dir( $cache ) || is_link( $cache ) ) {
+			return;
+		}
+
+		// When WP_CACHE couldn't be changed: once per Wrensafe version, not on every visit of the Staging page.
+		$checked = (array) get_option( 'wpbp_staging_cache_checked', array() );
+
+		if ( ! $off && WPBP_VERSION === ( $checked[ $name ] ?? '' ) ) {
+			return;
+		}
+
+		\WPBP\Utils\FileSystem::delete_directory( $cache );
+
+		if ( ! $off ) {
+			$checked[ $name ] = WPBP_VERSION;
+			update_option( 'wpbp_staging_cache_checked', $checked, false );
+			// WP_CACHE is set in a way this can't change (another file, getenv(), …).
+			Logger::warning( 'staging_page_cache_on: page caching may still be on for the password-protected staging site ' . $name . '. Its cached pages were deleted; set WP_CACHE to false in its wp-config.php so pages aren\'t cached again.' );
 		}
 	}
 

@@ -622,7 +622,9 @@ class SafeUpdates {
 	public static function continue_in_background( $job_id ): void {
 		$job = SafeUpdateJob::get( (int) $job_id );
 
-		if ( null === $job || $job->is_finished() ) {
+		// A run waiting for the administrator's decision continues once they
+		// decide (SafeUpdateManager::decide() schedules it).
+		if ( null === $job || $job->is_finished() || SafeUpdateJob::STATUS_PAUSED === $job->status() ) {
 			return;
 		}
 
@@ -631,13 +633,50 @@ class SafeUpdates {
 			return;
 		}
 
-		SafeUpdateManager::process( $job, false, 40 );
+		// WP-Cron removed the event that started this request, and only a step
+		// that ends normally schedules the next one. If this request ends
+		// early (exit, a fatal error such as PHP's time or memory limit), the
+		// shutdown handler schedules the next step 5 seconds out; that step
+		// waits up to a minute more if the run was active in the last 45
+		// seconds. If the host kills the request outright, nothing runs at
+		// shutdown: the fallback event continues the run after the lock time.
+		$finished = false;
+		$run_id   = $job->id();
+		$reserve  = str_repeat( ' ', 32768 ); // Freed first at shutdown: after PHP's memory limit, the handler still has room.
 
-		if ( ! $job->is_finished() ) {
-			// Straight on: no browser is waiting for this run.
-			self::schedule_continue( $job->id(), 1 );
-			spawn_cron();
+		register_shutdown_function(
+			static function () use ( &$finished, &$reserve, $run_id ): void {
+				$reserve = null;
+
+				if ( ! $finished ) {
+					wp_clear_scheduled_hook( self::CONTINUE_HOOK, array( $run_id ) );
+					wp_schedule_single_event( time() + 5, self::CONTINUE_HOOK, array( $run_id ) );
+				}
+			}
+		);
+
+		wp_schedule_single_event( time() + SafeUpdateManager::LOCK_SECONDS + 30, self::CONTINUE_HOOK, array( $run_id ) );
+
+		$ran = SafeUpdateManager::process( $job, false, 40 );
+
+		$finished = true;
+
+		wp_clear_scheduled_hook( self::CONTINUE_HOOK, array( $job->id() ) );
+
+		if ( $job->is_finished() || SafeUpdateJob::STATUS_PAUSED === $job->status() ) {
+			return;
 		}
+
+		if ( ! $ran ) {
+			// Another request holds the run (a step still working, or one cut
+			// off before its lock ran out): look again in 30 seconds, not every second.
+			self::schedule_continue( $job->id(), 30 );
+			return;
+		}
+
+		// Straight on: no browser is waiting for this run.
+		self::schedule_continue( $job->id(), 1 );
+		spawn_cron();
 	}
 
 	/**
