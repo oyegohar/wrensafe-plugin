@@ -131,6 +131,9 @@ class SafeUpdateManager {
 	/** Exception code for a save refused after the lock was taken over. */
 	private const LOCK_LOST = 4091;
 
+	/** Upgrader filters that renew the lock while a step installs a package. */
+	private const KEEP_LOCK_FILTERS = array( 'upgrader_pre_download', 'upgrader_source_selection', 'upgrader_clear_destination', 'upgrader_post_install' );
+
 	public static function is_running_here(): bool {
 		return self::$updating;
 	}
@@ -466,13 +469,17 @@ class SafeUpdateManager {
 
 				$p           = self::without_rollback( $job );
 				$interrupted = false;
+				$own_restore = array();
 
 				foreach ( $p['items'] as $i => $item ) {
 					if ( in_array( $item['state'], self::DONE_STATES, true ) ) {
 						continue;
 					}
 
-					$interrupted = $interrupted || ( 'rolling_back' === $item['state'] && ! empty( $item['point']['restore'] ) );
+					if ( 'rolling_back' === $item['state'] && ! empty( $item['point']['restore'] ) ) {
+						$interrupted   = true;
+						$own_restore[] = (int) $item['point']['restore'];
+					}
 
 					// No file work here: an own copy part-way back stays as it is.
 					$before                      = in_array( $item['state'], array( 'waiting', 'saving', 'ready' ), true );
@@ -487,7 +494,10 @@ class SafeUpdateManager {
 
 				// An own copy's restore left part-way (WordPress core in Wrensafe Pro): its
 				// lock and maintenance page are cleared, as settling it would. Nothing is restored.
-				if ( $interrupted ) {
+				// That clean-up is site-wide, so it waits while another restore is under way.
+				if ( $interrupted && self::other_restore_active( $own_restore ) ) {
+					Logger::warning( 'Safe Updates run #' . $job->id() . ': another restore is under way, so the interrupted restore’s lock and maintenance page were left for it (clear them under Rollback if they stay).', array(), $job->id() );
+				} elseif ( $interrupted ) {
 					try {
 						RestoreManager::clear_restore_locks_and_maintenance();
 					} catch ( \Throwable $e ) {
@@ -519,8 +529,12 @@ class SafeUpdateManager {
 			$steps          = 0;
 			self::$deadline = $deadline;
 
-			// The lock is kept while a step waits for a download or a site check.
-			add_filter( 'upgrader_pre_download', array( self::class, 'keep_lock_filter' ), 1 );
+			// The lock is kept while a step waits for a download or a site check,
+			// and between the stages of an install (after the unzip, before and
+			// after the copy), so one large package doesn't outlast it.
+			foreach ( self::KEEP_LOCK_FILTERS as $hook ) {
+				add_filter( $hook, array( self::class, 'keep_lock_filter' ), 1 );
+			}
 			add_action( 'http_api_debug', array( self::class, 'keep_lock' ), 10, 0 );
 
 			SafeUpdates::touch_guard();
@@ -547,6 +561,12 @@ class SafeUpdateManager {
 				&& ( microtime( true ) < $deadline - 3 || ( ! $from_browser && microtime( true ) < $deadline + self::FINISH_CHECK_SECONDS && self::has_unchecked( $job ) ) )
 			);
 		} catch ( \Throwable $e ) {
+			// A takeover no save() has noticed yet: the run is the other request's now.
+			if ( ! self::$lock_lost && '' !== self::$lock && ! self::holds_lock() ) {
+				self::$lock      = '';
+				self::$lock_lost = true;
+			}
+
 			if ( self::$lock_lost ) {
 				// The run belongs to the request that took the lock over: leave it to that one.
 				Logger::warning( 'Safe Updates run #' . $job->id() . ': a step took longer than its lock; another request continues the run.', array(), $job->id() );
@@ -557,9 +577,17 @@ class SafeUpdateManager {
 				self::finish( $job, self::safety_stop( $job, $error ), $error );
 			}
 		} finally {
-			remove_filter( 'upgrader_pre_download', array( self::class, 'keep_lock_filter' ), 1 );
+			foreach ( self::KEEP_LOCK_FILTERS as $hook ) {
+				remove_filter( $hook, array( self::class, 'keep_lock_filter' ), 1 );
+			}
 			remove_action( 'http_api_debug', array( self::class, 'keep_lock' ), 10 );
 			self::unlock();
+		}
+
+		// Another request took the lock over: it carries on with the run and
+		// counts its own steps, so this one leaves the count and the next step to it.
+		if ( self::$lock_lost ) {
+			return false;
 		}
 
 		// The step returned: the next one starts counting again.
@@ -633,6 +661,13 @@ class SafeUpdateManager {
 				$job->resume();
 				SafeUpdates::schedule_continue( $job->id(), 1 );
 			}
+		} catch ( \RuntimeException $e ) {
+			if ( self::LOCK_LOST !== $e->getCode() ) {
+				throw $e;
+			}
+
+			// A rollback that outlasted the lock: another request has the run now.
+			return new \WP_Error( 'wpbp_busy', __( 'Another request took over this run while your choice was being applied. Reload the page to see where it is.', 'wrensafe' ) );
 		} finally {
 			self::unlock();
 		}
@@ -990,7 +1025,11 @@ class SafeUpdateManager {
 			$ready = array();
 		}
 
-		if ( empty( $ready ) ) {
+		// Past the step's time (a background step finishing its checks), the
+		// updates already installed are checked before the next group goes in:
+		// a step that runs out of time then ends between a check and an
+		// update, never with updates installed but not checked.
+		if ( empty( $ready ) || ( self::indexes( $p, array( 'installed' ) ) && microtime( true ) >= self::deadline() - 3 ) ) {
 			$p['phase'] = 'check';
 			self::save( $job, $p );
 			return true;
@@ -1030,15 +1069,17 @@ class SafeUpdateManager {
 		$installed = self::indexes( $p, array( 'installed' ) );
 
 		if ( empty( $installed ) ) {
-			$p['phase'] = 'finish';
+			// Groups the update phase left for after this check (see phase_update_group()).
+			$p['phase'] = self::indexes( $p, $p['safe'] ? array( 'ready' ) : array( 'waiting', 'ready' ) ) ? 'update' : 'finish';
 			self::save( $job, $p );
 			return true;
 		}
 
 		++$p['rounds'];
 
-		// Every round rolls back at least one item; this only guards against a loop.
-		if ( $p['rounds'] > count( $p['items'] ) + 2 ) {
+		// Every round rolls back at least one item or ends a group's check
+		// (see phase_update_group()); this only guards against a loop.
+		if ( $p['rounds'] > count( $p['items'] ) + 2 + (int) ceil( count( $p['items'] ) / self::GROUP_SIZE ) ) {
 			$p = self::roll_back( $job, $p, $installed, __( 'The site check didn’t settle after several rollbacks.', 'wrensafe' ), $from_browser );
 		} else {
 			$p = self::check_items( $job, $p, $installed, $from_browser );
@@ -1329,10 +1370,11 @@ class SafeUpdateManager {
 			$after   = UpdateHealthCheck::run( $from_browser );
 			$problem = UpdateHealthCheck::compare( $p['baseline'], $after );
 
-			// A page can fail once while caches warm up; a fatal error is definite.
+			// A page can fail once while caches warm up; a fatal error is definite. A page that only took
+			// too long gets a longer second try: on a slow site, one slow answer isn't a broken site.
 			if ( null !== $problem && 'fatal' !== $problem['reason'] ) {
 				sleep( 3 );
-				$after   = UpdateHealthCheck::run( $from_browser );
+				$after   = UpdateHealthCheck::timed_out( $after ) ? UpdateHealthCheck::retry_timed_out( $after, $from_browser, $p['baseline'] ) : UpdateHealthCheck::run( $from_browser );
 				$problem = UpdateHealthCheck::compare( $p['baseline'], $after );
 			}
 
@@ -1442,18 +1484,33 @@ class SafeUpdateManager {
 			$p['items'][ $i ]['state'] = 'installed';
 		}
 
-		return self::roll_back( $job, $p, $targets, $message, $from_browser );
+		// Only a page that didn't answer in time, even with more time: no proof the update broke anything.
+		$why  = (string) ( $result['reason'] ?? '' );
+		$page = (array) ( $after[ (string) ( $result['check'] ?? '' ) ] ?? array() );
+
+		if ( ( 'unreachable' === $why && UpdateHealthCheck::timed_out( $after ) ) || ( 'server_error' === $why && UpdateHealthCheck::page_timed_out( $page ) ) ) {
+			$why = 'timeout';
+		}
+
+		return self::roll_back( $job, $p, $targets, $message, $from_browser, $why );
 	}
 
 	/**
 	 * Put the saved copies of the items at $indexes back.
 	 *
-	 * @param int[] $indexes
+	 * @param int[]  $indexes
+	 * @param string $why What the check found: 'fatal', 'server_error', 'blank', 'unreachable', 'timeout'
+	 *                    (pages that didn't answer in time), or '' when not from a check.
 	 */
-	private static function roll_back( SafeUpdateJob $job, array $p, array $indexes, string $reason, bool $from_browser ): array {
+	private static function roll_back( SafeUpdateJob $job, array $p, array $indexes, string $reason, bool $from_browser, string $why = '' ): array {
 		foreach ( $indexes as $i ) {
 			$p['items'][ $i ]['state']   = 'rolling_back';
 			$p['items'][ $i ]['message'] = $reason;
+
+			// Kept with the item: a rollback cut off here goes on in another request.
+			if ( '' !== $why ) {
+				$p['items'][ $i ]['why'] = $why;
+			}
 		}
 
 		self::save( $job, $p, __( 'Putting the previous version back…', 'wrensafe' ) );
@@ -1464,9 +1521,18 @@ class SafeUpdateManager {
 
 		foreach ( $indexes as $i ) {
 			$item     = $p['items'][ $i ];
+			$item_why = (string) ( $item['why'] ?? $why );
 			$handler  = self::type_of( $item );
 			$id       = UpdateTypes::id_of( $item );
 			$restored = self::restore_copy( $job, $item, max( self::deadline(), microtime( true ) + self::ROLLBACK_SECONDS ) );
+
+			// No copy, but the previous version is already in place: an earlier request put it back (and
+			// deleted the copy), then stopped before it could save that. The rollback is done; nothing must be
+			// deactivated over it.
+			if ( is_wp_error( $restored ) && 'wpbp_no_copy' === $restored->get_error_code() && '' !== (string) $item['from'] && (string) $item['from'] === $handler->installed_version( $id ) ) {
+				Logger::info( 'Safe Updates run #' . $job->id() . ': ' . self::item_label( $item ) . ' was already back at ' . $item['from'] . ' (put back by an earlier step).', array(), $job->id() );
+				$restored = true;
+			}
 
 			// The previous version isn't back yet; the run's next step goes on with it.
 			if ( false === $restored ) {
@@ -1474,6 +1540,8 @@ class SafeUpdateManager {
 				$pending[]                 = $i;
 				continue;
 			}
+
+			unset( $p['items'][ $i ]['why'] );
 
 			if ( true === $restored ) {
 				$handler->keep_after_rollback( $item );
@@ -1496,8 +1564,13 @@ class SafeUpdateManager {
 				$restored = new \WP_Error( 'wpbp_rollback_failed', __( 'the saved copy couldn’t be put back', 'wrensafe' ) );
 			}
 
-			// Last resort: whatever keeps the site working (plugins: deactivate).
-			$done = $handler->last_resort( $item, $job->id() );
+			if ( 'timeout' === $item_why && ! empty( $p['unverified'] ) ) {
+				// Slow, and no check to tell whether switching it off helps: the update stays.
+				$done = __( 'The update was kept: the site only answered too slowly, which doesn’t show the update broke it. Check the site.', 'wrensafe' );
+			} else {
+				// Last resort: whatever keeps the site working (plugins: deactivate).
+				$done = self::last_resort_checked( $job, $p, $i, $from_browser, $item_why );
+			}
 
 			$p['items'][ $i ]['point']   = $item['point'];
 			$p['items'][ $i ]['state']   = 'failed';
@@ -1514,6 +1587,7 @@ class SafeUpdateManager {
 			Logger::critical( 'Safe Updates: ' . self::item_label( $item ) . ' broke the site and could not be rolled back (' . $restored->get_error_message() . '). ' . $done . ' ' . $reason, array(), $job->id() );
 		}
 
+		$failed          = array_values( array_diff( array_intersect( $indexes, self::indexes( $p, array( 'failed' ) ) ), $pending ) );
 		$still_installed = self::indexes( $p, array( 'installed' ) );
 		self::guard( $p, array( 'installed' ) );
 
@@ -1534,20 +1608,23 @@ class SafeUpdateManager {
 		 */
 		do_action( 'wpbp_safe_update_rolled_back', $job, $rolled_back, $reason, $items );
 
-		// Is the site back to how it was? (All at once: the next round checks.)
-		if ( empty( $still_installed ) && empty( self::indexes( $p, array( 'rolling_back' ) ) ) && ! $p['unverified'] && $rolled_back ) {
+		// Is the site back to how it was? (All at once: the next round checks.) Also after an
+		// update that couldn't be rolled back: what Wrensafe did instead may not have been enough.
+		if ( empty( $still_installed ) && empty( self::indexes( $p, array( 'rolling_back' ) ) ) && ! $p['unverified'] && ( $rolled_back || $failed ) ) {
 			self::before_check( $p, self::changed( $p ) );
 
-			$problem = UpdateHealthCheck::compare( $p['baseline'], UpdateHealthCheck::run( $from_browser ) );
+			$after   = UpdateHealthCheck::run( $from_browser );
+			$problem = UpdateHealthCheck::compare( $p['baseline'], $after );
 
 			if ( null !== $problem ) {
 				sleep( 3 );
-				$problem = UpdateHealthCheck::compare( $p['baseline'], UpdateHealthCheck::run( $from_browser ) );
+				$after   = UpdateHealthCheck::timed_out( $after ) ? UpdateHealthCheck::retry_timed_out( $after, $from_browser, $p['baseline'] ) : UpdateHealthCheck::run( $from_browser );
+				$problem = UpdateHealthCheck::compare( $p['baseline'], $after );
 			}
 
 			if ( null !== $problem ) {
 				$culprit = 'fatal' === $problem['reason'] ? self::culprit( $p, $indexes, (string) ( $problem['file'] ?? '' ) ) : null;
-				$done    = null !== $culprit ? self::type_of( $p['items'][ $culprit ] )->last_resort( $p['items'][ $culprit ], $job->id() ) : '';
+				$done    = null !== $culprit ? self::last_resort_checked( $job, $p, $culprit, $from_browser, 'fatal' ) : '';
 
 				foreach ( $indexes as $i ) {
 					$p['items'][ $i ]['message'] .= ' ' . ( $i === $culprit
@@ -1556,10 +1633,126 @@ class SafeUpdateManager {
 				}
 
 				Logger::error( 'Safe Updates run #' . $job->id() . ': the site still reports a problem after the rollback: ' . $problem['message'], array(), $job->id() );
+
+				// Every later update would be compared with the site as it was before the run and
+				// rolled back for this same problem: the run stops here instead.
+				$p = self::stop_remaining( $p, __( 'Not updated: the site still had a problem after an earlier update in this run, so the run stopped instead of blaming more updates for it.', 'wrensafe' ) );
 			}
 		}
 
 		return $p;
+	}
+
+	/**
+	 * The last resort for an update that couldn't be rolled back (plugins: deactivate it), then a look
+	 * at the site: when switching a plugin off broke something that needs it (a theme calling its
+	 * functions), it is switched back on. Not a plugin that itself stopped the site with a fatal error:
+	 * on again, it could lock the administrator out of wp-admin too.
+	 *
+	 * @param array<string,mixed> $p
+	 * @param string              $why What the check found (see roll_back()).
+	 * @return string What was done, for the item's message.
+	 */
+	private static function last_resort_checked( SafeUpdateJob $job, array $p, int $i, bool $from_browser, string $why = '' ): string {
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+		$item    = $p['items'][ $i ];
+		$handler = self::type_of( $item );
+		$plugin  = PluginUpdateType::KEY === UpdateTypes::key_of( $item ) ? UpdateTypes::id_of( $item ) : '';
+		$active  = '' !== $plugin && is_plugin_active( $plugin );
+		$network = '' !== $plugin && is_multisite() && is_plugin_active_for_network( $plugin );
+		$done    = $handler->last_resort( $item, $job->id() );
+
+		if ( ! $active || $p['unverified'] || 'fatal' === $why ) {
+			return $done;
+		}
+
+		$results = UpdateHealthCheck::run( $from_browser );
+		$problem = UpdateHealthCheck::compare( $p['baseline'], $results );
+		$owner   = null !== $problem && 'fatal' === $problem['reason'] ? self::culprit( $p, array( $i ), (string) ( $problem['file'] ?? '' ) ) : $i;
+
+		// Only slow pages before: it stays off only if the site works again without it. Still slow, or any
+		// other problem, means switching it off didn't help (the update isn't shown to be the cause).
+		$slow = 'timeout' === $why && ( null !== $problem || UpdateHealthCheck::timed_out( $results ) );
+
+		if ( $slow || ( null !== $problem && 'fatal' === $problem['reason'] && null === $owner ) ) {
+			$back = activate_plugin( $plugin, '', $network, true );
+
+			Logger::warning( 'Safe Updates run #' . $job->id() . ': ' . ( $slow ? 'with ' . self::item_label( $item ) . ' off the site still didn’t work' . ( null !== $problem ? ' (' . $problem['message'] . ')' : '' ) : 'switching ' . self::item_label( $item ) . ' off broke the site (' . $problem['message'] . ')' ) . '; ' . ( is_wp_error( $back ) ? 'switching it back on failed: ' . $back->get_error_message() : 'it was switched back on.' ), array(), $job->id() );
+
+			if ( $slow ) {
+				return is_wp_error( $back )
+					? __( 'It was deactivated, but the site still didn’t work without it, and it couldn’t be switched back on.', 'wrensafe' )
+					: __( 'The update was kept and the plugin stays active: switching it off didn’t make the site work again, so the update isn’t shown to be the cause. Check the site.', 'wrensafe' );
+			}
+
+			return is_wp_error( $back )
+				? __( 'It was deactivated, but the site needs it (something else stopped working without it) and it couldn’t be switched back on.', 'wrensafe' )
+				: __( 'It stays active: switching it off broke something that needs it (often the theme), so it was switched back on.', 'wrensafe' );
+		}
+
+		return $done;
+	}
+
+	/**
+	 * End the items not started yet, with a reason (the run then finishes).
+	 *
+	 * @param array<string,mixed> $p
+	 */
+	private static function stop_remaining( array $p, string $message ): array {
+		foreach ( $p['items'] as $i => $item ) {
+			if ( in_array( $item['state'], array( 'waiting', 'saving', 'ready' ), true ) ) {
+				$p['items'][ $i ]['state']   = 'skipped';
+				$p['items'][ $i ]['message'] = $message;
+			}
+		}
+
+		return $p;
+	}
+
+	/**
+	 * Stop the run at once ("Stop now"). Updates not started stay as they are; an update installed but
+	 * not checked yet goes back to its saved copy. When a step is running right now, it stops at its next
+	 * safe point instead (as with "Stop after this update"), at most a few minutes later.
+	 *
+	 * @param string $why Why it was stopped, for the log ('' = by the administrator).
+	 * @return bool True when the run has ended; false when a running step will end it.
+	 */
+	public static function stop_now( SafeUpdateJob $job, string $why = '' ): bool {
+		if ( $job->is_finished() ) {
+			return true;
+		}
+
+		// Once: a restore waiting for the run asks again on every step.
+		if ( ! self::cancel_requested( $job ) ) {
+			self::request_cancel( $job );
+		}
+
+		if ( ! self::lock() ) {
+			return false;
+		}
+
+		try {
+			$fresh = SafeUpdateJob::get( $job->id() );
+
+			if ( null === $fresh || $fresh->is_finished() ) {
+				return true;
+			}
+
+			if ( function_exists( 'set_time_limit' ) ) {
+				@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_set_time_limit, Squiz.PHP.DiscouragedFunctions.Discouraged -- putting saved copies back can take a while.
+			}
+
+			$reason = '' !== $why ? $why : __( 'You stopped the run before this update was checked.', 'wrensafe' );
+
+			Logger::info( 'Safe Updates run #' . $fresh->id() . ': stopped at once (' . ( '' !== $why ? $why : 'by user #' . get_current_user_id() ) . ').', array(), $fresh->id() );
+
+			self::finish( $fresh, self::safety_stop( $fresh, '', $reason ) );
+		} finally {
+			self::unlock();
+		}
+
+		return true;
 	}
 
 	/**
@@ -1598,11 +1791,14 @@ class SafeUpdateManager {
 	}
 
 	/**
-	 * The run stopped with an error. In a safe mode, no update stays
-	 * unchecked: every item installed but not yet checked goes back to its
-	 * saved copy.
+	 * The run stopped with an error, or was stopped at once. In a safe mode,
+	 * no update stays unchecked: every item installed but not yet checked
+	 * goes back to its saved copy.
+	 *
+	 * @param string $error  The error that stopped the run ('' when stopped on purpose).
+	 * @param string $reason Why, in the items' messages, when stopped on purpose.
 	 */
-	private static function safety_stop( SafeUpdateJob $job, string $error ): array {
+	private static function safety_stop( SafeUpdateJob $job, string $error, string $reason = '' ): array {
 		$p = self::normalize( $job->payload() );
 
 		if ( empty( $p['safe'] ) || empty( $p['items'] ) ) {
@@ -1616,6 +1812,9 @@ class SafeUpdateManager {
 			if ( empty( $item['point']['done'] ) || null === $handler ) {
 				continue;
 			}
+
+			// Several copies can take longer than the lock lasts.
+			self::renew_lock();
 
 			try {
 				$restored = self::restore_copy( $job, $item, microtime( true ) + 60 );
@@ -1635,8 +1834,11 @@ class SafeUpdateManager {
 
 				$p['items'][ $i ]['state']   = 'rolled_back';
 				$p['items'][ $i ]['version'] = $handler->installed_version( UpdateTypes::id_of( $item ) );
-				/* translators: 1: version number, 2: error message */
-				$p['items'][ $i ]['message'] = sprintf( __( 'Rolled back to %1$s: the run stopped with an error before the site could be checked (%2$s).', 'wrensafe' ), $item['from'], $error );
+				$p['items'][ $i ]['message'] = '' !== $reason
+					/* translators: 1: version number, 2: why, e.g. "You stopped the run before this update was checked." */
+					? sprintf( __( 'Rolled back to %1$s. %2$s', 'wrensafe' ), $item['from'], $reason )
+					/* translators: 1: version number, 2: error message */
+					: sprintf( __( 'Rolled back to %1$s: the run stopped with an error before the site could be checked (%2$s).', 'wrensafe' ), $item['from'], $error );
 
 				self::delete_copy( $item );
 				$p['items'][ $i ]['point'] = array();
@@ -1646,8 +1848,10 @@ class SafeUpdateManager {
 				// An own copy says what it left in place.
 				$p['items'][ $i ]['state']   = 'failed';
 				$p['items'][ $i ]['version'] = $handler->installed_version( UpdateTypes::id_of( $item ) );
-				/* translators: 1: error message, 2: what was kept, e.g. "WordPress 7.1 was kept." */
-				$p['items'][ $i ]['message'] = sprintf( __( 'The run stopped with an error before the site could be checked (%1$s). %2$s', 'wrensafe' ), $error, $restored->get_error_message() );
+				$p['items'][ $i ]['message'] = '' !== $reason
+					? trim( $reason . ' ' . $restored->get_error_message() )
+					/* translators: 1: error message, 2: what was kept, e.g. "WordPress 7.1 was kept." */
+					: sprintf( __( 'The run stopped with an error before the site could be checked (%1$s). %2$s', 'wrensafe' ), $error, $restored->get_error_message() );
 
 				Logger::critical( 'Safe Updates: ' . self::item_label( $item ) . ' could not be rolled back after the run stopped: ' . $restored->get_error_message(), array(), $job->id() );
 			}
@@ -1849,6 +2053,9 @@ class SafeUpdateManager {
 			'cleared'  => array_values( (array) ( $p['cleared'] ?? array() ) ),
 			'backupId' => (int) ( $p['backup_id'] ?? 0 ),
 			'date'     => $row ? mysql2date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (string) $row['created_at'] ) : '',
+			// For the screens: a stop asked for, and how long nothing has moved (a run nobody continues).
+			'stopping' => ! $job->is_finished() && self::cancel_requested( $job ),
+			'idle'     => $job->is_finished() ? 0 : self::seconds_since_activity( $job ),
 		);
 	}
 
@@ -2301,8 +2508,9 @@ class SafeUpdateManager {
 	}
 
 	private static function save( SafeUpdateJob $job, array $p, string $step = '' ): void {
-		// Past the renewal window (keep_lock()), a takeover may not have been noticed yet.
-		if ( ! self::$lock_lost && '' !== self::$lock && microtime( true ) > self::$deadline + self::FINISH_CHECK_SECONDS + self::ROLLBACK_SECONDS && ! self::holds_lock() ) {
+		// Once the lock's time is up, or past the renewal window (keep_lock()), a
+		// takeover may not have been noticed yet.
+		if ( ! self::$lock_lost && '' !== self::$lock && ( time() >= (int) self::$lock || microtime( true ) > self::$deadline + self::FINISH_CHECK_SECONDS + self::ROLLBACK_SECONDS ) && ! self::holds_lock() ) {
 			self::$lock      = '';
 			self::$lock_lost = true;
 		}
@@ -2512,11 +2720,18 @@ class SafeUpdateManager {
 
 			$handler = UpdateTypes::get( UpdateTypes::key_of( $item ) );
 
-			try {
-				$done = null !== $handler ? $handler->last_resort( $item, $job->id() ) : '';
-			} catch ( \Throwable $e ) {
-				$done = '';
+			if ( 'timeout' === ( $item['why'] ?? '' ) ) {
+				// Only slow pages: no proof the update broke anything, so nothing is switched off.
+				$done = __( 'It was left as it is: the site only answered too slowly, which doesn’t show the update broke it.', 'wrensafe' );
+			} else {
+				try {
+					$done = null !== $handler ? $handler->last_resort( $item, $job->id() ) : '';
+				} catch ( \Throwable $e ) {
+					$done = '';
+				}
 			}
+
+			unset( $p['items'][ $i ]['why'] );
 
 			$p['items'][ $i ]['state']   = 'failed';
 			$p['items'][ $i ]['message'] = trim( __( 'The run stopped while the previous version was being put back: that was cut off again and again.', 'wrensafe' ) . ' ' . $done . ' ' . __( 'Install the previous version again by hand.', 'wrensafe' ) );
@@ -2541,6 +2756,27 @@ class SafeUpdateManager {
 			self::$lock      = '';
 			self::$lock_lost = true;
 		}
+	}
+
+	/**
+	 * Whether a restore other than the given ones is under way: running and
+	 * active in the last three minutes (a running restore updates its job
+	 * every few seconds). Only a running restore holds the restore lock, the
+	 * maintenance page, the boot guard and work tables; upload and import
+	 * previews stay "pending" for good, and an older running job was cut off.
+	 *
+	 * @param int[] $own The run's own restore job ids.
+	 */
+	private static function other_restore_active( array $own ): bool {
+		$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - 3 * MINUTE_IN_SECONDS );
+
+		foreach ( JobsRepository::list_by_type( 'restore', 50 ) as $row ) {
+			if ( 'running' === (string) $row['status'] && (string) ( $row['updated_at'] ?? '' ) >= $since && ! in_array( (int) $row['id'], $own, true ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/** The lock row still holds this request's value. */
@@ -2581,8 +2817,10 @@ class SafeUpdateManager {
 		if ( $wpdb->query( $wpdb->prepare( 'UPDATE %i SET option_value = %s WHERE option_name = %s AND option_value = %s', $wpdb->options, $value, self::LOCK_OPTION, self::$lock ) ) ) {
 			self::$lock = $value;
 			wp_cache_delete( self::LOCK_OPTION, 'options' );
-		} elseif ( $value !== self::$lock && ! self::holds_lock() ) {
-			// Not changed and not ours any more (a same-second renewal changes nothing and is still ours).
+		} elseif ( ! self::holds_lock() ) {
+			// Not changed and not ours any more. A renewal in the same second as the
+			// last one changes nothing either (MySQL counts no changed row), so the
+			// row itself says whether the lock is still this request's.
 			self::$lock      = '';
 			self::$lock_lost = true;
 

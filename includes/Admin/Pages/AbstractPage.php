@@ -19,6 +19,9 @@ abstract class AbstractPage {
 	 * Header buttons draw inline SVG instead of the dashicon they name, so
 	 * the icon always takes the button's text colour (see Icons).
 	 */
+	/** The author's site, for the credit in the brand bar. */
+	public const AUTHOR_URL = 'https://www.husnaingohar.com/';
+
 	private const HEADER_ICON_MAP = array(
 		'dashicons-plus-alt2'       => 'plus',
 		'dashicons-backup'          => 'restore',
@@ -105,6 +108,7 @@ abstract class AbstractPage {
 		}
 
 		printf( '<div class="wrap wpbp-wrap wpbp-page-%s">', esc_attr( $this->page_key() ) );
+		self::render_brand_bar();
 		$this->render_header();
 		echo '<hr class="wp-header-end">'; // WordPress core moves admin notices to just after this.
 		$this->render_content();
@@ -130,12 +134,7 @@ abstract class AbstractPage {
 		?>
 		<header class="wpbp-header">
 			<div class="wpbp-header-main">
-				<span class="wpbp-brand-mark" aria-hidden="true"><?php echo wp_kses( self::BRAND_MARK_SVG, Kses::allowed() ); ?></span>
 				<div class="wpbp-header-text">
-					<p class="wpbp-eyebrow">
-						<span class="wpbp-eyebrow-name"><?php esc_html_e( 'Wrensafe', 'wrensafe' ); ?></span>
-						<span class="wpbp-version"><?php echo esc_html( 'v' . WPBP_VERSION ); ?></span>
-					</p>
 					<h1 class="wpbp-page-title">
 						<?php echo esc_html( $this->get_title() ); ?>
 						<?php if ( ! empty( $pill['label'] ) ) : ?>
@@ -168,6 +167,104 @@ abstract class AbstractPage {
 				</div>
 			<?php endif; ?>
 		</header>
+		<?php
+	}
+
+	/**
+	 * What the brand bar shows. Add-ons can change it (White Label: another name, no credit).
+	 *
+	 * @return array{name:string,tagline:string,mark:bool,credit:bool,links:array<int,array{label:string,url:string}>}
+	 */
+	public static function brand(): array {
+		$brand = array(
+			'name'    => __( 'Wrensafe', 'wrensafe' ),
+			'tagline' => __( 'Backup, restore and migration', 'wrensafe' ),
+			'mark'    => true,
+			'credit'  => true,
+			'links'   => array(
+				array(
+					'label' => __( 'Docs', 'wrensafe' ),
+					'url'   => 'https://wordpress.org/plugins/wrensafe/#faq',
+				),
+				array(
+					'label' => __( 'Help', 'wrensafe' ),
+					'url'   => 'https://wordpress.org/support/plugin/wrensafe/',
+				),
+			),
+		);
+
+		/**
+		 * Filters the brand bar at the top of Wrensafe's screens.
+		 *
+		 * @param array $brand 'name', 'tagline', 'mark' (show the logo), 'credit' (show "Made with ♥ by
+		 *                     Husnain Gohar") and 'links' (each 'label' and 'url', http or https).
+		 */
+		$filtered = apply_filters( 'wpbp_admin_brand', $brand );
+		$filtered = is_array( $filtered ) ? $filtered : $brand;
+		$links    = array();
+
+		foreach ( (array) ( $filtered['links'] ?? array() ) as $link ) {
+			$url = is_array( $link ) ? esc_url_raw( (string) ( $link['url'] ?? '' ), array( 'http', 'https' ) ) : '';
+
+			if ( '' !== $url && '' !== (string) ( $link['label'] ?? '' ) ) {
+				$links[] = array(
+					'label' => (string) $link['label'],
+					'url'   => $url,
+				);
+			}
+		}
+
+		return array(
+			'name'    => '' !== (string) ( $filtered['name'] ?? '' ) ? (string) $filtered['name'] : $brand['name'],
+			'tagline' => (string) ( $filtered['tagline'] ?? '' ),
+			'mark'    => ! empty( $filtered['mark'] ),
+			'credit'  => ! empty( $filtered['credit'] ),
+			'links'   => array_slice( $links, 0, 4 ),
+		);
+	}
+
+	/** The brand bar: logo, name, version, tagline, help links and the author's credit. */
+	public static function render_brand_bar(): void {
+		$brand = self::brand();
+		$tab   = '<span class="screen-reader-text"> ' . esc_html__( '(opens in a new tab)', 'wrensafe' ) . '</span>';
+		?>
+		<div class="wpbp-brandbar">
+			<div class="wpbp-brandbar-main">
+				<?php if ( $brand['mark'] ) : ?>
+					<span class="wpbp-brandbar-tile" aria-hidden="true"><?php echo wp_kses( self::BRAND_MARK_SVG, Kses::allowed() ); ?></span>
+				<?php endif; ?>
+				<div class="wpbp-brandbar-text">
+					<p class="wpbp-brandbar-name">
+						<?php echo esc_html( $brand['name'] ); ?>
+						<span class="wpbp-brandbar-version"><?php echo esc_html( WPBP_VERSION ); ?></span>
+					</p>
+					<?php if ( '' !== $brand['tagline'] ) : ?>
+						<p class="wpbp-brandbar-tagline"><?php echo esc_html( $brand['tagline'] ); ?></p>
+					<?php endif; ?>
+				</div>
+			</div>
+			<?php if ( $brand['links'] || $brand['credit'] ) : ?>
+				<nav class="wpbp-brandbar-links" aria-label="<?php esc_attr_e( 'Wrensafe help', 'wrensafe' ); ?>">
+					<?php foreach ( $brand['links'] as $link ) : ?>
+						<a href="<?php echo esc_url( $link['url'] ); ?>" target="_blank" rel="noopener"><?php echo esc_html( $link['label'] ) . wp_kses( $tab, Kses::allowed() ); ?></a>
+					<?php endforeach; ?>
+					<?php if ( $brand['credit'] ) : ?>
+						<a class="wpbp-credit" href="<?php echo esc_url( self::AUTHOR_URL ); ?>" target="_blank" rel="noopener">
+							<?php
+							$heart = '<svg class="wpbp-heart" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg><span class="screen-reader-text">' . esc_html__( 'love', 'wrensafe' ) . '</span>';
+							$name  = '<span class="wpbp-credit-name">' . esc_html__( 'Husnain Gohar', 'wrensafe' ) . '</span>';
+
+							echo wp_kses(
+								/* translators: 1: a heart (read as "love"), 2: the author's name */
+								sprintf( esc_html__( 'Made with %1$s by %2$s', 'wrensafe' ), $heart, $name ) . $tab,
+								Kses::allowed()
+							);
+							?>
+						</a>
+					<?php endif; ?>
+				</nav>
+			<?php endif; ?>
+		</div>
 		<?php
 	}
 

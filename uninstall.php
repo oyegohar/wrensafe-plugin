@@ -20,7 +20,18 @@ if ( version_compare( PHP_VERSION, '7.4', '<' ) ) {
 	return;
 }
 
-require_once __DIR__ . '/includes/Core/Settings.php';
-require_once __DIR__ . '/includes/Core/Uninstaller.php';
+// When two copies are deleted together, the first one's uninstall has
+// already declared these classes in this request: use them (loading the same
+// classes again from this copy's folder would stop PHP).
+if ( ! class_exists( '\WPBP\Core\Settings', false ) ) {
+	require_once __DIR__ . '/includes/Core/Settings.php';
+}
 
-\WPBP\Core\Uninstaller::uninstall();
+if ( ! class_exists( '\WPBP\Core\Uninstaller', false ) ) {
+	require_once __DIR__ . '/includes/Core/Uninstaller.php';
+}
+
+// This copy's folder as WordPress names it (also when the folder is a
+// symlink; WordPress registers it before it runs this file).
+// WP_UNINSTALL_PLUGIN still names the first copy then.
+\WPBP\Core\Uninstaller::uninstall( dirname( plugin_basename( __FILE__ ) ) );

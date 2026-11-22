@@ -208,6 +208,44 @@
 	 * A run: progress, the list of plugins, and the loop that drives it.
 	 * ------------------------------------------------------------------ */
 
+	/**
+	 * "Stop after this update" and "Stop now" for a running run. Stop now ends the run at once when no
+	 * step is running (an update installed but not checked yet is put back); otherwise the step ends it.
+	 */
+	function stopControls( run, texts, $box ) {
+		var $later = $( '<button type="button" class="button wpbp-su-stop"></button>' ).text( texts.cancelRun );
+		var $now = $( '<button type="button" class="button-link button-link-delete wpbp-su-stop-now"></button>' ).text( base.stopNow );
+
+		$later.on( 'click', function () {
+			$later.prop( 'disabled', true ).text( texts.cancelling );
+			post( 'safe_update_cancel', { job_id: run.id } );
+		} );
+
+		$now.on( 'click', function () {
+			// eslint-disable-next-line no-alert
+			if ( ! window.confirm( base.stopNowConfirm ) ) {
+				return;
+			}
+
+			$later.prop( 'disabled', true );
+			$now.prop( 'disabled', true ).text( base.stoppingNow );
+
+			post( 'safe_update_cancel', { job_id: run.id, now: 1 } ).done( function ( response ) {
+				if ( ! response || ! response.success || ! response.data ) {
+					return;
+				}
+
+				renderRun( $box, response.data );
+
+				if ( ! response.data.finished ) {
+					$box.find( '.wpbp-su-run-idle' ).prop( 'hidden', false ).text( base.stopLater );
+				}
+			} );
+		} );
+
+		return $later.add( $now );
+	}
+
 	function renderRun( $box, run ) {
 		var $progress = $box.find( '.wpbp-su-progress' );
 
@@ -215,11 +253,17 @@
 			$box.empty().append(
 				$( '<p class="wpbp-su-step"></p>' ),
 				$( '<div class="wpbp-su-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="wpbp-su-progress-fill"></span></div>' ),
+				$( '<p class="wpbp-su-run-idle" hidden></p>' ),
 				$( '<ul class="wpbp-su-items"></ul>' ),
 				$( '<p class="wpbp-su-run-note"></p>' )
 			);
 			$progress = $box.find( '.wpbp-su-progress' );
 		}
+
+		// A run nothing has moved for a while (its window closed, WP-Cron not running): say so.
+		var idle = run.finished || run.paused || run.stopping ? 0 : Math.floor( ( run.idle || 0 ) / 60 );
+
+		$box.find( '.wpbp-su-run-idle' ).prop( 'hidden', idle < 5 ).text( idle >= 5 && base.idle ? base.idle.replace( '%d', idle ) : '' );
 
 		var percent = run.finished ? 100 : Math.max( 2, run.progress || 0 );
 
@@ -643,7 +687,7 @@
 	function showProgress( win, run ) {
 		var texts = textsFor( run.items );
 		var $run = $( '<div class="wpbp-su-run" aria-live="polite"></div>' );
-		var $stop = $( '<button type="button" class="button wpbp-su-stop"></button>' ).text( texts.cancelRun );
+		var $stop = stopControls( run, texts, $run );
 		var $close = $( '<button type="button" class="button"></button>' ).text( base.close );
 
 		win.running = true;
@@ -662,11 +706,6 @@
 
 		$close.on( 'click', function () {
 			win.close();
-		} );
-
-		$stop.on( 'click', function () {
-			$stop.prop( 'disabled', true ).text( texts.cancelling );
-			post( 'safe_update_cancel', { job_id: run.id } );
 		} );
 
 		bindRunActions( $run );
@@ -918,11 +957,7 @@
 			}
 
 			var texts = textsFor( run.items );
-			var $stop = $( '<button type="button" class="button wpbp-su-stop"></button>' ).text( texts.cancelRun ).on( 'click', function () {
-				$stop.prop( 'disabled', true ).text( texts.cancelling );
-				post( 'safe_update_cancel', { job_id: run.id } );
-			} );
-			$actions.empty().append( $stop );
+			$actions.empty().append( stopControls( run, texts, $run ) );
 
 			new Runner(
 				run.id,

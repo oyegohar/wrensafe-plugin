@@ -350,6 +350,12 @@ class SafeUpdates {
 				'rolledBack'     => __( 'Rolled back.', 'wrensafe' ),
 				'checking'       => __( 'Checking for updates…', 'wrensafe' ),
 				'keep'           => __( 'Keep the update', 'wrensafe' ),
+				'stopNow'        => __( 'Stop now', 'wrensafe' ),
+				'stopNowConfirm' => __( 'Stop the run now? Updates not started yet stay as they are, and an update installed but not checked yet is put back to its previous version.', 'wrensafe' ),
+				'stoppingNow'    => __( 'Stopping…', 'wrensafe' ),
+				'stopLater'      => __( 'A step is running: the run stops as soon as it ends.', 'wrensafe' ),
+				/* translators: %d: number of minutes */
+				'idle'           => __( 'Nothing has happened for %d minutes. If the run seems stuck, select Stop now.', 'wrensafe' ),
 				/* translators: %s: label of a picture, e.g. "Home page after the update" */
 				'openImage'      => __( 'Open %s in a new tab', 'wrensafe' ),
 				'mixed'          => array(

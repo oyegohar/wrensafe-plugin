@@ -1,0 +1,107 @@
+/*
+ * Wrensafe — the link and media check: Wrensafe → Fix Links, and the notice
+ * after a restore (also on the Dashboard and Plugins screens, where
+ * Wrensafe's main stylesheet isn't loaded).
+ *
+ * After editing, regenerate the RTL copy:
+ *   npx rtlcss assets/admin/css/link-check.css assets/admin/css/link-check-rtl.css
+ */
+
+.wpbp-lc-notice .wpbp-lc-title {
+	margin-bottom: 4px;
+}
+
+.wpbp-lc-body .wpbp-lc-progress-label {
+	margin: 8px 0 6px;
+}
+
+.wpbp-lc-meter {
+	position: relative;
+	max-width: 420px;
+	height: 6px;
+	margin: 0 0 12px;
+	overflow: hidden;
+	border-radius: 3px;
+	background: #dcdcde;
+}
+
+.wpbp-lc-meter span {
+	display: block;
+	height: 100%;
+	border-radius: 3px;
+	background: #2457f5;
+	transition: width 0.3s ease;
+}
+
+.wpbp-lc-findings {
+	margin: 8px 0;
+	padding: 0;
+	list-style: none;
+}
+
+.wpbp-lc-findings > li {
+	position: relative;
+	margin: 0 0 8px;
+	padding-inline-start: 22px;
+}
+
+.wpbp-lc-findings > li::before {
+	position: absolute;
+	top: 6px;
+	right: 4px;
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background: #dba617;
+	content: "";
+}
+
+.wpbp-lc-findings > li.is-error::before {
+	background: #d63638;
+}
+
+.wpbp-lc-findings > li.is-info::before {
+	background: #72aee6;
+}
+
+.wpbp-lc-examples {
+	margin: 6px 0 0;
+	padding: 0;
+	list-style: none;
+	font-size: 12px;
+}
+
+.wpbp-lc-examples li {
+	margin: 2px 0;
+	color: #50575e;
+	word-break: break-all;
+}
+
+.wpbp-lc-examples code {
+	font-size: 11px;
+}
+
+.wpbp-lc-line.is-good {
+	color: #00703c;
+}
+
+.wpbp-lc-line.is-error {
+	color: #b32d2e;
+}
+
+.wpbp-lc-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.wpbp-lc-actions .button-link {
+	margin-inline-start: 4px;
+}
+
+.wpbp-lc-list {
+	margin: 0 0 8px;
+	padding-inline-start: 20px;
+	list-style: disc;
+}

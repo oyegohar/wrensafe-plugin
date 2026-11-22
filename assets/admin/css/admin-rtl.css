@@ -6374,3 +6374,186 @@ body.wpbp-modal-open {
 	font-weight: 800;
 	letter-spacing: -0.021em;
 }
+
+/* Brand bar (1.2.7): logo, name, version, tagline, help links and the author's credit, at the top of
+   every Wrensafe screen. Navy to Royal Cobalt with an Ice Blue glow; white text (AA on every part). */
+.wpbp-wrap .wpbp-brandbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px 24px;
+	margin: 20px 0 0;
+	padding: 18px 24px;
+	border-radius: var(--wpbp-radius);
+	background:
+		radial-gradient(circle at 0% 0%, rgba(98, 182, 255, 0.28), transparent 45%),
+		radial-gradient(circle at 100% 100%, rgba(36, 87, 245, 0.5), transparent 55%),
+		linear-gradient(-120deg, #101d42 0%, #142a6b 58%, #1638c4 100%);
+	box-shadow: 0 10px 30px rgba(16, 29, 66, 0.18);
+	color: #fff;
+}
+
+.wpbp-wrap .wpbp-brandbar p {
+	margin: 0;
+}
+
+.wpbp-brandbar-main {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-width: 0;
+}
+
+.wpbp-brandbar-tile {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 52px;
+	height: 52px;
+	border-radius: 13px;
+	background: #fff;
+	box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.wpbp-brandbar-tile svg {
+	display: block;
+	width: 34px;
+	height: 34px;
+}
+
+.wpbp-wrap .wpbp-brandbar .wpbp-brandbar-name {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	color: #fff;
+	font-family: var(--wpbp-font-display);
+	font-size: 20px;
+	font-weight: 800;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
+}
+
+.wpbp-brandbar-version {
+	padding: 2px 9px;
+	border-radius: 999px;
+	background: rgba(98, 182, 255, 0.22);
+	color: #d6ebff;
+	font-family: var(--wpbp-font);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 18px;
+	letter-spacing: 0;
+	font-variant-numeric: tabular-nums;
+}
+
+.wpbp-wrap .wpbp-brandbar .wpbp-brandbar-tagline {
+	margin-top: 3px;
+	color: #c9d8ff;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.wpbp-brandbar-links {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px 20px;
+}
+
+.wpbp-wrap .wpbp-brandbar-links a {
+	color: #e3ecff;
+	font-weight: 500;
+	text-decoration: none;
+}
+
+.wpbp-wrap .wpbp-brandbar-links a:hover,
+.wpbp-wrap .wpbp-brandbar-links a:focus {
+	color: #fff;
+	text-decoration: underline;
+	box-shadow: none;
+}
+
+.wpbp-wrap .wpbp-brandbar-links a:focus-visible {
+	outline: 2px solid #62b6ff;
+	outline-offset: 3px;
+	border-radius: 4px;
+}
+
+.wpbp-wrap .wpbp-brandbar-links a.wpbp-credit {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35em;
+	padding: 8px 16px;
+	border: 1px solid rgba(255, 255, 255, 0.28);
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.08);
+	white-space: nowrap;
+}
+
+.wpbp-wrap .wpbp-brandbar-links a.wpbp-credit:hover,
+.wpbp-wrap .wpbp-brandbar-links a.wpbp-credit:focus {
+	background: rgba(255, 255, 255, 0.15);
+	text-decoration: none;
+}
+
+.wpbp-credit-name {
+	color: #fff;
+	font-weight: 700;
+}
+
+.wpbp-heart {
+	flex: none;
+	width: 1em;
+	height: 1em;
+	fill: #ff6b6b;
+	transform-origin: center;
+}
+
+.wpbp-credit:hover .wpbp-heart,
+.wpbp-credit:focus-visible .wpbp-heart {
+	animation: wpbp-heart-beat 0.9s ease-in-out infinite;
+}
+
+@keyframes wpbp-heart-beat {
+
+	0%,
+	30%,
+	100% {
+		transform: scale(1);
+	}
+
+	15% {
+		transform: scale(1.25);
+	}
+
+	45% {
+		transform: scale(1.12);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.wpbp-credit:hover .wpbp-heart,
+	.wpbp-credit:focus-visible .wpbp-heart {
+		animation: none;
+	}
+}
+
+@media (max-width: 782px) {
+
+	.wpbp-wrap .wpbp-brandbar {
+		padding: 14px 16px;
+	}
+
+	.wpbp-brandbar-tile {
+		width: 44px;
+		height: 44px;
+	}
+
+	.wpbp-brandbar-tile svg {
+		width: 28px;
+		height: 28px;
+	}
+}

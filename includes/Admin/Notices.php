@@ -7,6 +7,8 @@
 
 namespace WPBP\Admin;
 
+use WPBP\Admin\Pages\FixLinksPage;
+use WPBP\Restore\LinkCheck;
 use WPBP\Restore\PostRestoreIntegrityChecker;
 use WPBP\Security\CapabilityManager;
 use WPBP\Security\NonceManager;
@@ -25,6 +27,65 @@ class Notices {
 		add_action( 'admin_init', array( $this, 'register_privacy_policy_content' ) );
 		add_action( 'admin_notices', array( $this, 'render_folder_notice' ) );
 		add_action( 'network_admin_notices', array( $this, 'render_folder_notice' ) );
+		// After a restore that moved the site: the link check, then what it found, with "Fix links".
+		add_action( 'admin_notices', array( $this, 'render_link_check_notice' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_link_check' ) );
+	}
+
+	/** Where the after-restore notices appear: the Dashboard, Plugins and Wrensafe's pages. */
+	private static function restore_notice_screen( string $id ): bool {
+		return in_array( $id, array( 'dashboard', 'plugins' ), true ) || AdminMenu::is_plugin_screen( $id );
+	}
+
+	/** Whether the link-check notice shows on this screen (not on Fix Links itself, which shows the same). */
+	private static function shows_link_check( string $id ): bool {
+		return self::restore_notice_screen( $id ) && false === strpos( $id, FixLinksPage::SLUG ) && CapabilityManager::current_user_can( CapabilityManager::RESTORE_BACKUPS ) && LinkCheck::needs_notice();
+	}
+
+	/**
+	 * After a restore that moved the site: Wrensafe checks the links (the screen runs the check in
+	 * steps), then says what it found, with Fix links, Details and Dismiss. Never a pop-up.
+	 */
+	public function render_link_check_notice(): void {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+
+		if ( ! $screen || ! self::shows_link_check( (string) $screen->id ) ) {
+			return;
+		}
+
+		$report = LinkCheck::report( LinkCheck::state() );
+		$type   = 'checked' === $report['status'] && 0 === (int) $report['fixable'] && 0 === (int) $report['found']['missing'] && '' === $report['error'] ? 'notice-success' : 'notice-warning';
+		?>
+		<div class="notice <?php echo esc_attr( $type ); ?> wpbp-notice wpbp-lc-notice" id="wpbp-lc-box" data-token="<?php echo esc_attr( (string) $report['token'] ); ?>" data-status="<?php echo esc_attr( (string) $report['status'] ); ?>" data-compact="1" aria-live="polite">
+			<p class="wpbp-lc-title"><strong><?php esc_html_e( 'Wrensafe: links after the restore', 'wrensafe' ); ?></strong></p>
+			<div class="wpbp-lc-body"><?php echo wp_kses_post( FixLinksPage::results_html( $report, true ) ); ?></div>
+		</div>
+		<?php
+	}
+
+	public function enqueue_link_check( string $hook_suffix ): void {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+		$id     = $screen ? (string) $screen->id : $hook_suffix;
+
+		if ( false === strpos( $id, FixLinksPage::SLUG ) && ! self::shows_link_check( $id ) ) {
+			return;
+		}
+
+		wp_enqueue_style( 'wpbp-link-check', WPBP_PLUGIN_URL . 'assets/admin/css/link-check.css', array(), WPBP_VERSION );
+		wp_style_add_data( 'wpbp-link-check', 'rtl', 'replace' );
+		wp_enqueue_script( 'wpbp-link-check', WPBP_PLUGIN_URL . 'assets/admin/js/link-check.js', array( 'jquery' ), WPBP_VERSION, true );
+		wp_localize_script(
+			'wpbp-link-check',
+			'wpbpLinkCheck',
+			array(
+				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'nonce'   => NonceManager::create( 'admin_ajax' ),
+				'i18n'    => array(
+					'fixConfirm' => __( 'Fix these links now? A database backup is made first, so the change can be undone from the Backup Browser.', 'wrensafe' ),
+					'failed'     => __( 'The link check stopped. Reload the page to see where it got to, or start it again on Wrensafe → Fix Links.', 'wrensafe' ),
+				),
+			)
+		);
 	}
 
 	/**

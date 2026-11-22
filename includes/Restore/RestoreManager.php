@@ -22,6 +22,7 @@ use WPBP\Core\Database\BackupsRepository;
 use WPBP\Core\Database\JobsRepository;
 use WPBP\Core\Database\RestorePointsRepository;
 use WPBP\Security\PathValidator;
+use WPBP\Updates\SafeUpdateManager;
 use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
 use WPBP\Utils\Logger;
@@ -700,9 +701,15 @@ class RestoreManager {
 			return;
 		}
 
-		unset( $payload['verify_cursor'], $payload['preflight_archive'] );
+		// Once, also when this step comes back while an update run is being stopped (complete_preflight()).
+		if ( empty( $payload['verify_logged'] ) ) {
+			Logger::info( 'Restore job #' . $job->id() . ' integrity verification completed (' . (int) $integrity['checked_files'] . ' files, ' . (int) $integrity['checked_database_files'] . ' database files).', array(), $job->id() );
 
-		Logger::info( 'Restore job #' . $job->id() . ' integrity verification completed (' . (int) $integrity['checked_files'] . ' files, ' . (int) $integrity['checked_database_files'] . ' database files).', array(), $job->id() );
+			$payload['verify_logged'] = true;
+			$job->set_payload( $payload );
+		}
+
+		unset( $payload['verify_cursor'], $payload['preflight_archive'], $payload['verify_logged'] );
 
 		$this->complete_preflight( $job, $payload, $archive_path, $result );
 	}
@@ -714,6 +721,18 @@ class RestoreManager {
 	 * @param array<string,mixed> $result ArchiveReader::validate() result.
 	 */
 	private function complete_preflight( RestoreJob $job, array $payload, string $archive_path, array $result ): void {
+		// Another restore started meanwhile (this one may have waited for an update run): one at a time.
+		$other = self::locked_job_id();
+
+		if ( $other > 0 && $other !== $job->id() && self::is_locked() ) {
+			$running = RestoreJob::get( $other );
+
+			if ( null !== $running && RestoreJob::STATUS_RUNNING === $running->status() ) {
+				$this->fail_preflight( $job, __( 'Another restore is running. Start this one when it has finished.', 'wrensafe' ) );
+				return;
+			}
+		}
+
 		$needs_db    = ! empty( $result['manifest']['contains_database'] );
 		$needs_files = ! empty( $result['manifest']['contains_files'] );
 		$root_filter = '';
@@ -790,6 +809,22 @@ class RestoreManager {
 		// active) and the restore touches the database, protect live
 		// order/customer-lookup tables by excluding them from the SQL replay.
 		$woo_safe_mode = $needs_db && WooSafeMode::is_active() && ( $payload['woo_safe_mode'] ?? true );
+
+		// A Safe Updates run still going would carry on over the restored site, whose scheduled tasks
+		// and files no longer match it (it then hangs, or rolls back updates the restore just put in).
+		// Stopped here, once the backup is known to be good: a restore that can't start leaves the run
+		// alone. While one of its steps is running, the restore waits for it. Not the restore a run
+		// makes itself (Pro's WordPress updates put the database back mid-run).
+		$updates = 'safe_update' === ( $payload['source'] ?? '' ) ? null : SafeUpdateManager::running_job();
+
+		if ( null !== $updates ) {
+			if ( ! SafeUpdateManager::stop_now( $updates, __( 'A restore was started, so the update run was stopped.', 'wrensafe' ) ) ) {
+				$job->update_progress( 1, __( 'Waiting for the update run to stop…', 'wrensafe' ) );
+				return;
+			}
+
+			Logger::warning( 'Restore job #' . $job->id() . ': the Safe Updates run #' . $updates->id() . ' still going was stopped first.', array(), $job->id() );
+		}
 
 		// Capture the DESTINATION site's URLs/paths NOW, before any database
 		// change. After the atomic table swap, wp_options holds the SOURCE
@@ -1291,6 +1326,15 @@ class RestoreManager {
 			}
 		}
 
+		// The restored tables are live from here. Recorded at once (a request cut off now still counts as
+		// swapped), the restore lock set again (it was in the options table just replaced), and a link
+		// check or fix the backup was holding dropped before any other screen can carry it on.
+		wp_cache_flush();
+		$payload['db_swapped'] = true;
+		$job->set_payload( $payload );
+		$this->acquire_restore_lock( $job->id() );
+		LinkCheck::forget_restored();
+
 		// Different table prefix on the source: the restored tables were
 		// renamed to this site's prefix, but WordPress also stores the prefix
 		// INSIDE two tables — the {prefix}user_roles option and per-user
@@ -1677,6 +1721,21 @@ class RestoreManager {
 	}
 
 	/** A folder path with one trailing slash, or '' when unknown. */
+	/** A path from the root of a disk ("/var/www", "C:\\sites", "\\\\server\\share"), not one relative to the site. */
+	private static function is_full_path( string $path ): bool {
+		return '' !== $path && ( '/' === $path[0] || 1 === preg_match( '#^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)#', $path ) );
+	}
+
+	/**
+	 * At least two folders deep. A short path like "/code/" also appears inside ordinary web
+	 * addresses ("https://github.com/acme/code/…"), so it is never searched for.
+	 */
+	private static function is_deep_path( string $path ): bool {
+		$path = (string) preg_replace( '#^[A-Za-z]:#', '', str_replace( '\\', '/', $path ) );
+
+		return count( array_filter( explode( '/', $path ), 'strlen' ) ) >= 2;
+	}
+
 	private static function folder_with_slash( string $path ): string {
 		return '' === $path ? '' : trailingslashit( $path );
 	}
@@ -1696,24 +1755,44 @@ class RestoreManager {
 			array( untrailingslashit( (string) ( $payload['site_url'] ?? '' ) ), (string) ( $payload['dest_home_url'] ?? '' ) ),
 			array( (string) ( $payload['source_site_url_option'] ?? '' ), (string) ( $payload['dest_site_url'] ?? '' ) ),
 			array( (string) ( $payload['source_uploads_baseurl'] ?? '' ), (string) ( $payload['dest_uploads_baseurl'] ?? '' ) ),
+		);
+
+		// Folders on the old server. Only full paths: a backup that names its
+		// uploads folder "wp-content/uploads" (All-in-One WP Migration does)
+		// would otherwise turn every "…/wp-content/uploads/…" in the site's
+		// links into this server's disk path, breaking every image.
+		foreach ( array(
 			array( (string) ( $payload['source_uploads_basedir'] ?? '' ), (string) ( $payload['dest_uploads_basedir'] ?? '' ) ),
 			array( (string) ( $payload['source_content_dir'] ?? '' ), (string) ( $payload['dest_content_dir'] ?? '' ) ),
 			// Whole folder only ("/var/www/html/wp/"): without the slash a
 			// source folder /var/www/html/wp would also cut into
 			// /var/www/html/wp-content. Stored ABSPATH values end in a slash.
 			array( self::folder_with_slash( (string) ( $payload['source_abspath'] ?? '' ) ), self::folder_with_slash( (string) ( $payload['dest_abspath'] ?? '' ) ) ),
-		);
+		) as $pair ) {
+			if ( self::is_full_path( $pair[0] ) && self::is_full_path( $pair[1] ) && self::is_deep_path( $pair[0] ) ) {
+				$candidates[] = $pair;
+			}
+		}
 
 		// The same site addresses in their other forms: the other scheme
-		// (old http:// links on a site that moved to https://) and
-		// protocol-relative ("//old-site.com/wp-content/…", common in page
-		// builders and sliders). Serializer::replace() applies every pair in
-		// one strtr() pass, longest match first, so "https://old" is never
-		// also caught by "//old".
+		// (old http:// links on a site that moved to https://), with and
+		// without "www.", and protocol-relative ("//old-site.com/wp-content/…",
+		// common in page builders and sliders). Serializer::replace() applies
+		// every pair in one strtr() pass, longest match first, so
+		// "https://old" is never also caught by "//old".
 		foreach ( array_slice( $candidates, 0, 2 ) as $pair ) {
-			if ( preg_match( '#^(https?):(//.+)$#i', $pair[0], $from ) && preg_match( '#^https?:(//.+)$#i', $pair[1], $to ) ) {
-				$candidates[] = array( ( 'https' === strtolower( $from[1] ) ? 'http' : 'https' ) . ':' . $from[2], $pair[1] );
-				$candidates[] = array( $from[2], $to[1] );
+			if ( ! preg_match( '#^(https?)://([^/]+)(.*)$#i', $pair[0], $from ) || ! preg_match( '#^https?:(//.+)$#i', $pair[1], $to ) ) {
+				continue;
+			}
+
+			$host  = strtolower( $from[2] );
+			$www   = 0 === strpos( $host, 'www.' );
+			$hosts = array( $host, $www ? substr( $host, 4 ) : 'www.' . $host );
+
+			foreach ( $hosts as $one ) {
+				foreach ( array( 'http:', 'https:', '' ) as $scheme ) {
+					$candidates[] = array( $scheme . '//' . $one . $from[3], '' === $scheme ? $to[1] : $pair[1] );
+				}
 			}
 		}
 
@@ -1784,7 +1863,7 @@ class RestoreManager {
 		// As many batches as fit in this request (one 200-row batch per
 		// request made a 30k-post site take hundreds of round trips).
 		while ( $payload['sr_table_index'] < $table_count && microtime( true ) < $deadline ) {
-			$result = $engine->process_table_after( $tables[ $payload['sr_table_index'] ], $payload['sr_cursor'] ?? null, $payload['sr_pairs'] );
+			$result = $engine->process_table_after( $tables[ $payload['sr_table_index'] ], $payload['sr_cursor'] ?? null, $payload['sr_pairs'], false, array(), true );
 
 			if ( $result['done'] ) {
 				++$payload['sr_table_index'];

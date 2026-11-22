@@ -111,7 +111,7 @@ class SearchReplaceEngine {
 	 * @param string[]                            $skip_columns Columns left as they are (e.g. post GUIDs).
 	 * @return array{cursor:?string,done:bool,rows_changed:int,rows_seen?:int}
 	 */
-	public function process_table_after( string $table, ?string $after, array $pairs, bool $dry_run = false, array $skip_columns = array() ): array {
+	public function process_table_after( string $table, ?string $after, array $pairs, bool $dry_run = false, array $skip_columns = array(), bool $whole_addresses = false ): array {
 		global $wpdb;
 
 		$map = array();
@@ -150,7 +150,7 @@ class SearchReplaceEngine {
 			);
 		}
 
-		$rows_changed = $this->apply_to_rows( $table, $rows, $primary_key, $map, $dry_run, $skip_columns );
+		$rows_changed = $this->apply_to_rows( $table, $rows, $primary_key, $map, $dry_run, $skip_columns, $whole_addresses );
 		$last         = end( $rows );
 
 		return array(
@@ -168,8 +168,10 @@ class SearchReplaceEngine {
 	 * @param array<int,array<string,mixed>> $rows
 	 * @param array<string,string>           $map
 	 * @param string[]                       $skip_columns
+	 * @param bool                           $whole_addresses The pairs are site addresses: a longer address that
+	 *                                                        only starts like one stays (Serializer::replace_addresses()).
 	 */
-	private function apply_to_rows( string $table, array $rows, string $primary_key, array $map, bool $dry_run = false, array $skip_columns = array() ): int {
+	private function apply_to_rows( string $table, array $rows, string $primary_key, array $map, bool $dry_run = false, array $skip_columns = array(), bool $whole_addresses = false ): int {
 		global $wpdb;
 
 		$rows_changed = 0;
@@ -182,7 +184,7 @@ class SearchReplaceEngine {
 					continue;
 				}
 
-				$new_value = Serializer::replace( $value, $map );
+				$new_value = $whole_addresses ? Serializer::replace_addresses( $value, $map ) : Serializer::replace( $value, $map );
 
 				if ( $new_value !== $value ) {
 					$updates[ $column ] = $new_value;

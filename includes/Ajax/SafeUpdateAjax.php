@@ -138,8 +138,15 @@ class SafeUpdateAjax {
 
 		$job = self::find_job( isset( $_POST['job_id'] ) ? absint( $_POST['job_id'] ) : 0 );
 
+		// "Stop now": the run ends in this request when no step is running; an update installed but not
+		// checked yet goes back. Otherwise (and for "Stop after this update") the running step stops it.
 		if ( ! $job->is_finished() ) {
-			SafeUpdateManager::request_cancel( $job );
+			if ( isset( $_POST['now'] ) && '1' === sanitize_key( wp_unslash( $_POST['now'] ) ) ) {
+				SafeUpdateManager::stop_now( $job );
+				$job = self::find_job( $job->id() );
+			} else {
+				SafeUpdateManager::request_cancel( $job );
+			}
 		}
 
 		self::send_report( $job );

@@ -93,6 +93,8 @@ class Plugin {
 		( new \WPBP\Updates\SafeUpdates() )->register_hooks();
 		// Site Health also runs its checks from WP-Cron, outside wp-admin.
 		( new \WPBP\Admin\SiteHealth() )->register_hooks();
+		// After a restore that moved the site: a link check waits for the next administrator screen.
+		\WPBP\Restore\LinkCheck::register();
 
 		if ( is_admin() ) {
 			$this->container->get( AdminMenu::class )->register_hooks();

@@ -89,7 +89,33 @@ class AllInOneWpMigration extends AbstractFormat {
 			throw new \RuntimeException( esc_html__( 'This .wpress backup is compressed, which Wrensafe cannot read yet. Export it again in All-in-One WP Migration without compression, then import it here.', 'wrensafe' ) );
 		}
 
-		$uploads = (string) ( $package['Uploads'] ?? '' );
+		// The old server's WordPress folder, and its uploads folder as a full path: All-in-One WP
+		// Migration records uploads relative to WordPress ("wp-content/uploads") unless it was moved.
+		$absolute = str_replace( '\\', '/', (string) ( $package['WordPress']['Absolute'] ?? '' ) );
+		$uploads  = str_replace( '\\', '/', (string) ( $package['Uploads'] ?? '' ) );
+
+		if ( '' !== $uploads && '/' !== $uploads[0] && 1 !== preg_match( '#^[A-Za-z]:/#', $uploads ) ) {
+			$uploads = '' !== $absolute && ( '/' === $absolute[0] || 1 === preg_match( '#^[A-Za-z]:/#', $absolute ) ) ? trailingslashit( $absolute ) . ltrim( $uploads, '/' ) : '';
+		}
+
+		$meta = array(
+			'site_url'        => (string) ( $package['SiteURL'] ?? '' ),
+			'home_url'        => (string) ( $package['HomeURL'] ?? '' ),
+			'prefix'          => 'SERVMASK_PREFIX_',
+			'wp_version'      => (string) ( $package['WordPress']['Version'] ?? '' ),
+			'php_version'     => (string) ( $package['PHP']['Version'] ?? '' ),
+			'abspath'         => $absolute,
+			'content_dir'     => str_replace( '\\', '/', (string) ( $package['WordPress']['Content'] ?? '' ) ),
+			'uploads_basedir' => $uploads,
+			'is_multisite'    => $multisite,
+			'plugin_version'  => (string) ( $package['Plugin']['Version'] ?? '' ),
+			'options'         => self::package_options( $package ),
+		);
+
+		// Only when the backup names it: otherwise the importer works it out from the site address.
+		if ( '' !== (string) ( $package['UploadsURL'] ?? '' ) ) {
+			$meta['uploads_baseurl'] = (string) $package['UploadsURL'];
+		}
 
 		return array(
 			'sources'  => array(
@@ -99,19 +125,7 @@ class AllInOneWpMigration extends AbstractFormat {
 					'base' => 'content',
 				),
 			),
-			'meta'     => array(
-				'site_url'        => (string) ( $package['SiteURL'] ?? '' ),
-				'home_url'        => (string) ( $package['HomeURL'] ?? '' ),
-				'prefix'          => 'SERVMASK_PREFIX_',
-				'wp_version'      => (string) ( $package['WordPress']['Version'] ?? '' ),
-				'php_version'     => (string) ( $package['PHP']['Version'] ?? '' ),
-				'content_dir'     => str_replace( '\\', '/', (string) ( $package['WordPress']['Content'] ?? '' ) ),
-				'uploads_basedir' => str_replace( '\\', '/', $uploads ),
-				'uploads_baseurl' => (string) ( $package['UploadsURL'] ?? '' ),
-				'is_multisite'    => $multisite,
-				'plugin_version'  => (string) ( $package['Plugin']['Version'] ?? '' ),
-				'options'         => self::package_options( $package ),
-			),
+			'meta'     => $meta,
 			'warnings' => array(),
 		);
 	}

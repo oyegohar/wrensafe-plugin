@@ -32,8 +32,14 @@ defined( 'ABSPATH' ) || exit;
 
 class Serializer {
 
+	/** What makes a longer address of a site address: a letter, digit, "-", ".x" or a port. */
+	public const ADDRESS_CONTINUES = '(?:[\w-]|\.[A-Za-z0-9]|:\d|%3[Aa]\d)';
+
 	/** Nesting limit for the serialized-data walker. */
 	private const MAX_DEPTH = 512;
+
+	/** @var bool Whether the running replacement changes whole addresses only (see replace_addresses()). */
+	private static $whole_addresses = false;
 
 	/**
 	 * Whether a string looks like serialized PHP data.
@@ -88,6 +94,103 @@ class Serializer {
 		}
 
 		return self::replace_in_string( $value, $map, 0 );
+	}
+
+	/**
+	 * Like replace(), for site addresses: only whole addresses change. "https://old.com" doesn't
+	 * touch "https://old.com.au", "https://old.com-shop.net" or "https://old.com:8443".
+	 *
+	 * @param array<string, string> $map Search => replace.
+	 */
+	public static function replace_addresses( string $value, array $map ): string {
+		$map = self::expand_map( $map );
+
+		if ( empty( $map ) || ! self::contains_any( $value, $map ) ) {
+			return $value;
+		}
+
+		// Worked out per string, right before it is replaced: the cost stays in step with the value's size.
+		self::$whole_addresses = true;
+
+		try {
+			return self::replace_in_string( $value, $map, 0 );
+		} finally {
+			self::$whole_addresses = false;
+		}
+	}
+
+	/**
+	 * The map plus, for each longer address in this value, a pair that leaves it as it is: strtr()
+	 * takes the longest match at each position, so it wins over the shorter address.
+	 *
+	 * @param array<string, string> $map Expanded search => replace.
+	 * @return array<string, string>
+	 */
+	private static function keep_longer_addresses( string $value, array $map ): array {
+		$addresses = array();
+
+		foreach ( array_keys( $map ) as $search ) {
+			$search = (string) $search;
+
+			// A web address in any of its forms: plain, protocol-relative, JSON-escaped, URL-encoded.
+			// One ending in a slash is a whole path already: nothing can make it a longer address.
+			if ( '/' !== substr( $search, -1 ) && '%2F' !== strtoupper( substr( $search, -3 ) ) && false !== strpos( $value, $search ) && 1 === preg_match( '~^(?:https?(?::|%3A))?(?:\\\\?/\\\\?/|%2F%2F)~i', $search ) ) {
+				$addresses[] = $search;
+			}
+		}
+
+		if ( ! $addresses ) {
+			return $map;
+		}
+
+		// A file-transfer address on the same host ("ftp://old.com") is a server, not a link to the site.
+		$bare = array_filter(
+			$addresses,
+			static function ( string $address ): bool {
+				return 1 === preg_match( '~^(?:\\\\?/\\\\?/|%2F%2F)~i', $address );
+			}
+		);
+
+		if ( $bare && preg_match_all( '~(?:ftps?|sftp)(?::|%3A)(?:' . implode( '|', array_map( 'preg_quote', $bare, array_fill( 0, count( $bare ), '~' ) ) ) . ')~i', $value, $transfer ) ) {
+			foreach ( array_unique( $transfer[0] ) as $keep ) {
+				$map[ $keep ] = $keep;
+			}
+		}
+
+		usort(
+			$addresses,
+			static function ( string $a, string $b ): int {
+				return strlen( $b ) <=> strlen( $a );
+			}
+		);
+
+		$quoted = array_map(
+			static function ( string $address ): string {
+				return preg_quote( $address, '~' );
+			},
+			$addresses
+		);
+
+		// The address and the one character (or ".x", ":8", "%3A8") that makes it a longer one: enough for
+		// strtr() to prefer it, and few distinct lengths however many longer addresses a value holds.
+		if ( ! preg_match_all( '~(?:' . implode( '|', $quoted ) . ')' . self::ADDRESS_CONTINUES . '~', $value, $found ) ) {
+			return $map;
+		}
+
+		foreach ( array_unique( $found[0] ) as $longer ) {
+			// "https://old.com/uploads2" is still on the old site when "https://old.com" is an address too:
+			// it moves with that address, not with a longer one it only starts like (".../uploads").
+			foreach ( $addresses as $address ) {
+				if ( strlen( $address ) < strlen( $longer ) && 0 === strpos( $longer, $address ) && 1 !== preg_match( '~^' . self::ADDRESS_CONTINUES . '~', substr( $longer, strlen( $address ) ) ) ) {
+					$map[ $longer ] = $map[ $address ] . substr( $longer, strlen( $address ) );
+					continue 2;
+				}
+			}
+
+			$map[ $longer ] = $longer;
+		}
+
+		return $map;
 	}
 
 	/**
@@ -157,7 +260,7 @@ class Serializer {
 			}
 		}
 
-		return strtr( $value, $map );
+		return strtr( $value, self::$whole_addresses ? self::keep_longer_addresses( $value, $map ) : $map );
 	}
 
 	/**

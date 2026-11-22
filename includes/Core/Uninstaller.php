@@ -59,7 +59,13 @@ class Uninstaller {
 	/** Folder name of the default storage folder (WPBP_STORAGE_DIR_NAME). */
 	private const STORAGE_DIR_NAME = 'wrensafe-storage';
 
-	public static function uninstall(): void {
+	/**
+	 * Run the uninstall.
+	 *
+	 * @param string $own_folder The folder of the copy being deleted (from
+	 *                           uninstall.php); this file's own folder when empty.
+	 */
+	public static function uninstall( string $own_folder = '' ): void {
 		// Without Wrensafe the guard would keep filtering the site's plugins
 		// and theme and pausing cron, whatever the data setting says.
 		self::remove_restore_guard();
@@ -73,7 +79,7 @@ class Uninstaller {
 		// Deleting one of two copies (a second folder from a GitHub "Source
 		// code" download, or the plugin under an earlier name) must not remove
 		// the data the remaining copy uses.
-		if ( self::another_copy_installed() ) {
+		if ( self::another_copy_installed( '' !== $own_folder ? $own_folder : dirname( plugin_basename( dirname( __DIR__, 2 ) . '/wrensafe.php' ) ) ) ) {
 			return;
 		}
 
@@ -125,17 +131,28 @@ class Uninstaller {
 
 	/**
 	 * Whether another copy of this plugin is still installed besides the one
-	 * being deleted (WP_UNINSTALL_PLUGIN holds its plugin file).
+	 * being deleted.
+	 *
+	 * The copy being deleted is named by its folder (uninstall.php passes its
+	 * own): WordPress defines WP_UNINSTALL_PLUGIN once per request, so when
+	 * two copies are deleted together it still names the first one while the
+	 * second uninstalls. Only copies whose main file is still on disk count:
+	 * the plugin list WordPress keeps in memory can still name a copy deleted
+	 * earlier in this request.
+	 *
+	 * @param string $own_folder The folder of the copy being deleted.
 	 */
-	private static function another_copy_installed(): bool {
+	private static function another_copy_installed( string $own_folder ): bool {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
 
-		$deleting = defined( 'WP_UNINSTALL_PLUGIN' ) ? (string) WP_UNINSTALL_PLUGIN : '';
-
 		foreach ( get_plugins() as $file => $data ) {
-			if ( $file !== $deleting && in_array( strtolower( (string) ( $data['TextDomain'] ?? '' ) ), self::TEXT_DOMAINS, true ) ) {
+			if ( dirname( $file ) === $own_folder || ! file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
+				continue;
+			}
+
+			if ( in_array( strtolower( (string) ( $data['TextDomain'] ?? '' ) ), self::TEXT_DOMAINS, true ) ) {
 				return true;
 			}
 		}

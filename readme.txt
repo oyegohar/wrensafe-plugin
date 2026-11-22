@@ -4,7 +4,7 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.6
+Stable tag: 1.2.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,6 +35,7 @@ https://www.youtube.com/watch?v=uYh1AkgG6Kk
 * **Restore what you need:** the whole site, only the database, only the files, or just the media, themes or plugins.
 * **Your server settings stay yours:** `wp-config.php` is never put in a backup or overwritten, so your database password and security keys stay on the server. Wrensafe itself is never overwritten, and server-specific files (`.htaccess`, `.user.ini`, cache drop-ins) are kept when you move a site to another server.
 * **Plugin safety:** after a restore, Wrensafe loads the site once. Any plugin that is incomplete, needs a newer PHP or WordPress than this server has, or stops the site from loading is turned off instead of breaking the site, and you're told which one and why.
+* **Fix Links:** after a restore or a move, Wrensafe checks for links that still point to the old site or have a server folder in their address, fixes them after a database backup, and lists media files that aren't on the site. Email addresses and other domains are left alone. A link to another site that contains the old address, such as a share or web-archive link, is updated too. Server folders it can't confirm as this site's, and tables left out of backups, are listed for you to check by hand.
 * **WooCommerce Safe Mode** keeps new orders, customers and stock untouched while the rest of the store is restored.
 
 ### Update safely
@@ -141,7 +142,7 @@ Password-protected backups from other plugins can't be read; make an unencrypted
 
 = Does a restore remove files added after the backup? =
 
-No. A restore puts back the files in the backup and leaves newer files where they are. After a hack, that means it won't remove files an attacker added, so clean the site first or restore onto a fresh WordPress install.
+No. A restore puts back the files in the backup and leaves newer files where they are. After a hack, that means it won't remove files an attacker added: clean the site first, or restore a backup made before the hack onto a fresh WordPress install. `wp-config.php` is never in a backup, so check it on the hacked site too.
 
 = Will restoring log me out? =
 
@@ -212,8 +213,25 @@ Wrensafe only contacts the services below, and only after a site administrator c
 13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 14. When you update a plugin, choose Quick Update or Safe Update, which checks your site and rolls a breaking update back.
 15. Safe Updates: update several plugins one by one or all at once, follow the progress, and roll an update back later.
+16. Fix Links: after a restore or a move, find links that still point to the old site or have a server folder in them, fix them after a database backup, and see which media files are missing.
 
 == Changelog ==
+
+= 1.2.7 =
+* Fixed: restoring a backup made with All-in-One WP Migration onto another site broke images and file links: a server folder was written into their addresses ("https://site//var/www/html/wp-content/uploads/…"). Restores now only replace full folders and whole addresses (the old address no longer changes a longer one such as old-site.com.au), and also replace the old address's "www." form.
+* New: Wrensafe → Fix Links. After a restore or a move it checks posts, pages, page-builder data, settings and the Media Library for links that still point to the old site, links with a server folder in them, http:// links on an https:// site, and media files that aren't on the site. It fixes the links after a database backup and lists the missing files. Email addresses and other domains are left alone. A link to another site that contains the old address, such as a share or web-archive link, is updated too. Server folders it can't confirm as this site's, and tables left out of backups, are listed for you to check by hand. After a restore that moved the site, a notice offers it with a Fix links button.
+* Fixed: when the site check after an update only timed out (a slow site) and the update couldn't be rolled back, Safe Updates deactivated the plugin, which could break a theme that needs it (for example Advanced Custom Fields). Slow pages now get a longer second try; when an update can't be rolled back after a timeout, the plugin is left switched off only if the site answers again without it; and a plugin whose deactivation breaks something else is switched back on.
+* Fixed: after one update left the site with a problem, Safe Updates rolled back every later update for that same problem. The run now stops instead.
+* New: "Stop now" in Safe Updates ends a run at once (an update installed but not checked yet is rolled back), next to "Stop after this update". A run nothing has moved for five minutes says so.
+* Fixed: a restore started while Safe Updates was running left the run hanging for hours. A restore now stops the update run first.
+* Changed: a new header on Wrensafe's screens, with links to the documentation and support.
+* Fixed: the import screen counted one of Wrensafe's own protection files as an uploaded backup file.
+* Fixed: deleting two copies of Wrensafe together (for example one installed from a GitHub download) could stop with a PHP error on the second copy, or keep its data although "Delete Wrensafe's data" was on. When both copies are 1.2.7 or later, the second one now removes the data once no copy is left.
+* Fixed: in "All at once" Safe Updates continued in the background, a step that runs out of time now checks the updates it already installed before it installs more, so it never ends with updates installed but not checked.
+* Fixed: a Safe Updates step that runs longer than its lock now leaves the run to the request that took it over in every case, also when an error happens at that moment, and a large package's unzip and copy keep the lock.
+* Fixed: choosing to keep or roll back an update an add-on held back no longer ends in an error page if another request took the run over meanwhile.
+* Fixed: when a run that an add-on's WordPress core update was part of stops, the restore clean-up waits if another restore is under way.
+* Changed: the FAQ says what to do when restoring after a hack.
 
 = 1.2.6 =
 The 1.2.5 fixes below come to WordPress.org with this version (1.2.5 was a private test release).
@@ -336,6 +354,9 @@ The first 1.2 release on WordPress.org. Versions 1.2.0 to 1.2.3 were tested on a
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.2.7 =
+Fixes broken images after restoring All-in-One WP Migration backups, adds Fix Links (repairs links and finds missing media after a restore), Stop now for update runs, and safer Safe Updates on slow sites.
 
 = 1.2.6 =
 Safe Updates in the background get more time to check what they installed and continue after a step is cut off, and protected staging sites delete pages cached earlier.

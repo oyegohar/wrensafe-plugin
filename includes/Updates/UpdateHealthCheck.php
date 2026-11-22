@@ -31,6 +31,91 @@ class UpdateHealthCheck {
 	/** Answer of the admin-ajax ping (see SafeUpdates::ping()). */
 	const PING_ANSWER = 'wrensafe-update-ping-ok';
 
+	/** Seconds a page may take. */
+	const TIMEOUT = 30;
+
+	/** The longest a page may take on a second try. */
+	const PATIENT_TIMEOUT = 90;
+
+	/** Whether a page in these results didn't answer in time (as opposed to failing). */
+	public static function timed_out( array $results ): bool {
+		foreach ( $results as $result ) {
+			if ( self::page_timed_out( (array) $result ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/** A page that didn't answer in time: the request timed out, or a proxy in front gave up (504, Cloudflare's 524). */
+	public static function page_timed_out( array $result ): bool {
+		$error = (string) ( $result['error'] ?? '' );
+
+		if ( in_array( (int) ( $result['code'] ?? 0 ), array( 504, 524 ), true ) ) {
+			return true;
+		}
+
+		return '' !== $error && ( false !== stripos( $error, 'timed out' ) || false !== stripos( $error, 'cURL error 28' ) );
+	}
+
+	/**
+	 * A second, longer try for the pages that didn't answer in time. Only those are loaded again, and
+	 * it stops at the first that still doesn't answer, so that one request stays short enough for a
+	 * host or proxy not to cut it off.
+	 *
+	 * @param array<string,array<string,mixed>> $results  The check that timed out.
+	 * @param array<string,array<string,mixed>> $baseline The checks before any update.
+	 * @return array<string,array<string,mixed>>
+	 */
+	public static function retry_timed_out( array $results, bool $as_user, array $baseline ): array {
+		$pages   = self::pages();
+		$cookies = $as_user ? self::login_cookies() : array();
+		$timeout = self::patient_timeout( $baseline );
+
+		if ( ! empty( $cookies ) ) {
+			$pages['dashboard'] = admin_url( 'plugins.php' );
+		}
+
+		foreach ( $results as $key => $result ) {
+			if ( ! isset( $pages[ $key ] ) || ! self::page_timed_out( (array) $result ) ) {
+				continue;
+			}
+
+			$results[ $key ] = self::load( $pages[ $key ], 'dashboard' === $key ? $cookies : array(), $timeout );
+
+			if ( self::page_timed_out( $results[ $key ] ) ) {
+				break;
+			}
+		}
+
+		return $results;
+	}
+
+	/** @return array<string,string> The pages every check loads. */
+	private static function pages(): array {
+		return array(
+			'home'  => add_query_arg( 'wpbp_check', wp_generate_password( 8, false ), home_url( '/' ) ),
+			'admin' => add_query_arg( 'action', 'wpbp_update_ping', admin_url( 'admin-ajax.php' ) ),
+		);
+	}
+
+	/**
+	 * How long to wait on a second try after a page didn't answer in time: three times the slowest page
+	 * of the run's first check, at least a minute, at most 90 seconds.
+	 *
+	 * @param array<string,array<string,mixed>> $baseline The checks before any update.
+	 */
+	public static function patient_timeout( array $baseline ): int {
+		$slowest = 0.0;
+
+		foreach ( $baseline as $result ) {
+			$slowest = max( $slowest, (float) ( $result['seconds'] ?? 0 ) );
+		}
+
+		return (int) min( self::PATIENT_TIMEOUT, max( 60, (int) ceil( 3 * $slowest ) ) );
+	}
+
 	/**
 	 * Run the checks.
 	 *
@@ -38,11 +123,7 @@ class UpdateHealthCheck {
 	 * @return array<string,array<string,mixed>> Check key => result.
 	 */
 	public static function run( bool $as_user ): array {
-		$pages = array(
-			'home'  => add_query_arg( 'wpbp_check', wp_generate_password( 8, false ), home_url( '/' ) ),
-			'admin' => add_query_arg( 'action', 'wpbp_update_ping', admin_url( 'admin-ajax.php' ) ),
-		);
-
+		$pages   = self::pages();
 		$cookies = $as_user ? self::login_cookies() : array();
 
 		if ( ! empty( $cookies ) ) {
@@ -165,13 +246,13 @@ class UpdateHealthCheck {
 	 * @param array<string,string> $cookies Login cookies to send, or none.
 	 * @return array{code:int,error:string,fatal:array|null,scraped:bool,length:int,ping:bool,seconds:float}
 	 */
-	private static function load( string $url, array $cookies ): array {
+	private static function load( string $url, array $cookies, int $timeout = self::TIMEOUT ): array {
 		$key   = md5( wp_generate_password( 32, false ) );
 		$nonce = wp_generate_password( 32, false );
 
 		set_transient( 'scrape_key_' . $key, $nonce, 2 * MINUTE_IN_SECONDS );
 
-		// A check can take a while (up to 30 seconds per page): the run is alive.
+		// A check can take a while (up to 30 seconds per page, longer on a second try): the run is alive.
 		SafeUpdates::touch_guard();
 
 		$started  = microtime( true );
@@ -184,7 +265,7 @@ class UpdateHealthCheck {
 				$url
 			),
 			array(
-				'timeout'   => 30,
+				'timeout'   => max( 5, $timeout ),
 				'cookies'   => $cookies,
 				'headers'   => array( 'Cache-Control' => 'no-cache' ),
 				/** This filter is documented in wp-includes/class-wp-http-streams.php */

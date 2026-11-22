@@ -213,8 +213,18 @@ body.wpbp-su-open {
 	background: var(--wpbp-su-brand-700);
 }
 
-.wpbp-su-modal-foot .wpbp-su-stop {
+/* "Stop after this update" and "Stop now" sit together on the left; Close stays on the right. */
+.wpbp-su-modal-foot .wpbp-su-stop-now {
 	margin-inline-end: auto;
+}
+
+.wpbp-su-stop-now {
+	margin-inline-start: 12px;
+}
+
+.wpbp-su-stop-now:disabled {
+	color: var(--wpbp-su-muted);
+	cursor: default;
 }
 
 /* ===== Mode cards (window and page) ===== */
@@ -630,6 +640,17 @@ body.wpbp-su-open {
 	margin: 14px 0 0;
 	color: var(--wpbp-su-muted);
 	font-size: 12px;
+}
+
+/* A run nothing has moved for a while. */
+.wpbp-su-run-idle {
+	margin: 12px 0 0;
+	padding: 8px 12px;
+	border-inline-start: 3px solid var(--wpbp-su-warning-icon);
+	border-radius: 4px;
+	background: var(--wpbp-su-warning-bg);
+	color: var(--wpbp-su-ink);
+	font-size: 13px;
 }
 
 /* ===== Safe Updates page ===== */

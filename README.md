@@ -56,7 +56,7 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 </tr>
 <tr>
 <td><img src=".wordpress-org/screenshot-15.png" alt="Safe Updates"><br><sub><b>Safe Updates</b>: update several plugins, follow the progress, roll back later.</sub></td>
-<td></td>
+<td><img src=".wordpress-org/screenshot-16.png" alt="Fix Links"><br><sub><b>Fix Links</b>: after a restore or a move, fix links that point to the old site or have a server folder in them, and see which media files are missing.</sub></td>
 </tr>
 </table>
 
@@ -96,6 +96,7 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 - Migration Assistant: readiness score, server checks, recommended method and a checklist.
 - Staging: a private copy with its own tables and keys, optional password protection that works on every web server, push to live.
 - Search & Replace with a dry run, safe for serialized and JSON data.
+- Fix Links: after a restore or a move, finds links that still point to the old site or have a server folder in them, fixes them after a database backup, and lists media files that aren't on the site.
 
 ### Stay informed
 - Dashboard with protection status, backups, schedules and migration readiness.

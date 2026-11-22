@@ -66,8 +66,9 @@ class ImportSet {
 		$files = array();
 		$names = scandir( $dir );
 
+		// Not the folder's own protection files (index.php, .htaccess, web.config): only what was uploaded.
 		foreach ( is_array( $names ) ? $names : array() as $name ) {
-			if ( '' !== $name && '.' !== $name[0] && 'index.php' !== $name && is_file( $dir . $name ) ) {
+			if ( '' !== $name && '.' !== $name[0] && ! in_array( strtolower( $name ), array( 'index.php', 'web.config' ), true ) && is_file( $dir . $name ) ) {
 				$files[ $name ] = $dir . $name;
 			}
 		}
