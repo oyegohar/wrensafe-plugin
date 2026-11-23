@@ -67,7 +67,7 @@ class BackupBrowserPage extends AbstractPage {
 				<div class="wpbp-backup-browser-notice wpbp-inline-notice wpbp-is-hidden" role="status" aria-live="polite"></div>
 
 				<div class="wpbp-bulk-bar">
-					<button type="button" class="button wpbp-bulk-delete" disabled>
+					<button type="button" class="button button-link-delete wpbp-bulk-delete" disabled>
 						<?php esc_html_e( 'Delete selected', 'wrensafe' ); ?>
 					</button>
 					<span class="description"><?php esc_html_e( 'Locked backups are skipped.', 'wrensafe' ); ?></span>

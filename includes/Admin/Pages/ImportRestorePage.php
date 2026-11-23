@@ -320,7 +320,7 @@ class ImportRestorePage extends AbstractPage {
 					<?php Icons::render( 'restore', 18 ); ?>
 					<?php esc_html_e( 'Restore now', 'wrensafe' ); ?>
 				</button>
-				<button type="button" class="button button-link wpbp-summary-reset" id="wpbp-summary-reset"><?php esc_html_e( 'Choose a different backup', 'wrensafe' ); ?></button>
+				<button type="button" class="button button-hero wpbp-summary-reset" id="wpbp-summary-reset"><?php esc_html_e( 'Choose a different backup', 'wrensafe' ); ?></button>
 			</div>
 
 			<div class="wpbp-card wpbp-restore-progress" id="wpbp-restore-progress" hidden>

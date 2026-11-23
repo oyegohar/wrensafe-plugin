@@ -29,6 +29,7 @@ class Deactivator {
 		// A Safe Updates run can't continue without the plugin.
 		wp_unschedule_hook( \WPBP\Updates\SafeUpdates::CONTINUE_HOOK );
 		\WPBP\Updates\SafeUpdates::remove_guard();
+		\WPBP\Updates\LiveProgress::close();
 
 		if ( PluginSafety::has_boot_guard() ) {
 			PluginSafety::remove_boot_guard();

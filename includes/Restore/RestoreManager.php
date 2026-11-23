@@ -60,6 +60,12 @@ class RestoreManager {
 	 */
 	const RESTORE_LOCK_TRANSIENT = 'wpbp_restore_lock';
 
+	/** The row a restore holds while it checks for another restore and takes the lock (see claim_start()). */
+	const START_CLAIM = 'wpbp_restore_starting';
+
+	/** How long a claim lasts without being renewed (a restore waiting for an update run renews it every step). */
+	const START_CLAIM_SECONDS = 300;
+
 	/**
 	 * Holds the job id a user has asked to cancel. Honored only at a safe
 	 * checkpoint before the atomic database swap — never mid-SQL or mid-file —
@@ -261,9 +267,61 @@ class RestoreManager {
 
 	private function acquire_restore_lock( int $job_id ): void {
 		set_transient( self::RESTORE_LOCK_TRANSIENT, $job_id, HOUR_IN_SECONDS );
+		self::release_start( $job_id ); // The lock holds it from here.
+	}
+
+	/**
+	 * Claim the start of a restore: one request at a time, by inserting a row only one request can insert. Then
+	 * no other restore may hold the lock and be running. Two restores finishing their checks at the same moment
+	 * can't both start (the lock itself is a transient: reading and setting it is two steps).
+	 */
+	private static function claim_start( int $job_id ): bool {
+		global $wpdb;
+
+		$value = $job_id . '|' . ( time() + self::START_CLAIM_SECONDS );
+
+		if ( ! $wpdb->query( $wpdb->prepare( 'INSERT IGNORE INTO %i (option_name, option_value, autoload) VALUES (%s, %s, %s)', $wpdb->options, self::START_CLAIM, $value, 'no' ) ) ) {
+			$held  = (string) $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM %i WHERE option_name = %s', $wpdb->options, self::START_CLAIM ) );
+			$parts = explode( '|', $held );
+			$owner = (int) $parts[0];
+			$until = (int) ( $parts[1] ?? 0 );
+
+			// Another restore's claim, still fresh.
+			if ( $owner !== $job_id && $until > time() ) {
+				return false;
+			}
+
+			// This restore's own (it is waiting and asks again), or a stale one: only one request can take it.
+			// The same value in the same second changes no row, so the row itself says whether it is ours.
+			if ( ! $wpdb->query( $wpdb->prepare( 'UPDATE %i SET option_value = %s WHERE option_name = %s AND option_value = %s', $wpdb->options, $value, self::START_CLAIM, $held ) )
+				&& (string) $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM %i WHERE option_name = %s', $wpdb->options, self::START_CLAIM ) ) !== $value ) {
+				return false;
+			}
+		}
+
+		$other = self::locked_job_id();
+
+		if ( $other > 0 && $other !== $job_id && self::is_locked() ) {
+			$running = RestoreJob::get( $other );
+
+			if ( null !== $running && RestoreJob::STATUS_RUNNING === $running->status() ) {
+				self::release_start( $job_id );
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/** Give up this restore's claim (it has the lock now, or it stopped). */
+	private static function release_start( int $job_id ): void {
+		global $wpdb;
+
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name = %s AND option_value LIKE %s', $wpdb->options, self::START_CLAIM, $wpdb->esc_like( $job_id . '|' ) . '%' ) );
 	}
 
 	private function release_restore_lock( int $job_id ): void {
+		self::release_start( $job_id );
 		delete_transient( self::RESTORE_LOCK_TRANSIENT );
 		delete_transient( self::CANCEL_TRANSIENT );
 		Logger::info( 'Restore job #' . $job_id . ' restore lock released.', array(), $job_id );
@@ -495,6 +553,7 @@ class RestoreManager {
 	 * "Preparing restore failed" always has an exact, findable reason.
 	 */
 	private function fail_preflight( RestoreJob $job, string $message ): void {
+		self::release_start( $job->id() );
 		Logger::failed( 'restore_preflight_failed: ' . $message . ' (no changes were made to this site).', array(), $job->id() );
 		$this->fail( $job, $message );
 	}
@@ -721,16 +780,10 @@ class RestoreManager {
 	 * @param array<string,mixed> $result ArchiveReader::validate() result.
 	 */
 	private function complete_preflight( RestoreJob $job, array $payload, string $archive_path, array $result ): void {
-		// Another restore started meanwhile (this one may have waited for an update run): one at a time.
-		$other = self::locked_job_id();
-
-		if ( $other > 0 && $other !== $job->id() && self::is_locked() ) {
-			$running = RestoreJob::get( $other );
-
-			if ( null !== $running && RestoreJob::STATUS_RUNNING === $running->status() ) {
-				$this->fail_preflight( $job, __( 'Another restore is running. Start this one when it has finished.', 'wrensafe' ) );
-				return;
-			}
+		// One restore at a time (this one may have waited for an update run meanwhile).
+		if ( ! self::claim_start( $job->id() ) ) {
+			$this->fail_preflight( $job, __( 'Another restore is running. Start this one when it has finished.', 'wrensafe' ) );
+			return;
 		}
 
 		$needs_db    = ! empty( $result['manifest']['contains_database'] );

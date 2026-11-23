@@ -214,7 +214,7 @@
 	 */
 	function stopControls( run, texts, $box ) {
 		var $later = $( '<button type="button" class="button wpbp-su-stop"></button>' ).text( texts.cancelRun );
-		var $now = $( '<button type="button" class="button-link button-link-delete wpbp-su-stop-now"></button>' ).text( base.stopNow );
+		var $now = $( '<button type="button" class="button button-link-delete wpbp-su-stop-now"></button>' ).text( base.stopNow );
 
 		$later.on( 'click', function () {
 			$later.prop( 'disabled', true ).text( texts.cancelling );
@@ -246,13 +246,202 @@
 		return $later.add( $now );
 	}
 
+	// How far along an item is, for the bars. The stages are the ones WordPress really goes through.
+	var WORK_WEIGHT = { saving: 0.12, ready: 0.22, updating: 0.25, installed: 0.75, checking: 0.85, awaiting: 0.85, rolling_back: 0.9 };
+	var STAGE_WEIGHT = { download: 0.42, install: 0.62, installed: 0.75, failed: 0.75 };
+	var ROW_PERCENT = { saving: 18, ready: 30, updating: 40, installed: 82, checking: 92, awaiting: 92, rolling_back: 92 };
+	var STAGE_PERCENT = { download: 46, install: 70, installed: 82, failed: 82 };
+
+	function isDone( item ) {
+		return -1 !== DONE.indexOf( item.state );
+	}
+
+	function weightOf( item ) {
+		if ( isDone( item ) ) {
+			return 1;
+		}
+
+		if ( 'updating' === item.state && STAGE_WEIGHT[ item.stage ] ) {
+			return STAGE_WEIGHT[ item.stage ];
+		}
+
+		return WORK_WEIGHT[ item.state ] || 0;
+	}
+
+	/** The last report, moved on by what the run's progress file says now. An item never goes backwards. */
+	function withLive( run, live ) {
+		if ( ! live || ! Array.isArray( live.s ) ) {
+			return run;
+		}
+
+		return $.extend( {}, run, {
+			items: ( run.items || [] ).map( function ( item, i ) {
+				var next = { state: live.s[ i ], stage: Array.isArray( live.g ) && 'string' === typeof live.g[ i ] ? live.g[ i ] : '' };
+
+				if ( 'string' !== typeof next.state || ! states[ next.state ] || isDone( item ) || weightOf( next ) < weightOf( item ) ) {
+					return item;
+				}
+
+				return $.extend( {}, item, next );
+			} )
+		} );
+	}
+
+	function ofTotal( text, position, total ) {
+		return String( text || '' ).replace( '%1$d', position ).replace( '%2$d', total );
+	}
+
+	/** What the run is doing now: the line at the top, and the item it is working on. */
+	function headline( run ) {
+		var items = run.items || [];
+		var total = items.length;
+
+		function find( test ) {
+			for ( var i = 0; i < total; i++ ) {
+				if ( test( items[ i ] ) ) {
+					return i;
+				}
+			}
+
+			return -1;
+		}
+
+		function hasState( state ) {
+			return function ( item ) {
+				return state === item.state;
+			};
+		}
+
+		function line( text, i, what ) {
+			return { count: ofTotal( text, i + 1, total ), index: i, step: items[ i ].name + ' · ' + what };
+		}
+
+		var i = find( function ( item ) {
+			return 'updating' === item.state && ( 'download' === item.stage || 'install' === item.stage );
+		} );
+
+		if ( i < 0 ) {
+			i = find( function ( item ) {
+				return 'updating' === item.state && 'installed' !== item.stage && 'failed' !== item.stage;
+			} );
+		}
+
+		if ( i >= 0 ) {
+			return line( base.nowUpdating, i, ( base.stages || {} )[ items[ i ].stage ] || states.updating );
+		}
+
+		if ( run.waiting || find( hasState( 'awaiting' ) ) >= 0 ) {
+			return { count: base.nowDecide, index: find( hasState( 'awaiting' ) ), step: run.step || '' };
+		}
+
+		if ( ( i = find( hasState( 'rolling_back' ) ) ) >= 0 ) {
+			return line( base.nowRollback, i, states.rolling_back );
+		}
+
+		if ( ( i = find( hasState( 'saving' ) ) ) >= 0 ) {
+			return line( base.nowSaving, i, states.saving );
+		}
+
+		if ( find( hasState( 'checking' ) ) >= 0 ) {
+			var checking = items.filter( hasState( 'checking' ) );
+
+			return {
+				count: base.nowChecking,
+				index: 1 === checking.length ? find( hasState( 'checking' ) ) : -1,
+				step: 1 === checking.length ? checking[ 0 ].name + ' · ' + states.checking : ( run.step || states.checking )
+			};
+		}
+
+		// Nothing has started: the backup before the updates, or the first check of the site.
+		if ( ! items.some( function ( item ) {
+			return 'waiting' !== item.state;
+		} ) ) {
+			return { count: base.nowPreparing, index: -1, step: run.step || t.starting };
+		}
+
+		// All at once saves every copy before the first update.
+		if ( 'all_at_once' === run.order && ( i = find( hasState( 'waiting' ) ) ) >= 0 ) {
+			return line( base.nowSaving, i, states.saving );
+		}
+
+		if ( ( i = find( hasState( 'ready' ) ) ) >= 0 ) {
+			return line( base.nowUpdating, i, states.updating );
+		}
+
+		if ( ( i = find( hasState( 'waiting' ) ) ) >= 0 ) {
+			return line( base.nowSaving, i, states.saving );
+		}
+
+		if ( find( hasState( 'installed' ) ) >= 0 ) {
+			return { count: base.nowChecking, index: -1, step: run.step || states.checking };
+		}
+
+		return { count: base.nowPreparing, index: -1, step: run.step || t.starting };
+	}
+
+	function overallPercent( $box, run ) {
+		var items = run.items || [];
+		var server = Math.max( 2, run.progress || 0 );
+		var percent = server;
+
+		if ( run.finished ) {
+			return 100;
+		}
+
+		if ( items.length && items.some( function ( item ) {
+			return 'waiting' !== item.state;
+		} ) ) {
+			var sum = items.reduce( function ( total, item ) {
+				return total + weightOf( item );
+			}, 0 );
+			var start = run.base || 3;
+
+			percent = Math.max( server, Math.floor( start + ( 99 - start ) * sum / items.length ) );
+		}
+
+		// The bar only ever moves forward.
+		percent = Math.min( 99, Math.max( percent, $box.data( 'wpbpPeak' ) || 0 ) );
+		$box.data( 'wpbpPeak', percent );
+
+		return percent;
+	}
+
+	function tallyText( run ) {
+		var items = run.items || [];
+		var updated = items.filter( function ( item ) {
+			return 'updated' === item.state;
+		} ).length;
+		var problems = items.filter( function ( item ) {
+			return isDone( item ) && 'updated' !== item.state;
+		} ).length;
+		var left = items.filter( function ( item ) {
+			return ! isDone( item );
+		} ).length;
+		var parts = [ String( base.tallyUpdated ).replace( '%d', updated ) ];
+
+		if ( problems ) {
+			parts.push( String( base.tallyProblem ).replace( '%d', problems ) );
+		}
+
+		parts.push( String( base.tallyLeft ).replace( '%d', left ) );
+
+		return parts.join( ' · ' );
+	}
+
 	function renderRun( $box, run ) {
 		var $progress = $box.find( '.wpbp-su-progress' );
 
 		if ( ! $progress.length ) {
 			$box.empty().append(
-				$( '<p class="wpbp-su-step"></p>' ),
-				$( '<div class="wpbp-su-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="wpbp-su-progress-fill"></span></div>' ),
+				$( '<div class="wpbp-su-now"></div>' ).append(
+					$( '<div class="wpbp-su-now-top"></div>' ).append(
+						$( '<span class="wpbp-su-now-count"></span>' ),
+						$( '<span class="wpbp-su-now-percent" aria-hidden="true"></span>' )
+					),
+					$( '<p class="wpbp-su-step"></p>' ),
+					$( '<div class="wpbp-su-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="wpbp-su-progress-fill"></span></div>' ),
+					$( '<p class="wpbp-su-tally" aria-hidden="true"></p>' )
+				),
 				$( '<p class="wpbp-su-run-idle" hidden></p>' ),
 				$( '<ul class="wpbp-su-items"></ul>' ),
 				$( '<p class="wpbp-su-run-note"></p>' )
@@ -265,54 +454,158 @@
 
 		$box.find( '.wpbp-su-run-idle' ).prop( 'hidden', idle < 5 ).text( idle >= 5 && base.idle ? base.idle.replace( '%d', idle ) : '' );
 
-		var percent = run.finished ? 100 : Math.max( 2, run.progress || 0 );
+		var percent = overallPercent( $box, run );
+		var now = headline( run );
+		var total = ( run.items || [] ).length;
 
 		$progress.attr( 'aria-valuenow', percent ).toggleClass( 'is-done', !! run.finished );
-		$progress.find( '.wpbp-su-progress-fill' ).css( 'width', percent + '%' );
-		$box.find( '.wpbp-su-step' ).text( run.error ? run.error : ( run.step || t.starting ) ).toggleClass( 'is-error', !! run.error );
+		$progress.find( '.wpbp-su-progress-fill' ).css( 'width', Math.max( 2, percent ) + '%' );
+		$box.find( '.wpbp-su-now-percent' ).text( percent + '%' );
+		$box.find( '.wpbp-su-now-count' ).text(
+			run.finished ? ofTotal( base.nowFinished, ( run.summary && run.summary.updated ) || 0, total ) : now.count
+		);
+		$box.find( '.wpbp-su-tally' ).text( run.finished ? '' : tallyText( run ) ).prop( 'hidden', !! run.finished );
 
-		var $list = $box.find( '.wpbp-su-items' ).empty();
+		if ( run.finished && ! run.error && run.pills && run.pills.length ) {
+			$box.find( '.wpbp-su-step' ).removeClass( 'is-error' ).empty().append( pillList( run.pills ) );
+		} else {
+			$box.find( '.wpbp-su-step' ).text( run.error ? run.error : ( now.step || t.starting ) ).toggleClass( 'is-error', !! run.error );
+		}
+
+		var $list = $box.find( '.wpbp-su-items' );
 
 		$.each( run.items || [], function ( i, item ) {
-			var $item = $( '<li class="wpbp-su-item"></li>' ).addClass( 'is-' + item.state ).attr( { 'data-type': item.type || 'plugin', 'data-id': item.id || item.plugin } );
-
-			if ( item.plugin ) {
-				$item.attr( 'data-plugin', item.plugin );
-			}
-
-			var $main = $( '<span class="wpbp-su-item-main"></span>' ).append(
-				$( '<span class="wpbp-su-item-name"></span>' ).text( item.name ),
-				$( '<span class="wpbp-su-item-versions"></span>' ).text( item.from + ' → ' + item.to ),
-				$( '<span class="wpbp-su-item-state"></span>' ).text( states[ item.state ] || item.state )
-			);
-
-			if ( item.message && ( -1 !== DONE.indexOf( item.state ) || 'awaiting' === item.state || 'rolling_back' === item.state ) ) {
-				$main.append( $( '<span class="wpbp-su-item-message"></span>' ).text( item.message ) );
-			}
-
-			$main.append( details( item.details ) );
-
-			$item.append( $( '<span class="wpbp-su-item-icon" aria-hidden="true"></span>' ), $main );
-
-			if ( 'awaiting' === item.state ) {
-				$main.append(
-					$( '<span class="wpbp-su-item-actions"></span>' ).append(
-						$( '<button type="button" class="button button-small wpbp-su-decide"></button>' ).attr( itemAttrs( run, item, { 'data-decision': 'keep' } ) ).text( base.keep ),
-						$( '<button type="button" class="button button-small wpbp-su-decide"></button>' ).attr( itemAttrs( run, item, { 'data-decision': 'rollback' } ) ).text( base.rollback )
-					)
-				);
-			} else if ( item.canRollBack ) {
-				$main.append(
-					$( '<button type="button" class="button button-small wpbp-su-rollback"></button>' )
-						.attr( itemAttrs( run, item, { 'data-name': item.name, 'data-version': item.from } ) )
-						.text( fmt( base.rollbackTo, item.from ) )
-				);
-			}
-
-			$list.append( $item );
+			renderRow( $list, run, item, i, ! run.finished && i === now.index );
 		} );
 
+		$list.children().slice( total ).remove();
+
+		// In the window the list scrolls on its own: keep the plugin being worked on in view.
+		var row = now.index >= 0 && ! run.finished ? $list.children()[ now.index ] : null;
+
+		if ( row && $list.closest( '.wpbp-su-modal' ).length ) {
+			var box = $list[ 0 ].getBoundingClientRect();
+			var at = row.getBoundingClientRect();
+
+			if ( at.top < box.top || at.bottom > box.bottom ) {
+				$list[ 0 ].scrollTop += at.top - box.top - 8;
+			}
+		}
+
 		$box.find( '.wpbp-su-run-note' ).text( run.finished ? '' : base.keepOpen ).prop( 'hidden', !! run.finished );
+	}
+
+	/** One plugin's row. It is only rebuilt when its result changes, so its bar moves smoothly. */
+	function renderRow( $list, run, item, index, current ) {
+		var $item = $list.children().eq( index );
+		var sign = JSON.stringify( [ item.state, item.message, item.cause || null, item.details || null, !! item.canRollBack ] );
+
+		if ( ! $item.length ) {
+			$item = $( '<li class="wpbp-su-item"></li>' ).appendTo( $list );
+		}
+
+		if ( $item.data( 'wpbpSign' ) !== sign ) {
+			$item.data( 'wpbpSign', sign );
+			fillRow( $item, run, item );
+		}
+
+		// All at once installs a group in turn: the others in it are next in line, not being updated yet.
+		var queued = 'updating' === item.state && ! item.stage && ! current;
+		var percent = queued ? 0 : ( 'updating' === item.state && STAGE_PERCENT[ item.stage ] ? STAGE_PERCENT[ item.stage ] : ROW_PERCENT[ item.state ] );
+		var $bar = $item.find( '.wpbp-su-item-bar' );
+
+		$item.toggleClass( 'is-current', current );
+		$item.toggleClass( 'is-queued', queued );
+		$item.find( '.wpbp-su-item-state' ).text(
+			queued ? base.stages.queued : ( 'updating' === item.state && item.stage && base.stages && base.stages[ item.stage ] ? base.stages[ item.stage ] : ( states[ item.state ] || item.state ) )
+		);
+		$bar.prop( 'hidden', ! percent );
+
+		if ( percent ) {
+			var $fill = $bar.find( 'span' );
+			var from = $item.data( 'wpbpBar' ) || 0;
+
+			if ( from !== percent ) {
+				$fill.css( 'width', from + '%' );
+				$fill[ 0 ].getBoundingClientRect();
+				$fill.css( 'width', percent + '%' );
+				$item.data( 'wpbpBar', percent );
+			}
+		}
+	}
+
+	function fillRow( $item, run, item ) {
+		$item.empty().attr( { class: 'wpbp-su-item is-' + item.state, 'data-type': item.type || 'plugin', 'data-id': item.id || item.plugin } );
+
+		if ( item.plugin ) {
+			$item.attr( 'data-plugin', item.plugin );
+		}
+
+		var $main = $( '<span class="wpbp-su-item-main"></span>' ).append(
+			$( '<span class="wpbp-su-item-name"></span>' ).text( item.name ),
+			$( '<span class="wpbp-su-item-versions"></span>' ).text( item.from + ' → ' + item.to ),
+			$( '<span class="wpbp-su-item-state"></span>' ).text( states[ item.state ] || item.state ),
+			$( '<span class="wpbp-su-item-bar" aria-hidden="true" hidden><span></span></span>' )
+		);
+
+		if ( item.cause && item.cause.label ) {
+			$main.append( causeBox( item.cause ) );
+		} else if ( item.message && ( -1 !== DONE.indexOf( item.state ) || 'awaiting' === item.state || 'rolling_back' === item.state ) ) {
+			$main.append( $( '<span class="wpbp-su-item-message"></span>' ).text( item.message ) );
+		}
+
+		$main.append( details( item.details ) );
+
+		$item.append( $( '<span class="wpbp-su-item-icon" aria-hidden="true"></span>' ), $main );
+
+		if ( 'awaiting' === item.state ) {
+			$main.append(
+				$( '<span class="wpbp-su-item-actions"></span>' ).append(
+					$( '<button type="button" class="button button-small wpbp-su-decide"></button>' ).attr( itemAttrs( run, item, { 'data-decision': 'keep' } ) ).text( base.keep ),
+					$( '<button type="button" class="button button-small wpbp-su-decide"></button>' ).attr( itemAttrs( run, item, { 'data-decision': 'rollback' } ) ).text( base.rollback )
+				)
+			);
+		} else if ( item.canRollBack ) {
+			$main.append(
+				$( '<button type="button" class="button button-small wpbp-su-rollback"></button>' )
+					.attr( itemAttrs( run, item, { 'data-name': item.name, 'data-version': item.from } ) )
+					.text( fmt( base.rollbackTo, item.from ) )
+			);
+		}
+	}
+
+	/** The labels that sum up a finished run (the page renders the same markup). */
+	function pillList( list ) {
+		var $pills = $( '<span class="wpbp-su-pills"></span>' );
+
+		$.each( list, function ( i, pill ) {
+			$pills.append( $( '<span class="wpbp-su-pill"></span>' ).addClass( 'is-' + pill.tone ).text( pill.text ) );
+		} );
+
+		return $pills;
+	}
+
+	/** Why an item wasn't updated or was rolled back, and what to do (the page renders the same markup). */
+	function causeBox( cause ) {
+		var $cause = $( '<span class="wpbp-su-cause"></span>' ).append(
+			$( '<span class="wpbp-su-cause-label"></span>' ).text( cause.label ),
+			$( '<span class="wpbp-su-cause-text"></span>' ).text( cause.text )
+		);
+
+		if ( cause.fix ) {
+			$cause.append(
+				$( '<span class="wpbp-su-cause-fix"></span>' ).append(
+					$( '<strong></strong>' ).text( base.whatToDo ),
+					document.createTextNode( ' ' + cause.fix )
+				)
+			);
+		}
+
+		if ( cause.detail ) {
+			$cause.append( $( '<span class="wpbp-su-cause-detail"></span>' ).text( base.technical + ' ' + cause.detail ) );
+		}
+
+		return $cause;
 	}
 
 	/** The data attributes that name a run's item on its buttons. */
@@ -381,20 +674,67 @@
 	 * until it is finished. Interruptions (a timeout, WordPress's
 	 * maintenance mode after a cut-off update) are retried.
 	 */
-	function Runner( jobId, onUpdate, onDone ) {
+	function Runner( jobId, onUpdate, onDone, first ) {
 		this.jobId = jobId;
 		this.onUpdate = onUpdate;
 		this.onDone = onDone;
 		this.failures = 0;
 		this.stopped = false;
+		this.report = first || null;
+		this.reading = false;
+		this.timer = 0;
 	}
 
 	Runner.prototype.start = function () {
 		this.tick();
+		this.watch();
 	};
 
 	Runner.prototype.stop = function () {
 		this.stopped = true;
+		this.unwatch();
+	};
+
+	/**
+	 * While a step runs, follow it through the run's progress file: during an
+	 * update WordPress answers every request with its maintenance page. If the
+	 * file can't be read, the screen simply moves on with each step's report.
+	 */
+	Runner.prototype.watch = function () {
+		var self = this;
+
+		if ( self.timer || ! window.fetch ) {
+			return;
+		}
+
+		self.timer = window.setInterval( function () {
+			var url = self.report && self.report.live;
+
+			if ( self.stopped || self.reading || ! url ) {
+				return;
+			}
+
+			self.reading = true;
+
+			window.fetch( url + '?t=' + Date.now(), { cache: 'no-store', credentials: 'omit' } )
+				.then( function ( response ) {
+					return response.ok ? response.json() : null;
+				} )
+				.then( function ( live ) {
+					if ( live && ! self.stopped && self.report && ! self.report.finished ) {
+						self.onUpdate( withLive( self.report, live ) );
+					}
+				} )
+				.catch( function () {} )
+				.then( function () {
+					self.reading = false;
+				} );
+		}, 700 );
+	};
+
+	Runner.prototype.unwatch = function () {
+		window.clearInterval( this.timer );
+		this.timer = 0;
 	};
 
 	Runner.prototype.tick = function () {
@@ -412,9 +752,11 @@
 				}
 
 				self.failures = 0;
+				self.report = response.data;
 				self.onUpdate( response.data );
 
 				if ( response.data.finished ) {
+					self.unwatch();
 					self.onDone( response.data );
 					return;
 				}
@@ -449,6 +791,7 @@
 
 		if ( final ) {
 			this.stopped = true;
+			this.unwatch();
 		}
 	};
 
@@ -723,7 +1066,7 @@
 			function ( report ) {
 				runner.finished = true;
 				win.running = false;
-				win.$modal.removeClass( 'is-running' ).addClass( report.summary.rolled_back || report.summary.failed || report.error ? 'is-warning' : 'is-success' );
+				win.$modal.removeClass( 'is-running' ).addClass( report.tone || 'is-success' );
 				win.$title.text( report.error ? base.failedTitle : base.doneTitle );
 				win.$foot.empty().append(
 					$( '<a class="button"></a>' ).attr( 'href', cfg.pageUrl ).text( base.viewPage ),
@@ -732,7 +1075,8 @@
 					} )
 				);
 				win.$foot.find( '.button-primary' ).trigger( 'focus' );
-			}
+			},
+			run
 		);
 
 		runner.start();
@@ -969,14 +1313,15 @@
 					}
 				},
 				function ( report ) {
-					$runCard.addClass( report.summary.rolled_back || report.summary.failed || report.error ? 'is-warning' : 'is-success' );
+					$runCard.addClass( report.tone || 'is-success' );
 					$runCard.find( 'h2' ).first().text( report.error ? base.failedTitle : base.doneTitle );
 					$actions.empty().append(
 						$( '<button type="button" class="button button-primary"></button>' ).text( base.reload ).on( 'click', function () {
 							window.location.reload();
 						} )
 					);
-				}
+				},
+				run
 			).start();
 		}
 

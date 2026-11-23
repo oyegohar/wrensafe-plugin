@@ -334,6 +334,31 @@ class SafeUpdates {
 				'update'         => __( 'Update', 'wrensafe' ),
 				'settingsNote'   => __( 'Change the default, or turn this window off, under Wrensafe → Settings → Updates.', 'wrensafe' ),
 				'settingsLink'   => __( 'Settings', 'wrensafe' ),
+				/* translators: 1: position of the plugin (or theme) being updated, 2: how many are being updated */
+				'nowUpdating'    => __( 'Updating %1$d of %2$d', 'wrensafe' ),
+				/* translators: 1: position of the plugin (or theme), 2: how many are being updated */
+				'nowSaving'      => __( 'Saving copy %1$d of %2$d', 'wrensafe' ),
+				/* translators: 1: how many were updated, 2: how many were selected */
+				'nowFinished'    => __( '%1$d of %2$d updated', 'wrensafe' ),
+				'nowChecking'    => __( 'Checking the site', 'wrensafe' ),
+				'nowRollback'    => __( 'Putting a version back', 'wrensafe' ),
+				'nowPreparing'   => __( 'Getting ready', 'wrensafe' ),
+				'nowDecide'      => __( 'Waiting for your decision', 'wrensafe' ),
+				/* translators: %d: number of plugins (or themes) */
+				'tallyUpdated'   => __( '%d updated', 'wrensafe' ),
+				/* translators: %d: number of plugins (or themes) */
+				'tallyProblem'   => __( '%d with a problem', 'wrensafe' ),
+				/* translators: %d: number of plugins (or themes) */
+				'tallyLeft'      => __( '%d to go', 'wrensafe' ),
+				'stages'         => array(
+					'queued'    => __( 'Next in line', 'wrensafe' ),
+					'download'  => __( 'Downloading…', 'wrensafe' ),
+					'install'   => __( 'Installing…', 'wrensafe' ),
+					'installed' => __( 'Installed, waiting for the site check', 'wrensafe' ),
+					'failed'    => __( 'Didn’t install', 'wrensafe' ),
+				),
+				'whatToDo'       => __( 'What to do:', 'wrensafe' ),
+				'technical'      => __( 'Technical detail:', 'wrensafe' ),
 				'doneTitle'      => __( 'Updates finished', 'wrensafe' ),
 				'failedTitle'    => __( 'The updates stopped', 'wrensafe' ),
 				'keepOpen'       => __( 'You can close this window: the updates continue in the background, and you can follow them on the Safe Updates page.', 'wrensafe' ),

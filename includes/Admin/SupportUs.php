@@ -15,6 +15,9 @@ defined( 'ABSPATH' ) || exit;
 
 class SupportUs {
 
+	/** The intro video on YouTube (the one on the WordPress.org plugin page). */
+	const VIDEO_ID = 'uYh1AkgG6Kk';
+
 	/**
 	 * A support link: the matching constant (blank by default, so the
 	 * button stays hidden), filterable for add-ons and agencies.
@@ -54,30 +57,63 @@ class SupportUs {
 	}
 
 	/**
-	 * Render the full Support Us card. Only buttons whose URL is actually
-	 * configured are shown.
+	 * The intro video, as a picture stored in the plugin: the YouTube player loads only when the
+	 * administrator presses play (assets/admin/js/support-video.js). Not with White Label.
+	 */
+	public static function render_video(): void {
+		if ( ! Pages\AbstractPage::brand()['credit'] ) {
+			return;
+		}
+
+		$title = __( 'Wrensafe intro video', 'wrensafe' );
+		?>
+		<div class="wpbp-card wpbp-video-card">
+			<h2><?php esc_html_e( 'See Wrensafe in action', 'wrensafe' ); ?></h2>
+			<p><?php esc_html_e( 'A short tour of backups, restores, migration and Safe Updates.', 'wrensafe' ); ?></p>
+			<div class="wpbp-video">
+				<button type="button" class="wpbp-video-play" data-video="<?php echo esc_attr( self::VIDEO_ID ); ?>" data-title="<?php echo esc_attr( $title ); ?>" aria-label="<?php esc_attr_e( 'Play the Wrensafe intro video (loads from YouTube)', 'wrensafe' ); ?>">
+					<img src="<?php echo esc_url( WPBP_PLUGIN_URL . 'assets/admin/images/intro-video-hd.jpg' ); ?>" width="2560" height="1440" alt="" loading="lazy" />
+					<span class="wpbp-video-icon" aria-hidden="true"></span>
+				</button>
+			</div>
+			<p class="description"><?php esc_html_e( 'The video plays from YouTube. Nothing is loaded from YouTube until you press play.', 'wrensafe' ); ?></p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render the Support Us card: the review request with any other links that are configured. With
+	 * White Label there is no request to review Wrensafe, only the site's own links (if any).
 	 */
 	public static function render_card(): void {
-		$buttons = array(
-			array( self::support_url(), __( 'Support Us', 'wrensafe' ), true ),
-			array( self::review_url(), __( 'Leave a review', 'wrensafe' ), false ),
-			array( self::feature_request_url(), __( 'Request a feature', 'wrensafe' ), false ),
-			array( self::report_issue_url(), __( 'Report an issue', 'wrensafe' ), false ),
-			array( self::community_url(), __( 'Join the community', 'wrensafe' ), false ),
+		$links = array_values(
+			array_filter(
+				array(
+					array( self::support_url(), __( 'Support Us', 'wrensafe' ) ),
+					array( self::feature_request_url(), __( 'Request a feature', 'wrensafe' ) ),
+					array( self::report_issue_url(), __( 'Report an issue', 'wrensafe' ) ),
+					array( self::community_url(), __( 'Join the community', 'wrensafe' ) ),
+				),
+				static function ( array $link ): bool {
+					return '' !== $link[0];
+				}
+			)
 		);
+
+		if ( Pages\AbstractPage::brand()['credit'] ) {
+			ReviewRequest::render( false, $links );
+			return;
+		}
+
+		if ( ! $links ) {
+			return;
+		}
 		?>
 		<div class="wpbp-card wpbp-support-card">
-			<h2><?php esc_html_e( 'Enjoying Wrensafe?', 'wrensafe' ); ?></h2>
-			<p>
-				<?php esc_html_e( 'If Wrensafe helps you protect or move your website, a short review on WordPress.org helps other site owners find it.', 'wrensafe' ); ?>
-			</p>
+			<h2><?php esc_html_e( 'Support', 'wrensafe' ); ?></h2>
 			<div class="wpbp-support-buttons">
-				<?php foreach ( $buttons as list( $url, $label, $is_primary ) ) : ?>
-					<?php if ( '' !== $url ) : ?>
-						<a class="button<?php echo $is_primary ? ' button-primary' : ''; ?>" href="<?php echo esc_url( $url ); ?>" target="_blank" rel="noopener noreferrer">
-							<?php echo esc_html( $label ); ?>
-						</a>
-					<?php endif; ?>
+				<?php foreach ( $links as $link ) : ?>
+					<a class="button" href="<?php echo esc_url( $link[0] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $link[1] ); ?></a>
 				<?php endforeach; ?>
 			</div>
 		</div>

@@ -80,9 +80,22 @@ class Notices {
 			array(
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => NonceManager::create( 'admin_ajax' ),
+				'home'    => home_url(),
+				'max'     => LinkCheck::ADDRESSES_MAX,
 				'i18n'    => array(
 					'fixConfirm' => __( 'Fix these links now? A database backup is made first, so the change can be undone from the Backup Browser.', 'wrensafe' ),
 					'failed'     => __( 'The link check stopped. Reload the page to see where it got to, or start it again on Wrensafe → Fix Links.', 'wrensafe' ),
+					'checking'   => __( 'Checking…', 'wrensafe' ),
+					'fixing'     => __( 'Fixing…', 'wrensafe' ),
+					'finished'   => __( 'Check finished. Showing what it found…', 'wrensafe' ),
+					'addFirst'   => __( 'Add an address, like https://old-site.com', 'wrensafe' ),
+					'addMore'    => __( 'Add another address', 'wrensafe' ),
+					/* translators: %s: a web address */
+					'remove'     => __( 'Remove %s', 'wrensafe' ),
+					'bad'        => __( 'That doesn’t look like a web address. Try something like https://old-site.com.', 'wrensafe' ),
+					'own'        => __( 'That is this site’s current address. Enter the address it had before it moved.', 'wrensafe' ),
+					/* translators: %d: the most addresses that can be added */
+					'tooMany'    => sprintf( __( 'You can add up to %d addresses.', 'wrensafe' ), LinkCheck::ADDRESSES_MAX ),
 				),
 			)
 		);

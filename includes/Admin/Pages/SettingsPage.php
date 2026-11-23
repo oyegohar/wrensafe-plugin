@@ -14,6 +14,7 @@ namespace WPBP\Admin\Pages;
 use WPBP\Admin\SupportUs;
 use WPBP\Core\LimitsManager;
 use WPBP\Core\Settings;
+use WPBP\Core\SettingsTransfer;
 use WPBP\Security\CapabilityManager;
 use WPBP\Utils\Paths;
 
@@ -45,6 +46,7 @@ class SettingsPage extends AbstractPage {
 		$map = array(
 			'security'    => CapabilityManager::MANAGE_SECURITY,
 			'team-access' => CapabilityManager::MANAGE_TEAM_ACCESS,
+			'remote'      => CapabilityManager::MANAGE_CLOUD,
 		);
 
 		return $map[ $tab ] ?? CapabilityManager::MANAGE_SETTINGS;
@@ -64,6 +66,7 @@ class SettingsPage extends AbstractPage {
 			'notifications'    => __( 'Notifications', 'wrensafe' ),
 			'security'         => __( 'Security', 'wrensafe' ),
 			'support-us'       => __( 'Support Us', 'wrensafe' ),
+			'tools'            => __( 'Import / Export', 'wrensafe' ),
 			'advanced'         => __( 'Advanced', 'wrensafe' ),
 		);
 
@@ -125,7 +128,7 @@ class SettingsPage extends AbstractPage {
 			__( 'Migration', 'wrensafe' )         => array( 'direct-migration', 'woocommerce' ),
 			__( 'Reporting', 'wrensafe' )         => array( 'notifications', 'reports' ),
 			__( 'Access & security', 'wrensafe' ) => array( 'security', 'team-access' ),
-			__( 'More', 'wrensafe' )              => array( 'support-us', 'advanced' ),
+			__( 'More', 'wrensafe' )              => array( 'support-us', 'tools', 'advanced' ),
 		);
 
 		/**
@@ -310,6 +313,107 @@ class SettingsPage extends AbstractPage {
 		<?php
 	}
 
+	/** Export, import and reset the settings (see WPBP\Core\SettingsTransfer). */
+	private function render_tab_tools(): void {
+		$undo   = SettingsTransfer::undo_info();
+		$resets = SettingsTransfer::reset_count();
+		$text   = array(
+			'exported'   => __( 'Settings exported.', 'wrensafe' ),
+			'tooBig'     => __( 'This file is too large to be a Wrensafe settings file.', 'wrensafe' ),
+			'notFile'    => __( 'This isn’t a Wrensafe settings file.', 'wrensafe' ),
+			'reading'    => __( 'Reading the file…', 'wrensafe' ),
+			'same'       => __( 'This file matches your current settings. There is nothing to import.', 'wrensafe' ),
+			/* translators: 1: site the file came from, 2: date, 3: Wrensafe version */
+			'from'       => __( 'From %1$s on %2$s, Wrensafe %3$s', 'wrensafe' ),
+			'review'     => __( 'Review what will change', 'wrensafe' ),
+			'reviewText' => __( 'Nothing is saved until you import. Untick anything you want to keep as it is.', 'wrensafe' ),
+			'changeOne'  => __( '1 change', 'wrensafe' ),
+			/* translators: %d: number of changes */
+			'changes'    => __( '%d changes', 'wrensafe' ),
+			'importOne'  => __( 'Import 1 setting', 'wrensafe' ),
+			/* translators: %d: number of settings */
+			'importMany' => __( 'Import %d settings', 'wrensafe' ),
+			'cancel'     => __( 'Cancel', 'wrensafe' ),
+			'imported'   => __( 'Settings imported. You can undo this below.', 'wrensafe' ),
+			'wasReset'   => __( 'Settings reset to their defaults. You can undo this below.', 'wrensafe' ),
+			'undone'     => __( 'Your previous settings are back.', 'wrensafe' ),
+			'resetTitle' => __( 'Reset Wrensafe’s settings?', 'wrensafe' ),
+			'resetText'  => sprintf(
+				/* translators: %d: number of settings */
+				_n( '%d setting goes back to its default. Your backups, schedules, backup folder, off-site storage and notification email stay as they are. You can undo this afterwards.', '%d settings go back to their defaults. Your backups, schedules, backup folder, off-site storage and notification email stay as they are. You can undo this afterwards.', $resets, 'wrensafe' ),
+				$resets
+			),
+			'resetGo'    => __( 'Reset settings', 'wrensafe' ),
+		);
+		?>
+		<div id="wpbp-settings-tools" data-text="<?php echo esc_attr( (string) wp_json_encode( $text ) ); ?>">
+			<?php if ( $undo ) : ?>
+				<div class="wpbp-callout is-info wpbp-st-undo">
+					<span class="dashicons dashicons-undo" aria-hidden="true"></span>
+					<div class="wpbp-callout-body">
+						<p class="wpbp-callout-title"><?php echo esc_html( 'reset' === $undo['what'] ? __( 'Settings were reset', 'wrensafe' ) : __( 'Settings were imported', 'wrensafe' ) ); ?></p>
+						<p>
+							<?php
+							/* translators: %s: date and time */
+							echo esc_html( sprintf( __( 'On %s. You can put back the settings you had before.', 'wrensafe' ), $undo['when'] ) );
+							?>
+						</p>
+					</div>
+					<button type="button" class="button" id="wpbp-st-undo"><?php esc_html_e( 'Undo', 'wrensafe' ); ?></button>
+				</div>
+			<?php endif; ?>
+
+			<div class="wpbp-card">
+				<h2><?php esc_html_e( 'Export settings', 'wrensafe' ); ?></h2>
+				<p><?php esc_html_e( 'Save Wrensafe’s settings to a file, to use them on another site or keep a copy.', 'wrensafe' ); ?></p>
+				<div class="wpbp-st-facts">
+					<div class="wpbp-st-fact">
+						<strong><?php esc_html_e( 'Included', 'wrensafe' ); ?></strong>
+						<?php esc_html_e( 'Backup exclusions, Safe Updates, notification choices, migration and advanced options.', 'wrensafe' ); ?>
+					</div>
+					<div class="wpbp-st-fact">
+						<strong><?php esc_html_e( 'Never included', 'wrensafe' ); ?></strong>
+						<?php esc_html_e( 'Passwords and keys, off-site storage, the backup folder, your email address and schedules.', 'wrensafe' ); ?>
+					</div>
+				</div>
+				<button type="button" class="button button-primary" id="wpbp-st-export"><?php esc_html_e( 'Export settings', 'wrensafe' ); ?></button>
+			</div>
+
+			<div class="wpbp-card">
+				<h2><?php esc_html_e( 'Import settings', 'wrensafe' ); ?></h2>
+				<p><?php esc_html_e( 'Use a settings file exported from Wrensafe. You see every change before anything is saved.', 'wrensafe' ); ?></p>
+				<div class="wpbp-dropzone wpbp-st-drop" id="wpbp-st-drop">
+					<span class="dashicons dashicons-upload" aria-hidden="true"></span>
+					<p><?php esc_html_e( 'Drag a settings file here, or', 'wrensafe' ); ?></p>
+					<button type="button" class="button" id="wpbp-st-choose"><?php esc_html_e( 'Choose file', 'wrensafe' ); ?></button>
+					<input type="file" id="wpbp-st-file" accept=".json,application/json" aria-label="<?php esc_attr_e( 'Settings file', 'wrensafe' ); ?>" />
+				</div>
+				<p class="wpbp-st-error" id="wpbp-st-error" role="alert" hidden></p>
+				<div class="wpbp-st-preview" id="wpbp-st-preview" aria-live="polite" hidden></div>
+			</div>
+
+			<div class="wpbp-card">
+				<h2><?php esc_html_e( 'Reset settings', 'wrensafe' ); ?></h2>
+				<p><?php esc_html_e( 'Put Wrensafe’s settings back to their defaults. You can undo this afterwards.', 'wrensafe' ); ?></p>
+				<div class="wpbp-st-facts">
+					<div class="wpbp-st-fact">
+						<strong><?php esc_html_e( 'Goes back to default', 'wrensafe' ); ?></strong>
+						<?php esc_html_e( 'Backup exclusions, Safe Updates, notification choices, migration, security and advanced options.', 'wrensafe' ); ?>
+					</div>
+					<div class="wpbp-st-fact">
+						<strong><?php esc_html_e( 'Always kept', 'wrensafe' ); ?></strong>
+						<?php esc_html_e( 'Your backups, schedules, backup folder, off-site storage and notification email.', 'wrensafe' ); ?>
+					</div>
+				</div>
+				<button type="button" class="button button-link-delete" id="wpbp-st-reset"<?php disabled( 0, $resets ); ?>><?php esc_html_e( 'Reset to defaults', 'wrensafe' ); ?></button>
+				<?php if ( 0 === $resets ) : ?>
+					<span class="description wpbp-st-at-default"><?php esc_html_e( 'Your settings are already at their defaults.', 'wrensafe' ); ?></span>
+				<?php endif; ?>
+			</div>
+		</div>
+		<?php
+	}
+
 	private function render_tab_advanced(): void {
 		$settings = Settings::get_all();
 
@@ -368,14 +472,19 @@ class SettingsPage extends AbstractPage {
 
 	private function render_tab_support_us(): void {
 		SupportUs::render_card();
+		SupportUs::render_video();
+
+		// The Roadmap box only once there is a roadmap page to link to.
+		$community_url = SupportUs::community_url();
+
+		if ( '' === $community_url ) {
+			return;
+		}
 		?>
 		<div class="wpbp-card">
 			<h2><?php esc_html_e( 'Roadmap', 'wrensafe' ); ?></h2>
 			<p><?php esc_html_e( 'Follow the Wrensafe roadmap, vote for features and suggest new ones.', 'wrensafe' ); ?></p>
-			<?php $community_url = SupportUs::community_url(); ?>
-			<?php if ( '' !== $community_url ) : ?>
-				<p><a class="button" href="<?php echo esc_url( $community_url ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'View roadmap', 'wrensafe' ); ?></a></p>
-			<?php endif; ?>
+			<p><a class="button" href="<?php echo esc_url( $community_url ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'View roadmap', 'wrensafe' ); ?></a></p>
 		</div>
 		<?php
 	}
@@ -426,7 +535,7 @@ class SettingsPage extends AbstractPage {
 		$r     = \WPBP\Remote\RemoteStorage::get();
 		$types = \WPBP\Remote\RemoteStorage::types();
 		$base  = Settings::OPTION_NAME . '[remote]';
-		$saved = __( 'Saved. Leave empty to keep it.', 'wrensafe' );
+		$saved = __( 'Saved. Leave empty to keep it, unless you change the server or account.', 'wrensafe' );
 
 		$field = static function ( string $kind, string $key, string $label, string $type = 'text', string $help = '', string $placeholder = '' ) use ( $r, $base, $saved ): void {
 			$id     = 'wpbp-remote-' . $kind . '-' . str_replace( '_', '-', $key );
@@ -584,14 +693,14 @@ class SettingsPage extends AbstractPage {
 						</div>
 						<p class="wpbp-backup-dir-presets">
 							<span><?php esc_html_e( 'Quick choice:', 'wrensafe' ); ?></span>
-							<button type="button" class="button-link" data-wpbp-dir="<?php echo esc_attr( untrailingslashit( $default ) ); ?>">
+							<button type="button" class="button" data-wpbp-dir="<?php echo esc_attr( untrailingslashit( $default ) ); ?>">
 							<?php
 							/* translators: %s: name of the site's content folder, usually wp-content */
 							echo esc_html( sprintf( __( 'Default (inside %s)', 'wrensafe' ), basename( Paths::content_dir() ) ) );
 							?>
 							</button>
 							<?php if ( $can_out ) : ?>
-								<button type="button" class="button-link" data-wpbp-dir="<?php echo esc_attr( $outside ); ?>"><?php esc_html_e( 'Outside the website folder (safest)', 'wrensafe' ); ?></button>
+								<button type="button" class="button" data-wpbp-dir="<?php echo esc_attr( $outside ); ?>"><?php esc_html_e( 'Outside the website folder (safest)', 'wrensafe' ); ?></button>
 							<?php endif; ?>
 						</p>
 						<p class="description wpbp-backup-dir-status" id="wpbp-backup-dir-status" aria-live="polite"></p>

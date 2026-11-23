@@ -326,13 +326,16 @@ class SafeUpdatesPage extends AbstractPage {
 			'skipped'     => __( 'Skipped', 'wrensafe' ),
 			'cancelled'   => __( 'Not updated (stopped)', 'wrensafe' ),
 		);
-		$tone   = $run['summary']['failed'] || 'failed' === $run['status'] ? 'is-danger' : ( $run['summary']['rolled_back'] ? 'is-warning' : 'is-success' );
 		?>
 		<details class="wpbp-su-history-run" data-job="<?php echo esc_attr( (string) $run['id'] ); ?>">
 			<summary>
 				<span class="wpbp-su-history-date"><?php echo esc_html( $run['date'] ); ?></span>
 				<span class="wpbp-su-history-mode"><?php echo esc_html( $run['modeName'] ); ?></span>
-				<span class="wpbp-pill <?php echo esc_attr( $tone ); ?>"><?php echo esc_html( rtrim( SafeUpdateManager::summary_text( $run['summary'] ), '.' ) ); ?></span>
+				<span class="wpbp-su-pills">
+					<?php foreach ( $run['pills'] as $pill ) : ?>
+						<span class="wpbp-su-pill is-<?php echo esc_attr( $pill['tone'] ); ?>"><?php echo esc_html( $pill['text'] ); ?></span>
+					<?php endforeach; ?>
+				</span>
 			</summary>
 			<?php if ( '' !== $run['error'] ) : ?>
 				<p class="wpbp-inline-notice is-error"><?php echo esc_html( $run['error'] ); ?></p>
@@ -345,7 +348,9 @@ class SafeUpdatesPage extends AbstractPage {
 							<span class="wpbp-su-item-name"><?php echo esc_html( $item['name'] ); ?></span>
 							<span class="wpbp-su-item-versions"><?php echo esc_html( $item['from'] . ' → ' . $item['to'] ); ?></span>
 							<span class="wpbp-su-item-state"><?php echo esc_html( $labels[ $item['state'] ] ?? $item['state'] ); ?></span>
-							<?php if ( '' !== $item['message'] ) : ?>
+							<?php if ( ! empty( $item['cause'] ) ) : ?>
+								<?php $this->render_cause( $item['cause'] ); ?>
+							<?php elseif ( '' !== $item['message'] ) : ?>
 								<span class="wpbp-su-item-message"><?php echo esc_html( $item['message'] ); ?></span>
 							<?php endif; ?>
 							<?php $this->render_details( $item['details'] ); ?>
@@ -370,6 +375,26 @@ class SafeUpdatesPage extends AbstractPage {
 				</p>
 			<?php endif; ?>
 		</details>
+		<?php
+	}
+
+	/**
+	 * Why an item wasn't updated or was rolled back, and what to do. The script renders the same markup.
+	 *
+	 * @param array<string,string> $cause
+	 */
+	private function render_cause( array $cause ): void {
+		?>
+		<span class="wpbp-su-cause">
+			<span class="wpbp-su-cause-label"><?php echo esc_html( $cause['label'] ); ?></span>
+			<span class="wpbp-su-cause-text"><?php echo esc_html( $cause['text'] ); ?></span>
+			<?php if ( '' !== ( $cause['fix'] ?? '' ) ) : ?>
+				<span class="wpbp-su-cause-fix"><strong><?php esc_html_e( 'What to do:', 'wrensafe' ); ?></strong> <?php echo esc_html( $cause['fix'] ); ?></span>
+			<?php endif; ?>
+			<?php if ( '' !== ( $cause['detail'] ?? '' ) ) : ?>
+				<span class="wpbp-su-cause-detail"><?php esc_html_e( 'Technical detail:', 'wrensafe' ); ?> <?php echo esc_html( $cause['detail'] ); ?></span>
+			<?php endif; ?>
+		</span>
 		<?php
 	}
 

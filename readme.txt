@@ -4,17 +4,25 @@ Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.7
+Stable tag: 1.2.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Back up, restore and migrate WordPress: full or partial backups, off-site copies (FTP, S3), schedules, staging and safe plugin updates.
+Back up, restore and migrate WordPress. Import other plugins' backups, repair broken links after a move, and update plugins safely.
 
 == Description ==
 
-Wrensafe backs up your WordPress site and restores it — on the same server or on a completely different one — without guesswork. Every backup is a single `.wbp` archive with its own manifest and checksums, every restore starts with an integrity check, and the dashboard tells you plainly whether your site is protected.
+Wrensafe is a WordPress backup, restore and migration plugin built for the moment that matters: getting a site back, working, with its links and images intact. It restores on the same server or a completely different one. Every backup is a single `.wbp` archive with its own manifest and checksums, every restore starts with an integrity check, and the dashboard tells you plainly whether your site is protected.
 
 https://www.youtube.com/watch?v=uYh1AkgG6Kk
+
+### Built for what goes wrong
+
+* **Broken images and links after a restore or migration?** Fix Links finds links that still point to the old site, server folders written into image addresses, http links on an https site and missing media files. It fixes the links after making a database backup.
+* **Stuck with a backup from another plugin?** Restore `.wpress`, UpdraftPlus, Duplicator, WPvivid, BackWPup and other backups without installing the plugin that made them.
+* **Afraid a plugin update will break the site?** Safe Update checks the site after updating and puts the previous version back if the update causes a fatal error.
+* **Moving to a new domain or host?** Wrensafe rewrites the old addresses and paths, including inside serialized data and page-builder content.
+* **On shared hosting?** Backups and restores run in small steps, so large sites finish even where PHP may only run for 30 seconds.
 
 ### Back up
 
@@ -83,9 +91,25 @@ To move a site: create a full backup on the old site, download it from the **Bac
 
 == Frequently Asked Questions ==
 
+= How do I fix broken images and links after restoring or migrating WordPress? =
+
+Open **Wrensafe → Fix Links**, check the old site address (it is filled in after a restore) and select **Check links and media**. The check changes nothing. If it finds links to fix, select **Fix links**: Wrensafe makes a database backup first, then repairs them. Media files that aren't on the site are listed so you can upload them again.
+
+= How do I restore a .wpress backup? =
+
+Install Wrensafe on the site, go to **Import / Restore → Other Backup Plugins** and upload the `.wpress` file. Wrensafe shows what's inside, then restores it with the same checks as its own backups. All-in-One WP Migration doesn't need to be installed.
+
+= How do I roll back a plugin update? =
+
+Update the plugin with **Safe Update**. Wrensafe saves a copy of the current version first and keeps it for 14 days (you can change this). To undo the update, open **Wrensafe → Safe Updates**, find it under **Recent updates** and roll it back.
+
+= How do I migrate WordPress to a new domain or host? =
+
+Create a full backup on the old site and download it from the **Backup Browser**. Install Wrensafe on the new site and upload the file under **Import / Restore**. Wrensafe rewrites the old addresses and paths. To skip the download, use **Direct Migration** to send the backup straight to the new site with a one-time key.
+
 = How does Safe Update know an update broke my site? =
 
-Before the first update, Wrensafe loads your home page and admin area the same way WordPress checks a plugin you edit in the plugin editor, and it does the same after each update. A new fatal error, a server error (HTTP 500 or higher), a page that no longer loads, or a home page that comes back empty means the update is rolled back. Problems the site already had before the update don't count.
+Before the first update, Wrensafe loads your home page and admin area the same way WordPress checks a plugin you edit in the plugin editor, and it does the same after each update (with "All at once", after the whole group). A new fatal error, a server error (HTTP 500 or higher), a page that no longer loads, or a home page that comes back empty means the update is rolled back. Problems the site already had before the update don't count.
 
 = What if my server can't load its own pages? =
 
@@ -174,7 +198,7 @@ Nothing is deleted unless you turn on **Settings → Advanced → Uninstall**. T
 
 = Does Wrensafe add files outside its plugin folder? =
 
-Only while it needs them. During a restore or a Safe Update it adds a small file to `wp-content/mu-plugins` (`wpbp-restore-plugin-guard.php` or `wpbp-safe-update-guard.php`) and removes it when it finishes, when Wrensafe is deactivated and when it is deleted. A staging site is a copy in a `staging-…` folder inside your WordPress folder, with its own database tables; a password-protected one gets `wrensafe-staging-guard.php` in its own `mu-plugins` folder, and page caching is turned off in its own `wp-config.php` (WP_CACHE). Where that can't be done, the staging site's cache folder is emptied and the Activity Log says how to turn caching off. Backups, logs and temporary files are kept in the `wrensafe-storage` folder (or the folder you chose).
+Only while it needs them. During a restore or a Safe Update it adds a small file to `wp-content/mu-plugins` (`wpbp-restore-plugin-guard.php` or `wpbp-safe-update-guard.php`) and removes it when it finishes, when Wrensafe is deactivated and when it is deleted. A staging site is a copy in a `staging-…` folder inside your WordPress folder, with its own database tables; a password-protected one gets `wrensafe-staging-guard.php` in its own `mu-plugins` folder, and page caching is turned off in its own `wp-config.php` (WP_CACHE). Where that can't be done, the staging site's cache folder is emptied and the Activity Log says how to turn caching off. Backups, logs and temporary files are kept in the `wrensafe-storage` folder (or the folder you chose). While Safe Updates runs, a small progress file (only the position and state of each update) is kept in `wp-content/uploads/wrensafe-live/` and removed when the run ends, when Wrensafe is deactivated and when it is deleted.
 
 = What are the minimum requirements? =
 
@@ -194,31 +218,48 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * **Remote storage** — when an administrator sets it up under Settings → Remote storage, backup archives are uploaded to the FTP/FTPS or S3-compatible server they enter, using the login or keys they enter. Wrensafe also lists and deletes older copies in that folder or bucket to keep only the newest ones. Which service this is, and its terms and privacy policy, are the administrator's choice: no service is preset (the providers named in the settings are only examples), and Wrensafe has no service of its own.
 * **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. It runs when Tools → Site Health is opened and during WordPress's own weekly Site Health check. No other server is contacted.
 * **Plugin updates (Safe Updates)** — updates run through WordPress's own updater, which downloads each update from the address WordPress lists for it (WordPress.org, or the author's server for a premium plugin). "Check again" on the Safe Updates page runs WordPress's own update check with WordPress.org. To check the site after an update, Wrensafe loads the site's own home page and admin area; no other server is contacted.
+* **YouTube (intro video)** — under Settings → Support Us the intro video is a picture stored in the plugin. Only when an administrator presses play, their browser loads the player from youtube-nocookie.com and other YouTube and Google addresses, which receive their IP address, browser details and this site's address (as the referrer); once the video plays, YouTube may store cookies or similar data in the browser. [YouTube terms](https://www.youtube.com/t/terms), [Google privacy policy](https://policies.google.com/privacy).
 * **Email notifications** — backup, restore and copy results are sent with WordPress's own `wp_mail()` to the addresses set under Settings → Notifications, through whatever mail service the site uses.
 
 == Screenshots ==
 
 1. Dashboard: see at a glance whether your site is backed up, plus recent backups, schedules and migration readiness.
-2. Back up the whole site, or only the database, files, media, themes or plugins, with optional AES-256 encryption.
-3. Every backup shows live, step-by-step progress and can be cancelled safely.
-4. Backup Browser: restore, download, verify, lock, tag and delete the backups stored on your server.
-5. Review before you restore: where the backup comes from, what's inside, what will change, and which parts to restore.
-6. Integrity verification checks the archive, manifest, database files and checksums before you restore.
-7. Automatic backups: the whole site and the database on separate schedules, keeping only the newest copies.
-8. Migration Assistant scores how ready the site is to move, recommends the safest method and lists the next steps.
-9. Settings grouped by task: the backup folder, exclusions, updates, remote storage, notifications, migration and WooCommerce Safe Mode.
-10. Restore backups made by other backup plugins: upload the files just as that plugin saved them.
-11. Off-site copies: copy each backup to FTP/FTPS or S3-compatible storage, and test the connection before saving.
-12. Search & Replace: a dry run shows how many rows would change in each table before anything is saved.
-13. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
-14. When you update a plugin, choose Quick Update or Safe Update, which checks your site and rolls a breaking update back.
-15. Safe Updates: update several plugins one by one or all at once, follow the progress, and roll an update back later.
-16. Fix Links: after a restore or a move, find links that still point to the old site or have a server folder in them, fix them after a database backup, and see which media files are missing.
+2. Fix Links: after a restore or a move, find links that still point to the old site or have a server folder in them, fix them after a database backup, and see which media files are missing.
+3. Safe Updates: update several plugins one by one or all at once, follow the progress, and roll an update back later.
+4. Restore backups made by other backup plugins: upload the files just as that plugin saved them.
+5. When you update a plugin, choose Quick Update or Safe Update, which checks your site and rolls a breaking update back.
+6. Back up the whole site, or only the database, files, media, themes or plugins, with optional AES-256 encryption.
+7. Every backup shows live, step-by-step progress and can be cancelled safely.
+8. Backup Browser: restore, download, verify, lock, tag and delete the backups stored on your server.
+9. Review before you restore: where the backup comes from, what's inside, what will change, and which parts to restore.
+10. Integrity verification checks the archive, manifest, database files and checksums before you restore.
+11. Automatic backups: the whole site and the database on separate schedules, keeping only the newest copies.
+12. Migration Assistant scores how ready the site is to move, recommends the safest method and lists the next steps.
+13. Off-site copies: copy each backup to FTP/FTPS or S3-compatible storage, and test the connection before saving.
+14. Search & Replace: a dry run shows how many rows would change in each table before anything is saved.
+15. Settings grouped by task: the backup folder, exclusions, updates, remote storage, notifications, migration and WooCommerce Safe Mode.
+16. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 
 == Changelog ==
 
+= 1.2.8 =
+* New: numbers in the Wrensafe menu when something needs you: updates waiting (Safe Updates) and links to fix (Fix Links). Rollback and Scheduled Backups show a "!" only when a restore or a scheduled backup failed, or schedules stopped running.
+* New: a redesigned review card, and a notice asking for a review at a good moment (after a restore that worked, or a few backups and two weeks of use). "Maybe later" asks once more after 30 days; closing it or "I already did" ends it. It doesn't appear while a backup, restore or update is running, while the Fix Links notice is showing, or when the latest backup, restore, update run, transfer, import or staging job didn't go well (it failed, its off-site copy failed, or an update was put back), and not when a scheduled backup failed or is late.
+* New: the intro video under Settings → Support Us. Nothing loads from YouTube until you press play.
+* New: Settings → Import / Export. Export Wrensafe's settings to a file, import them on another site after reviewing every change, or reset them to defaults, with an undo. Passwords, off-site storage, the backup folder and your email address are never included.
+* Improved: Fix Links now shows what it is reading, how far it has got and each part as it finishes, with a live count of what it has found. Old addresses are added and removed as neat chips, with a clear message when one is wrong.
+* Improved: when an update isn't installed or is rolled back, Safe Updates now says why (for example an inactive license, a blocked download, no disk space or a fatal error) and what to do. A run where most updates worked shows as a success, with the ones that didn't marked next to it.
+* Improved: Safe Updates shows live progress in both update modes: how many are done, which plugin is being worked on and whether it is downloading, installing or being checked.
+* Improved: the Security scan shows each check as it runs, then a clear summary with what needs a look first. A check that couldn't run now says so instead of showing "Nothing found".
+* Improved: buttons now look and behave the same on every screen, and every delete or stop action has the same clear style.
+* Improved: on sites with a long admin menu, short Wrensafe screens stay in view while the menu scrolls, instead of leaving an empty page.
+* Fixed: off-site storage settings and their connection test now need the permission to manage off-site storage (administrators have it), and a saved password or secret key has to be typed again when the server or account changes.
+* Fixed: two restores started at the same moment could both go ahead; starting a restore is now one step only one request can take.
+* Fixed: Fix Links also finds and fixes a Windows server folder written with doubled backslashes (as some page builders store it).
+* Changed: the empty Roadmap box under Settings → Support Us is hidden until there is a roadmap page to link to.
+
 = 1.2.7 =
-* Fixed: restoring a backup made with All-in-One WP Migration onto another site broke images and file links: a server folder was written into their addresses ("https://site//var/www/html/wp-content/uploads/…"). Restores now only replace full folders and whole addresses (the old address no longer changes a longer one such as old-site.com.au), and also replace the old address's "www." form.
+* Fixed: restoring a backup made with All-in-One WP Migration onto another site broke images and file links: the server's folder (such as /var/www/html) was written into their addresses, right after the site's address. Restores now only replace full folders and whole addresses (the old address no longer changes a longer one such as old-site.com.au), and also replace the old address's "www." form.
 * New: Wrensafe → Fix Links. After a restore or a move it checks posts, pages, page-builder data, settings and the Media Library for links that still point to the old site, links with a server folder in them, http:// links on an https:// site, and media files that aren't on the site. It fixes the links after a database backup and lists the missing files. Email addresses and other domains are left alone. A link to another site that contains the old address, such as a share or web-archive link, is updated too. Server folders it can't confirm as this site's, and tables left out of backups, are listed for you to check by hand. After a restore that moved the site, a notice offers it with a Fix links button.
 * Fixed: when the site check after an update only timed out (a slow site) and the update couldn't be rolled back, Safe Updates deactivated the plugin, which could break a theme that needs it (for example Advanced Custom Fields). Slow pages now get a longer second try; when an update can't be rolled back after a timeout, the plugin is left switched off only if the site answers again without it; and a plugin whose deactivation breaks something else is switched back on.
 * Fixed: after one update left the site with a problem, Safe Updates rolled back every later update for that same problem. The run now stops instead.
@@ -354,6 +395,9 @@ The first 1.2 release on WordPress.org. Versions 1.2.0 to 1.2.3 were tested on a
 * Test releases before the first stable version.
 
 == Upgrade Notice ==
+
+= 1.2.8 =
+Fix Links shows live progress, the menu shows when something needs you, buttons match on every screen, short screens no longer leave empty space, plus a new review card, the intro video and safer restore starts.
 
 = 1.2.7 =
 Fixes broken images after restoring All-in-One WP Migration backups, adds Fix Links (repairs links and finds missing media after a restore), Stop now for update runs, and safer Safe Updates on slow sites.

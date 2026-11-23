@@ -234,7 +234,7 @@ class DashboardPage extends AbstractPage {
 			</div>
 			<div class="wpbp-hero-actions">
 				<?php if ( $completed > 0 ) : ?>
-					<a class="button" href="<?php echo esc_url( self::page_url( 'wrensafe-browser' ) ); ?>"><?php esc_html_e( 'View backups', 'wrensafe' ); ?></a>
+					<a class="button button-hero" href="<?php echo esc_url( self::page_url( 'wrensafe-browser' ) ); ?>"><?php esc_html_e( 'View backups', 'wrensafe' ); ?></a>
 				<?php endif; ?>
 				<?php if ( $can_create ) : ?>
 					<a class="button button-primary button-hero wpbp-button-cta" href="<?php echo esc_url( self::page_url( 'wrensafe-backup' ) ); ?>"><?php echo esc_html( $hero['cta'] ); ?></a>

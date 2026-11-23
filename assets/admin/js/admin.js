@@ -25,6 +25,7 @@
 		initDirectMigrationPage();
 		initStagingPage();
 		initMalwareScan();
+		initSettingsTools();
 		initMigrationAssistant();
 		initLocalTimes();
 		initOtherNotices();
@@ -155,7 +156,7 @@
 			modal.$body.append( $tour );
 
 			var $counter = $( '<span class="wpbp-welcome-counter"></span>' );
-			var $skip = $( '<button type="button" class="button-link wpbp-welcome-skip"></button>' ).text( data.skip );
+			var $skip = $( '<button type="button" class="button wpbp-button-ghost wpbp-welcome-skip"></button>' ).text( data.skip );
 			var $back = $( '<button type="button" class="button"></button>' ).text( data.back );
 			var $next = $( '<button type="button" class="button button-primary"></button>' );
 			modal.$footer.append( $skip, $counter, $back, $next );
@@ -2966,7 +2967,7 @@
 					showResult( $content, [
 						button( i18n.foreignPrepare, true, convert ),
 						button( i18n.foreignAddMore, false, openPicker ),
-						button( i18n.foreignStartOver, false, startOver ).addClass( 'button-link' ).removeClass( 'button' )
+						button( i18n.foreignStartOver, false, startOver )
 					] );
 				} ).fail( function ( xhr ) {
 					showProblem( i18n.foreignNotUsable, errorOf( null, xhr ) || i18n.genericError );
@@ -2981,7 +2982,7 @@
 				} else {
 					actions.push( button( i18n.foreignAddMore, true, openPicker ) );
 				}
-				actions.push( button( i18n.foreignStartOver, false, startOver ).addClass( 'button-link' ).removeClass( 'button' ) );
+				actions.push( button( i18n.foreignStartOver, false, startOver ) );
 
 				showResult( resultHead( 'alert', 'error', title, message || i18n.genericError ), actions );
 			}
@@ -3087,7 +3088,7 @@
 
 				showResult(
 					resultHead( 'check-circle', 'success', i18n.foreignReadyKicker, i18n.foreignReady ),
-					[ button( i18n.foreignStartOver, false, startOver ).addClass( 'button-link' ).removeClass( 'button' ) ]
+					[ button( i18n.foreignStartOver, false, startOver ) ]
 				);
 
 				handleImportResponse( { success: true, data: restore } );
@@ -4035,6 +4036,19 @@
 		$dry.on( 'change', updateLabel );
 		updateLabel();
 
+		function showTableCount() {
+			var $count = $( '#wpbp-sr-count' );
+			var $boxes = $tables.find( 'input[type="checkbox"]' );
+
+			$count.text( String( $count.data( 'text' ) || '' ).replace( '%1$d', $boxes.filter( ':checked' ).length ).replace( '%2$d', $boxes.length ) );
+		}
+
+		$tables.on( 'change', 'input', showTableCount );
+		$( '#wpbp-sr-all, #wpbp-sr-none' ).on( 'click', function () {
+			window.setTimeout( showTableCount, 0 );
+		} );
+		showTableCount();
+
 		$( '#wpbp-sr-all' ).on( 'click', function () {
 			$tables.find( 'input' ).prop( 'checked', true );
 		} );
@@ -4458,7 +4472,8 @@
 	}
 
 	/**
-	 * Wires the on-demand Security Scan button on the System Info page.
+	 * The Security Scan on the System Info page: one check per request, so the
+	 * screen shows which is running and what each found as it finishes.
 	 */
 	function initMalwareScan() {
 		var $button = $( '#wpbp-malware-scan-run' );
@@ -4468,70 +4483,630 @@
 		}
 
 		var $results = $( '#wpbp-malware-scan-results' );
+		var checks = $button.data( 'checks' ) || [];
+		var text = $button.data( 'text' ) || {};
+		var found = {};
 
-		var sections = [
-			{ key: 'modified_core_files', label: wpbpT( 'Modified core files' ), listKey: 'modified_files' },
-			{ key: 'suspicious_uploads', label: wpbpT( 'PHP files in uploads' ) },
-			{ key: 'recently_changed', label: wpbpT( 'Recently changed files (last 2 days)' ) },
-			{ key: 'dangerous_permissions', label: wpbpT( 'Risky file permissions' ) },
-			{ key: 'hidden_files', label: wpbpT( 'Hidden files' ) },
-			{ key: 'suspicious_names', label: wpbpT( 'Suspicious file names' ) }
-		];
+		function count( template, n, total ) {
+			return String( template ).replace( '%1$d', n ).replace( '%2$d', total ).replace( '%d', n );
+		}
 
-		$button.on( 'click', function () {
-			$button.prop( 'disabled', true );
-			$results.empty().append( $( '<p>' ).text( wpbpT( 'Scanning…' ) ) );
+		// What a check found, as lines to show, and how many of them need a look.
+		function readCheck( check, data ) {
+			var out = { lines: [], attention: 0, failed: false, message: '' };
+
+			if ( null === data || 'object' !== typeof data ) {
+				out.failed = true;
+				return out;
+			}
+
+			if ( check.list ) {
+				if ( false === data.available ) {
+					out.failed = true;
+					out.message = data.message || '';
+					return out;
+				}
+
+				data = data[ check.list ] || [];
+			}
+
+			out.lines = $.map( data, function ( item ) {
+				if ( 'string' === typeof item ) {
+					return { text: item, flagged: false };
+				}
+
+				if ( item && item.file ) {
+					return { text: item.file + ' — ' + ( item.patterns || [] ).join( ', ' ), flagged: false };
+				}
+
+				if ( item && item.login ) {
+					return {
+						text: item.login + ' (' + count( text.since, 0 ).replace( '%s', String( item.registered || '' ).slice( 0, 10 ) ) + ')' + ( item.recently_added ? ' — ' + text.newAdmin : '' ),
+						flagged: !! item.recently_added
+					};
+				}
+
+				return null;
+			} );
+
+			if ( 'review' === check.level ) {
+				out.attention = out.lines.length;
+			} else {
+				out.attention = out.lines.filter( function ( line ) {
+					return line.flagged;
+				} ).length;
+			}
+
+			return out;
+		}
+
+		function attention() {
+			return checks.reduce( function ( total, check ) {
+				return total + ( found[ check.key ] ? found[ check.key ].attention : 0 );
+			}, 0 );
+		}
+
+		function drawProgress() {
+			var $steps = $( '<ol class="wpbp-lc-steps wpbp-scan-steps"></ol>' );
+
+			checks.forEach( function ( check ) {
+				$steps.append(
+					$( '<li class="is-waiting"></li>' ).append(
+						$( '<span class="wpbp-lc-step-dot" aria-hidden="true"></span>' ),
+						$( '<span class="wpbp-lc-step-name"></span>' ).text( check.label )
+					)
+				);
+			} );
+
+			$results.empty().append(
+				$( '<div class="wpbp-lc-progress wpbp-scan-progress"></div>' ).append(
+					$( '<div class="wpbp-lc-progress-head"></div>' ).append(
+						$( '<span class="wpbp-lc-ring" aria-hidden="true"></span>' ),
+						$( '<div class="wpbp-lc-progress-text"></div>' ).append(
+							$( '<p class="wpbp-lc-progress-label"></p>' ).text( text.title ),
+							$( '<p class="wpbp-lc-progress-now" aria-hidden="true"></p>' )
+						),
+						$( '<span class="wpbp-lc-progress-percent" aria-hidden="true">0%</span>' )
+					),
+					$( '<div class="wpbp-lc-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span style="width:3%"></span></div>' ).attr( 'aria-label', text.title ),
+					$steps,
+					$( '<p class="wpbp-lc-progress-foot" aria-hidden="true"></p>' )
+				)
+			);
+		}
+
+		function showStep( index ) {
+			var percent = Math.round( 100 * index / checks.length );
+			var review = attention();
+			var foot = count( text.progress, index, checks.length );
+
+			if ( review ) {
+				foot += ' · ' + ( 1 === review ? text.soFarOne : count( text.soFar, review ) );
+			}
+
+			$results.find( '.wpbp-lc-progress-now' ).text( checks[ index ] ? checks[ index ].doing : '' );
+			$results.find( '.wpbp-lc-progress-percent' ).text( percent + '%' );
+			$results.find( '.wpbp-lc-meter' ).attr( 'aria-valuenow', percent ).find( 'span' ).css( 'width', Math.max( 3, percent ) + '%' );
+			$results.find( '.wpbp-lc-progress-foot' ).text( foot );
+			$results.find( '.wpbp-scan-steps li' ).each( function ( i ) {
+				this.className = i < index ? 'is-done' : ( i === index ? 'is-active' : 'is-waiting' );
+
+				if ( i === index ) {
+					this.setAttribute( 'aria-current', 'step' );
+				} else {
+					this.removeAttribute( 'aria-current' );
+				}
+			} );
+		}
+
+		function drawRow( check, result, open ) {
+			var tone = result.failed ? 'is-failed' : ( result.attention ? 'is-review' : ( result.lines.length ? 'is-info' : 'is-clear' ) );
+			var badge = result.failed ? text.failed : ( result.attention ? count( text.toReview, result.attention ) : ( result.lines.length ? count( text.listed, result.lines.length ) + ( 'recently_changed' === check.key && result.lines.length >= 200 ? '+' : '' ) : text.nothing ) );
+			var hasBody = result.failed ? !! result.message : result.lines.length > 0;
+			var $row = $( hasBody ? '<details class="wpbp-scan-row"></details>' : '<div class="wpbp-scan-row"></div>' ).addClass( tone );
+			var $head = $( hasBody ? '<summary></summary>' : '<div class="wpbp-scan-head"></div>' ).append(
+				$( '<span class="wpbp-scan-dot" aria-hidden="true"></span>' ),
+				$( '<span class="wpbp-scan-title"></span>' ).text( check.title ),
+				$( '<span class="wpbp-scan-badge"></span>' ).text( badge )
+			);
+
+			$row.append( $head );
+
+			if ( hasBody ) {
+				var $body = $( '<div class="wpbp-scan-body"></div>' );
+
+				if ( result.failed ) {
+					$body.append( $( '<p></p>' ).text( result.message ) );
+				} else {
+					$body.append( $( '<p></p>' ).text( check.why ) );
+
+					var $files = $( '<ul class="wpbp-scan-files"></ul>' );
+
+					result.lines.slice( 0, 50 ).forEach( function ( line ) {
+						$files.append( $( '<li></li>' ).text( line.text ).toggleClass( 'is-flagged', line.flagged ) );
+					} );
+
+					if ( result.lines.length > 50 ) {
+						$files.append( $( '<li class="is-more"></li>' ).text( count( text.more, result.lines.length - 50 ) ) );
+					}
+
+					$body.append( $files );
+				}
+
+				$row.append( $body );
+
+				if ( open ) {
+					$row.attr( 'open', 'open' );
+				}
+			}
+
+			return $row;
+		}
+
+		function drawResults() {
+			var review = attention();
+			var incomplete = checks.some( function ( check ) {
+				return found[ check.key ].failed;
+			} );
+			var tone = review ? 'is-review' : ( incomplete ? 'is-failed' : 'is-clear' );
+			var title = review ? ( 1 === review ? text.oneTitle : count( text.manyTitle, review ) ) : ( incomplete ? text.partial : text.clear );
+			var body = review ? text.reviewText : ( incomplete ? text.partialText : text.clearText );
+			var $list = $( '<div class="wpbp-scan-list"></div>' );
+			var opened = false;
+
+			// What needs a look comes first.
+			checks.slice().sort( function ( a, b ) {
+				return ( found[ b.key ].attention ? 1 : 0 ) - ( found[ a.key ].attention ? 1 : 0 );
+			} ).forEach( function ( check ) {
+				var open = ! opened && found[ check.key ].attention > 0;
+
+				opened = opened || open;
+				$list.append( drawRow( check, found[ check.key ], open ) );
+			} );
+
+			$results.empty().append(
+				$( '<div class="wpbp-scan-summary"></div>' ).addClass( tone ).append(
+					$( '<span class="wpbp-scan-summary-icon" aria-hidden="true"></span>' ),
+					$( '<div></div>' ).append(
+						$( '<p class="wpbp-scan-summary-title"></p>' ).text( title ),
+						$( '<p class="wpbp-scan-summary-text"></p>' ).text( body )
+					)
+				),
+				$list
+			);
+		}
+
+		function finish() {
+			$button.prop( 'disabled', false ).removeClass( 'is-busy' ).removeAttr( 'aria-busy' ).text( text.again );
+
+			// The finished bar holds for a moment, so even a fast scan reads as complete.
+			showStep( checks.length );
+			$results.find( '.wpbp-lc-progress-now' ).text( '' );
+			window.setTimeout( drawResults, 500 );
+		}
+
+		function runCheck( index ) {
+			if ( index >= checks.length ) {
+				finish();
+				return;
+			}
+
+			showStep( index );
 
 			$.post( wpbpAdmin.ajaxUrl, {
 				action: 'wpbp_malware_scan',
+				check: checks[ index ].key,
 				_wpbp_nonce: wpbpAdmin.nonce
 			} ).done( function ( response ) {
-				$button.prop( 'disabled', false );
+				found[ checks[ index ].key ] = response && response.success
+					? readCheck( checks[ index ], response.data )
+					: { lines: [], attention: 0, failed: true, message: ( response && response.data && response.data.message ) || '' };
+			} ).fail( function ( xhr ) {
+				// One check cut off (a slow server) doesn't lose the others.
+				found[ checks[ index ].key ] = { lines: [], attention: 0, failed: true, message: wpbpXhrMessage( xhr ) };
+			} ).always( function () {
+				runCheck( index + 1 );
+			} );
+		}
 
-				if ( ! response.success ) {
-					return $results.empty().append( $( '<p>' ).text( ( response.data && response.data.message ) || wpbpAdmin.i18n.genericError ) );
+		$button.on( 'click', function () {
+			found = {};
+			$button.prop( 'disabled', true ).addClass( 'is-busy' ).attr( 'aria-busy', 'true' ).text( text.button );
+			drawProgress();
+			runCheck( 0 );
+		} );
+	}
+
+	/**
+	 * Settings → Import / Export: export to a file, import with a review of
+	 * every change, reset to defaults, and undo the last import or reset.
+	 */
+	function initSettingsTools() {
+		var $box = $( '#wpbp-settings-tools' );
+
+		if ( ! $box.length ) {
+			return;
+		}
+
+		var text = $box.data( 'text' ) || {};
+		var $file = $( '#wpbp-st-file' );
+		var $zone = $( '#wpbp-st-drop' );
+		var $preview = $( '#wpbp-st-preview' );
+		var $error = $( '#wpbp-st-error' );
+		var loaded = null;
+		var DONE_KEY = 'wpbpSettingsDone';
+
+		// The result of the last action, shown after the page reloads with the new values.
+		try {
+			var last = window.sessionStorage.getItem( DONE_KEY );
+
+			if ( last ) {
+				window.sessionStorage.removeItem( DONE_KEY );
+				wpbpToast( last, 'success' );
+			}
+		} catch ( e ) {
+			// No session storage: the page itself shows the new values.
+		}
+
+		function send( action, data ) {
+			return $.post( wpbpAdmin.ajaxUrl, $.extend( { action: 'wpbp_settings_' + action, _wpbp_nonce: wpbpAdmin.nonce }, data || {} ) );
+		}
+
+		function reason( response ) {
+			return ( response && response.data && response.data.message ) || wpbpAdmin.i18n.genericError;
+		}
+
+		function working( $button, on ) {
+			$button.prop( 'disabled', on ).toggleClass( 'is-busy', on );
+
+			if ( on ) {
+				$button.attr( 'aria-busy', 'true' );
+			} else {
+				$button.removeAttr( 'aria-busy' );
+			}
+		}
+
+		function finished( message ) {
+			try {
+				window.sessionStorage.setItem( DONE_KEY, message );
+			} catch ( e ) {
+				// The page still reloads with the new values.
+			}
+
+			window.location.reload();
+		}
+
+		function showError( message ) {
+			$error.text( message || '' ).prop( 'hidden', ! message );
+		}
+
+		function closePreview() {
+			loaded = null;
+			$file.val( '' );
+			$preview.empty().prop( 'hidden', true );
+			$zone.prop( 'hidden', false );
+		}
+
+		// JSON values as the form sends them: true and false as 1 and 0, an empty list as ''.
+		function prepare( json ) {
+			if ( ! json || 'object' !== typeof json || ! json.settings || 'object' !== typeof json.settings || Array.isArray( json.settings ) ) {
+				return null;
+			}
+
+			var settings = {};
+
+			Object.keys( json.settings ).forEach( function ( key ) {
+				var value = json.settings[ key ];
+
+				if ( 'boolean' === typeof value ) {
+					settings[ key ] = value ? 1 : 0;
+				} else if ( Array.isArray( value ) ) {
+					settings[ key ] = value.length ? value : '';
+				} else if ( 'string' === typeof value || 'number' === typeof value ) {
+					settings[ key ] = value;
+				}
+			} );
+
+			return {
+				settings: settings,
+				meta: { plugin: json.plugin, type: json.type, schema: json.schema, version: json.version, site: json.site, exported_at: json.exported_at } // eslint-disable-line camelcase
+			};
+		}
+
+		function updateImportButton() {
+			var total = 0;
+
+			$preview.find( 'input[type="checkbox"]:checked' ).each( function () {
+				total += parseInt( $( this ).attr( 'data-count' ), 10 ) || 0;
+			} );
+
+			$preview.find( '.wpbp-st-import' )
+				.prop( 'disabled', 0 === total )
+				.text( 1 === total ? text.importOne : String( text.importMany ).replace( '%d', total ) );
+		}
+
+		function drawPreview( data ) {
+			var $list = $( '<div class="wpbp-scan-list"></div>' );
+
+			$preview.empty();
+
+			if ( data.site || data.date ) {
+				$preview.append(
+					$( '<p class="wpbp-st-from"></p>' ).text(
+						String( text.from ).replace( '%1$s', data.site || '' ).replace( '%2$s', data.date || '' ).replace( '%3$s', data.from || '' )
+					)
+				);
+			}
+
+			if ( ! data.total ) {
+				$preview.append(
+					$( '<div class="wpbp-scan-summary is-clear"></div>' ).append(
+						$( '<span class="wpbp-scan-summary-icon" aria-hidden="true"></span>' ),
+						$( '<div></div>' ).append( $( '<p class="wpbp-scan-summary-title"></p>' ).text( text.same ) )
+					),
+					$( '<p class="wpbp-button-row"></p>' ).append( $( '<button type="button" class="button wpbp-st-cancel"></button>' ).text( text.cancel ) )
+				);
+				$preview.prop( 'hidden', false );
+				return;
+			}
+
+			data.groups.forEach( function ( group ) {
+				var $changes = $( '<ul class="wpbp-st-changes"></ul>' );
+
+				group.changes.forEach( function ( change ) {
+					$changes.append(
+						$( '<li></li>' ).append(
+							$( '<span class="wpbp-st-change-name"></span>' ).text( change.label ),
+							$( '<span class="wpbp-st-change-values"></span>' ).append(
+								$( '<span class="wpbp-st-old"></span>' ).text( change.from ),
+								$( '<span aria-hidden="true"> → </span>' ),
+								$( '<span class="wpbp-st-new"></span>' ).text( change.to )
+							)
+						)
+					);
+				} );
+
+				$list.append(
+					$( '<div class="wpbp-scan-row is-info"></div>' ).append(
+						$( '<label class="wpbp-scan-head"></label>' ).append(
+							$( '<input type="checkbox" checked>' ).val( group.key ).attr( 'data-count', group.changes.length ),
+							$( '<span class="wpbp-scan-title"></span>' ).text( group.label ),
+							$( '<span class="wpbp-scan-badge"></span>' ).text( 1 === group.changes.length ? text.changeOne : String( text.changes ).replace( '%d', group.changes.length ) )
+						),
+						$( '<div class="wpbp-scan-body"></div>' ).append( $changes )
+					)
+				);
+			} );
+
+			$preview.append(
+				$( '<h3></h3>' ).text( text.review ),
+				$( '<p class="description"></p>' ).text( text.reviewText ),
+				$list,
+				$( '<p class="wpbp-button-row"></p>' ).append(
+					$( '<button type="button" class="button button-primary wpbp-st-import"></button>' ),
+					$( '<button type="button" class="button wpbp-st-cancel"></button>' ).text( text.cancel )
+				)
+			);
+			$preview.prop( 'hidden', false );
+			updateImportButton();
+		}
+
+		function readFile( file ) {
+			showError( '' );
+
+			if ( ! file ) {
+				return;
+			}
+
+			if ( file.size > 65536 ) {
+				showError( text.tooBig );
+				$file.val( '' );
+				return;
+			}
+
+			var reader = new window.FileReader();
+
+			reader.onerror = function () {
+				showError( text.notFile );
+			};
+			reader.onload = function () {
+				var parsed = null;
+
+				try {
+					parsed = prepare( JSON.parse( String( reader.result ) ) );
+				} catch ( e ) {
+					parsed = null;
 				}
 
-				renderResults( response.data );
+				if ( ! parsed ) {
+					showError( text.notFile );
+					$file.val( '' );
+					return;
+				}
+
+				send( 'preview', parsed ).done( function ( response ) {
+					if ( ! response || ! response.success ) {
+						showError( reason( response ) );
+						$file.val( '' );
+						return;
+					}
+
+					loaded = parsed;
+					$zone.prop( 'hidden', true );
+					drawPreview( response.data );
+				} ).fail( function ( xhr ) {
+					showError( wpbpXhrMessage( xhr ) );
+				} );
+			};
+			reader.readAsText( file );
+		}
+
+		$( '#wpbp-st-export' ).on( 'click', function () {
+			var $button = $( this );
+
+			working( $button, true );
+			send( 'export' ).done( function ( response ) {
+				if ( ! response || ! response.success ) {
+					wpbpToast( reason( response ), 'error' );
+					return;
+				}
+
+				var url = window.URL.createObjectURL( new window.Blob( [ JSON.stringify( response.data.content, null, 2 ) ], { type: 'application/json' } ) );
+				var link = document.createElement( 'a' );
+
+				link.href = url;
+				link.download = response.data.filename;
+				document.body.appendChild( link );
+				link.click();
+				link.remove();
+				window.setTimeout( function () {
+					window.URL.revokeObjectURL( url );
+				}, 1000 );
+				wpbpToast( text.exported, 'success' );
 			} ).fail( function ( xhr ) {
-				$button.prop( 'disabled', false );
-				$results.empty().append( $( '<p>' ).text( wpbpXhrMessage( xhr ) ) );
+				wpbpToast( wpbpXhrMessage( xhr ), 'error' );
+			} ).always( function () {
+				working( $button, false );
 			} );
 		} );
 
-		function renderResults( data ) {
-			$results.empty();
+		$( '#wpbp-st-choose' ).on( 'click', function () {
+			$file.trigger( 'click' );
+		} );
 
-			sections.forEach( function ( section ) {
-				var items = section.listKey
-					? ( data[ section.key ] && data[ section.key ][ section.listKey ] ) || []
-					: data[ section.key ] || [];
+		$file.on( 'change', function () {
+			readFile( this.files && this.files[ 0 ] );
+		} );
 
-				var $section = $( '<div class="wpbp-card">' ).append( $( '<h3>' ).text( section.label ) );
+		$zone.on( 'dragover dragenter', function ( event ) {
+			event.preventDefault();
+			$zone.addClass( 'is-dragover' );
+		} ).on( 'dragleave dragend drop', function () {
+			$zone.removeClass( 'is-dragover' );
+		} ).on( 'drop', function ( event ) {
+			event.preventDefault();
+			readFile( event.originalEvent.dataTransfer && event.originalEvent.dataTransfer.files[ 0 ] );
+		} );
 
-				if ( ! items.length ) {
-					$section.append( $( '<p>' ).text( wpbpT( 'Nothing found.' ) ) );
-				} else {
-					var $list = $( '<ul>' );
-					items.slice( 0, 50 ).forEach( function ( item ) {
-						$list.append( $( '<li>' ).text( typeof item === 'string' ? item : JSON.stringify( item ) ) );
-					} );
-					$section.append( $list );
+		$preview.on( 'change', 'input[type="checkbox"]', updateImportButton );
+		$preview.on( 'click', '.wpbp-st-cancel', closePreview );
+
+		$preview.on( 'click', '.wpbp-st-import', function () {
+			var $button = $( this );
+			var groups = $preview.find( 'input[type="checkbox"]:checked' ).map( function () {
+				return this.value;
+			} ).get();
+
+			if ( ! loaded || ! groups.length ) {
+				return;
+			}
+
+			showError( '' );
+			working( $button, true );
+			send( 'import', $.extend( {}, loaded, { groups: groups } ) ).done( function ( response ) {
+				if ( response && response.success ) {
+					finished( text.imported );
+					return;
 				}
 
-				$results.append( $section );
+				working( $button, false );
+				showError( reason( response ) );
+			} ).fail( function ( xhr ) {
+				working( $button, false );
+				showError( wpbpXhrMessage( xhr ) );
 			} );
+		} );
 
-			if ( data.suspicious_code && data.suspicious_code.length ) {
-				var $codeSection = $( '<div class="wpbp-card">' ).append( $( '<h3>' ).text( wpbpT( 'Suspicious code patterns (warning only)' ) ) );
-				var $codeList = $( '<ul>' );
-				data.suspicious_code.forEach( function ( entry ) {
-					$codeList.append( $( '<li>' ).text( entry.file + ' — ' + entry.patterns.join( ', ' ) ) );
+		$( '#wpbp-st-reset' ).on( 'click', function () {
+			var $button = $( this );
+
+			wpbpConfirm( { title: text.resetTitle, message: text.resetText, confirmLabel: text.resetGo, danger: true } ).then( function () {
+				working( $button, true );
+				send( 'reset' ).done( function ( response ) {
+					if ( response && response.success ) {
+						finished( text.wasReset );
+						return;
+					}
+
+					working( $button, false );
+					wpbpToast( reason( response ), 'error' );
+				} ).fail( function ( xhr ) {
+					working( $button, false );
+					wpbpToast( wpbpXhrMessage( xhr ), 'error' );
 				} );
-				$codeSection.append( $codeList );
-				$results.append( $codeSection );
+			} );
+		} );
+
+		$( '#wpbp-st-undo' ).on( 'click', function () {
+			var $button = $( this );
+
+			working( $button, true );
+			send( 'undo' ).done( function ( response ) {
+				if ( response && response.success ) {
+					finished( text.undone );
+					return;
+				}
+
+				working( $button, false );
+				wpbpToast( reason( response ), 'error' );
+			} ).fail( function ( xhr ) {
+				working( $button, false );
+				wpbpToast( wpbpXhrMessage( xhr ), 'error' );
+			} );
+		} );
+	}
+
+	/**
+	 * WordPress makes a page as tall as its menu. On a site with a long menu, a short Wrensafe screen
+	 * would scroll away and leave an empty page beside the menu, so it stays in view instead. Screens
+	 * taller than the menu scroll as usual.
+	 */
+	( function keepContentInView() {
+		var wrap = document.querySelector( '.wpbp-wrap' );
+		var body = document.getElementById( 'wpbody-content' );
+		var menu = document.getElementById( 'adminmenuwrap' );
+		var bar = document.getElementById( 'wpadminbar' );
+		var page = document.getElementById( 'wpwrap' );
+		var frame = 0;
+
+		if ( ! wrap || ! body || ! menu || ! page || ! window.ResizeObserver ) {
+			return;
+		}
+
+		function fit() {
+			var barHeight = bar ? bar.offsetHeight : 0;
+			var menuBottom = menu.offsetHeight + barHeight;
+			var top;
+			var follows;
+
+			frame = 0;
+			body.style.minHeight = '';
+			top = body.getBoundingClientRect().top + window.scrollY;
+			follows = window.matchMedia( '(min-width: 783px)' ).matches && top + body.offsetHeight < menuBottom;
+			wrap.classList.toggle( 'wpbp-follows-menu', follows );
+			page.classList.toggle( 'wpbp-follows-page', follows );
+
+			if ( ! follows ) {
+				return;
+			}
+
+			body.style.minHeight = ( menuBottom - top - ( parseFloat( window.getComputedStyle( body ).paddingBottom ) || 0 ) ) + 'px';
+			// Taller than the window: it scrolls to its end first, then holds there.
+			wrap.style.setProperty( '--wpbp-follow-top', Math.min( barHeight + 14, window.innerHeight - wrap.offsetHeight - 16 ) + 'px' );
+		}
+
+		function schedule() {
+			if ( ! frame ) {
+				frame = window.requestAnimationFrame( fit );
 			}
 		}
-	}
+
+		var watcher = new window.ResizeObserver( schedule );
+
+		watcher.observe( wrap );
+		watcher.observe( menu );
+		window.addEventListener( 'resize', schedule );
+		schedule();
+	}() );
 
 } )( jQuery );

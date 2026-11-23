@@ -196,8 +196,23 @@ body.wpbp-su-open {
 .wpbp-su-modal-foot .button {
 	min-height: 36px;
 	padding: 0 16px;
-	border-radius: 8px;
+	border-radius: 6px;
 	line-height: 34px;
+}
+
+.wpbp-su-modal-foot .button:not(.button-primary, .wpbp-su-stop-now) {
+	border-color: #c3cee3;
+	background: #fff;
+	box-shadow: 0 1px 2px rgba(16, 29, 66, 0.06);
+	color: #101d42;
+	font-weight: 500;
+}
+
+.wpbp-su-modal-foot .button:not(.button-primary, .wpbp-su-stop-now):hover,
+.wpbp-su-modal-foot .button:not(.button-primary, .wpbp-su-stop-now):focus {
+	border-color: #8593ad;
+	background: #f6f8fc;
+	color: #101d42;
 }
 
 .wpbp-su-modal-foot .button-primary {
@@ -218,13 +233,27 @@ body.wpbp-su-open {
 	margin-inline-end: auto;
 }
 
-.wpbp-su-stop-now {
-	margin-inline-start: 12px;
+.button.wpbp-su-stop-now {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 36px;
+	margin-inline-start: 8px;
+	padding: 0 16px;
+	border: 1px solid #f1b4b5;
+	border-radius: 6px;
+	background: #fff;
+	box-shadow: 0 1px 2px rgba(16, 29, 66, 0.06);
+	color: #b32d2e;
+	font-weight: 500;
+	line-height: 1.2;
 }
 
-.wpbp-su-stop-now:disabled {
-	color: var(--wpbp-su-muted);
-	cursor: default;
+.button.wpbp-su-stop-now:hover,
+.button.wpbp-su-stop-now:focus {
+	border-color: #d63638;
+	background: #fcf0f1;
+	color: #b32d2e;
 }
 
 /* ===== Mode cards (window and page) ===== */
@@ -410,10 +439,59 @@ body.wpbp-su-open {
 }
 
 /* ===== A run ===== */
+/* What the run is doing now: stays in view while the list of plugins scrolls. */
+.wpbp-su-now {
+	position: sticky;
+	top: 40px;
+	z-index: 2;
+	margin: -4px -6px 0;
+	padding: 6px 6px 10px;
+	background: #fff;
+}
+
+.wpbp-su-now-top {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.wpbp-su-now-count {
+	color: var(--wpbp-su-navy);
+	font-size: 16px;
+	font-weight: 700;
+	line-height: 1.3;
+}
+
+.wpbp-su-now-percent {
+	flex: none;
+	color: var(--wpbp-su-navy);
+	font-size: 20px;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	letter-spacing: -0.02em;
+}
+
+.wpbp-su-tally {
+	margin: 8px 0 0;
+	color: var(--wpbp-su-muted);
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
 .wpbp-su-step {
-	margin: 0 0 10px;
-	color: var(--wpbp-su-ink);
-	font-weight: 600;
+	overflow: hidden;
+	margin: 2px 0 10px;
+	color: var(--wpbp-su-body);
+	font-size: 13px;
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.wpbp-su-step:has(.wpbp-su-pills) {
+	overflow: visible;
+	white-space: normal;
 }
 
 .wpbp-su-step.is-error {
@@ -480,6 +558,12 @@ body.wpbp-su-open {
 	animation: wpbp-su-spin 0.8s linear infinite;
 }
 
+/* In a group, waiting for its turn: not turning yet. */
+.wpbp-su-item.is-queued .wpbp-su-item-icon {
+	border-color: var(--wpbp-su-brand);
+	animation: none;
+}
+
 .wpbp-su-item:is(.is-ready) .wpbp-su-item-icon {
 	border-color: var(--wpbp-su-brand);
 }
@@ -512,6 +596,51 @@ body.wpbp-su-open {
 	grid-template-columns: minmax(0, 1fr) auto;
 	gap: 2px 12px;
 	min-width: 0;
+}
+
+/* The plugin being worked on, and how far along it is. */
+.wpbp-su-item.is-current {
+	margin-inline: -10px;
+	padding-inline: 10px;
+	border-radius: 10px;
+	background: var(--wpbp-su-brand-50, #f4f7ff);
+}
+
+.wpbp-su-item-bar {
+	display: block;
+	grid-column: 1 / -1;
+	height: 4px;
+	margin-top: 6px;
+	overflow: hidden;
+	border-radius: 999px;
+	background: #e3ecff;
+}
+
+.wpbp-su-item-bar[hidden] {
+	display: none;
+}
+
+.wpbp-su-item-bar > span {
+	display: block;
+	width: 0;
+	height: 100%;
+	border-radius: inherit;
+	background: linear-gradient(-90deg, #2457f5 0%, #3d9bff 70%, #62b6ff 100%);
+	transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wpbp-su-modal .wpbp-su-now {
+	position: static;
+	margin: 0;
+	padding: 0 0 6px;
+}
+
+.wpbp-su-modal .wpbp-su-items {
+	max-height: min(46vh, 430px);
+	margin-top: 8px;
+	padding-inline: 10px;
+	overflow-y: auto;
+	scroll-behavior: smooth;
 }
 
 .wpbp-su-item-name {
@@ -561,6 +690,109 @@ body.wpbp-su-open {
 	color: var(--wpbp-su-danger);
 }
 
+/* Why an update wasn't installed or was rolled back, and what to do. */
+.wpbp-su-cause {
+	display: flex;
+	flex-direction: column;
+	grid-column: 1 / -1;
+	gap: 4px;
+	margin-top: 8px;
+	padding: 10px 12px;
+	border: 1px solid #f6d9da;
+	border-radius: 8px;
+	background: #fef7f7;
+	color: #33415e;
+	font-size: 12.5px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.wpbp-su-item.is-rolled_back .wpbp-su-cause {
+	border-color: #f4e3b8;
+	background: #fffbf0;
+}
+
+.wpbp-su-cause-label {
+	align-self: flex-start;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: #fbe3e4;
+	color: #b32d2e;
+	font-size: 11.5px;
+	font-weight: 700;
+}
+
+.wpbp-su-item.is-rolled_back .wpbp-su-cause-label {
+	background: #fff0c9;
+	color: #8a5a00;
+}
+
+.wpbp-su-cause-text {
+	color: #101d42;
+	font-weight: 500;
+}
+
+.wpbp-su-cause-fix strong {
+	color: #101d42;
+}
+
+.wpbp-su-cause-detail {
+	color: #5b6a85;
+	font-size: 11.5px;
+}
+
+/* The labels that sum up a run: what worked stays green, and what didn't sits next to it. */
+.wpbp-su-pills {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	max-width: 100%;
+}
+
+.wpbp-su-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 24px;
+	padding: 3px 10px;
+	box-sizing: border-box;
+	border: 1px solid #dce4f2;
+	border-radius: 999px;
+	background: #f6f8fc;
+	color: #4a5a78;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+.wpbp-su-pill::before {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+	content: "";
+}
+
+.wpbp-su-pill.is-good {
+	border-color: #b7e4c7;
+	background: #ecfbf1;
+	color: #14632f;
+}
+
+.wpbp-su-pill.is-warn {
+	border-color: #f2d48b;
+	background: #fff6df;
+	color: #7a5000;
+}
+
+.wpbp-su-pill.is-bad {
+	border-color: #f1b4b5;
+	background: #fcf0f1;
+	color: #b32d2e;
+}
+
 /* Roll back / keep: under the state, at the end of the row. */
 .wpbp-su-item-main > .button,
 .wpbp-su-item-actions {
@@ -571,7 +803,7 @@ body.wpbp-su-open {
 	margin-top: 2px;
 }
 
-.wpbp-su-item-main:has(> .button, > .wpbp-su-item-actions) :is(.wpbp-su-item-message, .wpbp-su-item-details) {
+.wpbp-su-item-main:has(> .button, > .wpbp-su-item-actions) :is(.wpbp-su-item-message, .wpbp-su-cause, .wpbp-su-item-details) {
 	grid-column: 1;
 }
 

@@ -65,6 +65,7 @@ class AdminMenu {
 			. $item . ':is(.current,.wp-has-current-submenu,.opensub,:hover) div.wp-menu-image::before,' . $item . ' > a:focus div.wp-menu-image::before{background-color:#fff;background-size:14px 14px}'
 			. $item . ' .wp-submenu a:has(> .wpbp-menu-badge){white-space:nowrap}'
 			. $item . ' .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:#2457f5;color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
+			. $item . ' .wpbp-menu-badge.is-alert{background:#d63638}'
 		);
 	}
 
@@ -173,6 +174,18 @@ class AdminMenu {
 						)
 					),
 					$backup_count
+				);
+			}
+
+			// "Needs you" marks: updates waiting, links to fix, a failed restore or scheduled backup (red).
+			$mark = current_user_can( $capability ) ? MenuBadges::for_page( $slug ) : null;
+
+			if ( null !== $mark ) {
+				$menu_title .= sprintf(
+					' <span class="wpbp-menu-badge is-alert" aria-label="%s" title="%s">%s</span>',
+					esc_attr( $mark['label'] ),
+					esc_attr( $mark['label'] ),
+					esc_html( $mark['text'] )
 				);
 			}
 

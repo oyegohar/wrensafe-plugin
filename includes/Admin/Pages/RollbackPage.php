@@ -55,7 +55,7 @@ class RollbackPage extends AbstractPage {
 			<?php else : ?>
 				<div class="wpbp-backup-browser-notice wpbp-inline-notice wpbp-is-hidden" id="wpbp-rollback-notice" role="status" aria-live="polite"></div>
 				<div class="wpbp-bulk-bar">
-					<button type="button" class="button" id="wpbp-rollback-bulk-delete" disabled>
+					<button type="button" class="button button-link-delete" id="wpbp-rollback-bulk-delete" disabled>
 						<?php esc_html_e( 'Delete selected', 'wrensafe' ); ?>
 					</button>
 					<span class="description"><?php esc_html_e( 'Points whose backup is locked are skipped.', 'wrensafe' ); ?></span>

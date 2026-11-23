@@ -218,6 +218,11 @@ class Settings {
 				break;
 
 			case 'remote':
+				// Off-site storage needs its own permission: it decides where backups go, and holds a password.
+				if ( ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_CLOUD ) ) {
+					return $current;
+				}
+
 				// Remote storage keeps its own option (secrets encrypted).
 				\WPBP\Remote\RemoteStorage::save( \WPBP\Remote\RemoteStorage::sanitize( is_array( $value['remote'] ?? null ) ? $value['remote'] : array() ) );
 				break;
@@ -454,6 +459,21 @@ class Settings {
 		$all = self::get_all();
 
 		return $all[ $key ] ?? $fallback;
+	}
+
+	/**
+	 * Update several settings at once (see SettingsTransfer, which checks each value first).
+	 *
+	 * @param array<string,mixed> $values
+	 */
+	public static function update_many( array $values ): bool {
+		self::$internal_update = true;
+
+		try {
+			return update_option( self::OPTION_NAME, array_merge( self::get_all(), $values ) );
+		} finally {
+			self::$internal_update = false;
+		}
 	}
 
 	/**

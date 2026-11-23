@@ -9,6 +9,7 @@
 namespace WPBP\Admin\Pages;
 
 use WPBP\Migration\HealthCheck;
+use WPBP\Security\MalwareScanner;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -86,9 +87,42 @@ class SystemInfoPage extends AbstractPage {
 		<div class="wpbp-card">
 			<h2><?php esc_html_e( 'Security scan', 'wrensafe' ); ?></h2>
 			<p><?php esc_html_e( 'Checks core file integrity, suspicious PHP in uploads, file permissions, and other warning signs before you back up or migrate. This is a heuristic warning system, not an antivirus — review findings yourself rather than treating them as proof of infection.', 'wrensafe' ); ?></p>
-			<button type="button" id="wpbp-malware-scan-run" class="button button-primary"><?php esc_html_e( 'Run security scan', 'wrensafe' ); ?></button>
-			<div id="wpbp-malware-scan-results"></div>
+			<button type="button" id="wpbp-malware-scan-run" class="button button-primary" data-checks="<?php echo esc_attr( (string) wp_json_encode( MalwareScanner::checks() ) ); ?>" data-text="<?php echo esc_attr( (string) wp_json_encode( self::scan_text() ) ); ?>"><?php esc_html_e( 'Run security scan', 'wrensafe' ); ?></button>
+			<div id="wpbp-malware-scan-results" class="wpbp-lc-body" aria-live="polite"></div>
 		</div>
 		<?php
+	}
+
+	/** The Security scan's words for the script. @return array<string,string> */
+	private static function scan_text(): array {
+		return array(
+			'button'      => __( 'Scanning…', 'wrensafe' ),
+			'again'       => __( 'Scan again', 'wrensafe' ),
+			'title'       => __( 'Scanning your site…', 'wrensafe' ),
+			/* translators: 1: checks finished, 2: all checks */
+			'progress'    => __( '%1$d of %2$d checks done', 'wrensafe' ),
+			'soFarOne'    => __( '1 thing to review so far', 'wrensafe' ),
+			/* translators: %d: number of findings */
+			'soFar'       => __( '%d things to review so far', 'wrensafe' ),
+			'clear'       => __( 'No warning signs found', 'wrensafe' ),
+			'clearText'   => __( 'Every check came back clean. This is a warning system, so it can’t prove a site is free of malware.', 'wrensafe' ),
+			'oneTitle'    => __( '1 thing to review', 'wrensafe' ),
+			/* translators: %d: number of findings */
+			'manyTitle'   => __( '%d things to review', 'wrensafe' ),
+			'reviewText'  => __( 'These are warning signs, not proof of infection. Nothing was changed or deleted.', 'wrensafe' ),
+			'partial'     => __( 'Some checks couldn’t run', 'wrensafe' ),
+			'partialText' => __( 'The checks that ran found nothing to review. Run the scan again to finish the others.', 'wrensafe' ),
+			'nothing'     => __( 'Nothing found', 'wrensafe' ),
+			'failed'      => __( 'Couldn’t check', 'wrensafe' ),
+			/* translators: %d: number of findings */
+			'toReview'    => __( '%d to review', 'wrensafe' ),
+			/* translators: %d: number of items */
+			'listed'      => __( '%d listed', 'wrensafe' ),
+			/* translators: %d: number of items not shown */
+			'more'        => __( 'and %d more', 'wrensafe' ),
+			'newAdmin'    => __( 'added in the last 7 days', 'wrensafe' ),
+			/* translators: %s: date the account was created */
+			'since'       => __( 'since %s', 'wrensafe' ),
+		);
 	}
 }

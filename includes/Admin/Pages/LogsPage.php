@@ -98,7 +98,7 @@ class LogsPage extends AbstractPage {
 			<input type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="<?php esc_attr_e( 'Search messages…', 'wrensafe' ); ?>" />
 			<button type="submit" class="button"><?php esc_html_e( 'Filter', 'wrensafe' ); ?></button>
 			<?php if ( '' !== $level || '' !== $search ) : ?>
-				<a class="button-link" href="<?php echo esc_url( admin_url( 'admin.php?page=wrensafe-logs' ) ); ?>"><?php esc_html_e( 'Reset', 'wrensafe' ); ?></a>
+				<a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=wrensafe-logs' ) ); ?>"><?php esc_html_e( 'Reset', 'wrensafe' ); ?></a>
 			<?php endif; ?>
 		</form>
 

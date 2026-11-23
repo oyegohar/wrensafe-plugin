@@ -82,11 +82,14 @@ class SearchReplacePage extends AbstractPage {
 				<tr>
 					<th scope="row"><?php esc_html_e( 'Tables', 'wrensafe' ); ?></th>
 					<td>
-						<p class="wpbp-sr-table-tools">
-							<button type="button" class="button-link" id="wpbp-sr-all"><?php esc_html_e( 'Select all', 'wrensafe' ); ?></button>
-							<span aria-hidden="true">·</span>
-							<button type="button" class="button-link" id="wpbp-sr-none"><?php esc_html_e( 'Select none', 'wrensafe' ); ?></button>
-						</p>
+						<div class="wpbp-sr-table-tools">
+							<?php /* translators: 1: tables selected, 2: all tables */ ?>
+							<span class="wpbp-sr-table-count" id="wpbp-sr-count" aria-live="polite" data-text="<?php echo esc_attr( __( '%1$d of %2$d tables selected', 'wrensafe' ) ); ?>"></span>
+							<span class="wpbp-sr-table-actions">
+								<button type="button" class="button" id="wpbp-sr-all"><?php esc_html_e( 'Select all', 'wrensafe' ); ?></button>
+								<button type="button" class="button" id="wpbp-sr-none"><?php esc_html_e( 'Select none', 'wrensafe' ); ?></button>
+							</span>
+						</div>
 						<fieldset class="wpbp-checkbox-list wpbp-table-checklist" id="wpbp-sr-tables">
 							<legend class="screen-reader-text"><?php esc_html_e( 'Tables to search', 'wrensafe' ); ?></legend>
 							<?php foreach ( $tables as $table ) : ?>

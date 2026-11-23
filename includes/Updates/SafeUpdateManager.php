@@ -386,6 +386,7 @@ class SafeUpdateManager {
 
 		$job = SafeUpdateJob::create(
 			array(
+				'live'        => LiveProgress::new_token(),
 				'mode'        => $mode,
 				'safe'        => $safe,
 				'order'       => $order,
@@ -1217,7 +1218,10 @@ class SafeUpdateManager {
 				continue;
 			}
 
-			$reason = is_wp_error( $result ) ? $result->get_error_message() : __( 'WordPress didn’t install the new version.', 'wrensafe' );
+			$cause  = is_wp_error( $result ) ? UpdateFailure::explain( $result ) : UpdateFailure::not_installed();
+			$reason = $cause['text'];
+
+			$p['items'][ $i ]['cause'] = $cause;
 
 			// The update stopped part-way: the item's files may be a mix of both versions.
 			$incomplete = is_wp_error( $result ) && self::INCOMPLETE === $result->get_error_code();
@@ -1232,13 +1236,13 @@ class SafeUpdateManager {
 
 			$p['items'][ $i ]['state'] = 'failed';
 			/* translators: %s: error message */
-			$p['items'][ $i ]['message'] = sprintf( __( 'The update didn’t install: %s', 'wrensafe' ), $reason );
+			$p['items'][ $i ]['message'] = sprintf( __( 'The update didn’t install: %s', 'wrensafe' ), trim( $reason . ' ' . $cause['fix'] ) );
 
 			if ( '' === $version ) {
 				$p['items'][ $i ]['message'] .= ' ' . self::text( $item, 'missing' );
 			}
 
-			Logger::error( 'Safe Updates: ' . self::item_label( $item ) . ' was not updated: ' . $reason, array(), $job->id() );
+			Logger::error( 'Safe Updates: ' . self::item_label( $item ) . ' was not updated: ' . trim( $reason . ' ' . $cause['detail'] ), array(), $job->id() );
 		}
 
 		// Items that didn't install aren't on the live site in a new version.
@@ -1550,6 +1554,7 @@ class SafeUpdateManager {
 				$p['items'][ $i ]['version'] = $handler->installed_version( $id );
 				/* translators: 1: version number, 2: what went wrong */
 				$p['items'][ $i ]['message'] = sprintf( __( 'Rolled back to %1$s. %2$s', 'wrensafe' ), $item['from'], $reason );
+				$p['items'][ $i ]['cause']   = UpdateFailure::rolled_back( $item_why, (array) ( $item['cause'] ?? array() ) );
 
 				self::delete_copy( $item );
 				$p['items'][ $i ]['point'] = array();
@@ -1574,6 +1579,7 @@ class SafeUpdateManager {
 
 			$p['items'][ $i ]['point']   = $item['point'];
 			$p['items'][ $i ]['state']   = 'failed';
+			$p['items'][ $i ]['cause']   = UpdateFailure::not_restored();
 			$p['items'][ $i ]['message'] = trim(
 				sprintf(
 					/* translators: 1: what went wrong, 2: why the rollback failed, 3: what Wrensafe did instead, e.g. "The plugin was deactivated to keep the site working." */
@@ -1862,6 +1868,8 @@ class SafeUpdateManager {
 
 	/** Clean up and report. */
 	private static function finish( SafeUpdateJob $job, array $p, string $error = '' ): void {
+		LiveProgress::close();
+
 		$items = isset( $p['items'] ) && is_array( $p['items'] ) ? $p['items'] : array();
 
 		foreach ( $items as $i => $item ) {
@@ -2028,12 +2036,22 @@ class SafeUpdateManager {
 				'version'     => (string) $item['version'],
 				'state'       => (string) $item['state'],
 				'message'     => (string) $item['message'],
+				'cause'       => self::cause_of( $item ),
 				'canRollBack' => $job->is_finished() && self::can_roll_back( $item ),
 				'details'     => self::clean_details( is_array( $details ) ? $details : array() ),
 			);
 		}
 
-		$row = JobsRepository::find( $job->id() );
+		$row      = JobsRepository::find( $job->id() );
+		$summary  = self::summary( $p );
+		$critical = false;
+
+		// An update that broke the site and couldn't be put back: the run isn't a success.
+		foreach ( $items as $item ) {
+			if ( 'critical' === (string) ( $item['cause']['kind'] ?? '' ) ) {
+				$critical = true;
+			}
+		}
 
 		return array(
 			'id'       => $job->id(),
@@ -2049,7 +2067,12 @@ class SafeUpdateManager {
 			'order'    => (string) ( $p['order'] ?? '' ),
 			'items'    => $items,
 			'types'    => array_values( array_unique( wp_list_pluck( $items, 'type' ) ) ),
-			'summary'  => self::summary( $p ),
+			'summary'  => $summary,
+			'live'     => $job->is_finished() ? '' : LiveProgress::url( $p ),
+			'base'     => 'none' === ( $p['backup'] ?? 'none' ) ? 3 : 25,
+			'pills'    => UpdateFailure::pills( $summary, $items, 'failed' === $job->status() ),
+			// A run where most updates worked is a success, with the ones that didn't marked next to it.
+			'tone'     => '' !== (string) $job->error_message() || $critical || $summary['rolled_back'] || ( $summary['failed'] && ! $summary['updated'] ) ? 'is-warning' : 'is-success',
 			'cleared'  => array_values( (array) ( $p['cleared'] ?? array() ) ),
 			'backupId' => (int) ( $p['backup_id'] ?? 0 ),
 			'date'     => $row ? mysql2date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (string) $row['created_at'] ) : '',
@@ -2057,6 +2080,27 @@ class SafeUpdateManager {
 			'stopping' => ! $job->is_finished() && self::cancel_requested( $job ),
 			'idle'     => $job->is_finished() ? 0 : self::seconds_since_activity( $job ),
 		);
+	}
+
+	/**
+	 * Why an item wasn't updated or was rolled back, for the screens (empty when it was).
+	 *
+	 * @return array<string,string>
+	 */
+	private static function cause_of( array $item ): array {
+		$cause = (array) ( $item['cause'] ?? array() );
+
+		if ( empty( $cause['label'] ) || ! in_array( (string) $item['state'], array( 'failed', 'rolled_back', 'rolling_back' ), true ) ) {
+			return array();
+		}
+
+		$cause = array_map( 'strval', $cause );
+
+		if ( '' === ( $cause['text'] ?? '' ) ) {
+			$cause['text'] = (string) $item['message'];
+		}
+
+		return $cause;
 	}
 
 	/**
@@ -2521,6 +2565,7 @@ class SafeUpdateManager {
 
 		$job->set_payload( $p );
 		$job->update_progress( self::progress( $p ), '' !== $step ? $step : self::describe( $p ) );
+		LiveProgress::publish( $p );
 	}
 
 	private static function progress( array $p ): int {

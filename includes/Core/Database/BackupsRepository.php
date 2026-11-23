@@ -87,6 +87,13 @@ class BackupsRepository {
 		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE status = %s', self::table(), 'completed' ) );
 	}
 
+	/** When the oldest completed backup was made (site time), or ''. */
+	public static function oldest_completed_at(): string {
+		global $wpdb;
+
+		return (string) $wpdb->get_var( $wpdb->prepare( 'SELECT MIN(created_at) FROM %i WHERE status = %s', self::table(), 'completed' ) );
+	}
+
 	public static function sum_size(): int {
 		global $wpdb;
 

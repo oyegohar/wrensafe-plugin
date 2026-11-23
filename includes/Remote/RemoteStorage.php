@@ -334,9 +334,12 @@ final class RemoteStorage {
 		return '' !== (string) ( self::get()[ $type ][ $field ] ?? '' );
 	}
 
+	/** Fields that don't change where a secret is sent: a blank secret is still kept when only these change. */
+	private const SAME_ACCOUNT_FIELDS = array( 'folder', 'passive', 'path_style' );
+
 	/**
 	 * Settings from the Remote storage form, cleaned. A blank secret keeps
-	 * the saved one.
+	 * the saved one, as long as it is for the same server and account.
 	 *
 	 * @param array<string,mixed> $posted Unslashed values: from options.php
 	 *                                    (Settings::sanitize()), which unslashes
@@ -392,6 +395,28 @@ final class RemoteStorage {
 
 					default:
 						$settings[ $kind ][ $field ] = trim( sanitize_text_field( is_scalar( $raw ) ? (string) $raw : '' ) );
+				}
+			}
+
+			// A saved secret is only reused for the server and account it was typed for: otherwise someone
+			// allowed to edit this form could point it at their own server and receive the saved password.
+			foreach ( $definition['secrets'] as $secret ) {
+				// Typed means a new secret is being saved now (whatever else was posted under its name).
+				$typed = (string) ( $settings[ $kind ][ $secret ] ?? '' ) !== (string) ( $current[ $kind ][ $secret ] ?? '' );
+
+				if ( $typed || '' === (string) ( $current[ $kind ][ $secret ] ?? '' ) ) {
+					continue;
+				}
+
+				foreach ( $definition['fields'] as $field => $spec ) {
+					if ( 'password' === $spec['type'] || in_array( $field, self::SAME_ACCOUNT_FIELDS, true ) ) {
+						continue;
+					}
+
+					if ( (string) ( $settings[ $kind ][ $field ] ?? '' ) !== (string) ( $current[ $kind ][ $field ] ?? $definition['defaults'][ $field ] ?? '' ) ) {
+						$settings[ $kind ][ $secret ] = '';
+						break;
+					}
 				}
 			}
 		}

@@ -28,35 +28,35 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 <table>
 <tr>
 <td width="50%"><img src=".wordpress-org/screenshot-1.png" alt="Dashboard"><br><sub><b>Dashboard</b>: see at a glance whether your site is backed up.</sub></td>
-<td width="50%"><img src=".wordpress-org/screenshot-2.png" alt="Create Backup"><br><sub><b>Create a backup</b>: the whole site or just what you need, optionally encrypted.</sub></td>
+<td width="50%"><img src=".wordpress-org/screenshot-2.png" alt="Fix Links"><br><sub><b>Fix Links</b>: after a restore or a move, fix links that point to the old site or have a server folder in them, and see which media files are missing.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-3.png" alt="Backup progress"><br><sub><b>Live progress</b>, step by step; cancel safely at any time.</sub></td>
-<td><img src=".wordpress-org/screenshot-4.png" alt="Backup Browser"><br><sub><b>Backup Browser</b>: restore, download, verify, lock, tag and delete.</sub></td>
+<td><img src=".wordpress-org/screenshot-3.png" alt="Safe Updates"><br><sub><b>Safe Updates</b>: update several plugins, follow the progress, roll back later.</sub></td>
+<td><img src=".wordpress-org/screenshot-4.png" alt="Restore backups from other plugins"><br><sub><b>Restore backups made by 10 other plugins</b>, just as they saved them.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-5.png" alt="Review before restore"><br><sub><b>Review before you restore</b>: what's inside and what will change.</sub></td>
-<td><img src=".wordpress-org/screenshot-6.png" alt="Integrity check"><br><sub><b>Integrity check</b>: archive, database and every file's checksum.</sub></td>
+<td><img src=".wordpress-org/screenshot-5.png" alt="Quick or Safe Update"><br><sub><b>Quick or Safe Update</b>: Safe Update checks your site and rolls a breaking update back.</sub></td>
+<td><img src=".wordpress-org/screenshot-6.png" alt="Create Backup"><br><sub><b>Create a backup</b>: the whole site or just what you need, optionally encrypted.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-7.png" alt="Scheduled Backups"><br><sub><b>Two schedules</b>: the whole site weekly, the database every day.</sub></td>
-<td><img src=".wordpress-org/screenshot-8.png" alt="Migration Assistant"><br><sub><b>Migration Assistant</b>: readiness score, recommended method, next steps.</sub></td>
+<td><img src=".wordpress-org/screenshot-7.png" alt="Backup progress"><br><sub><b>Live progress</b>, step by step; cancel safely at any time.</sub></td>
+<td><img src=".wordpress-org/screenshot-8.png" alt="Backup Browser"><br><sub><b>Backup Browser</b>: restore, download, verify, lock, tag and delete.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-9.png" alt="Settings"><br><sub><b>Settings</b> grouped by task: backup folder, exclusions, updates, notifications.</sub></td>
-<td><img src=".wordpress-org/screenshot-10.png" alt="Restore backups from other plugins"><br><sub><b>Restore backups made by 10 other plugins</b>, just as they saved them.</sub></td>
+<td><img src=".wordpress-org/screenshot-9.png" alt="Review before restore"><br><sub><b>Review before you restore</b>: what's inside and what will change.</sub></td>
+<td><img src=".wordpress-org/screenshot-10.png" alt="Integrity check"><br><sub><b>Integrity check</b>: archive, database and every file's checksum.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-11.png" alt="Remote storage"><br><sub><b>Off-site copies</b> to FTP/FTPS or S3-compatible storage, with a connection test.</sub></td>
-<td><img src=".wordpress-org/screenshot-12.png" alt="Search &amp; Replace"><br><sub><b>Search &amp; Replace</b>: a dry run shows what would change before anything is saved.</sub></td>
+<td><img src=".wordpress-org/screenshot-11.png" alt="Scheduled Backups"><br><sub><b>Two schedules</b>: the whole site weekly, the database every day.</sub></td>
+<td><img src=".wordpress-org/screenshot-12.png" alt="Migration Assistant"><br><sub><b>Migration Assistant</b>: readiness score, recommended method, next steps.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-13.png" alt="Dashboard widget"><br><sub><b>Dashboard widget</b>: newest backup, next run, off-site copy and Back up now.</sub></td>
-<td><img src=".wordpress-org/screenshot-14.png" alt="Quick or Safe Update"><br><sub><b>Quick or Safe Update</b>: Safe Update checks your site and rolls a breaking update back.</sub></td>
+<td><img src=".wordpress-org/screenshot-13.png" alt="Remote storage"><br><sub><b>Off-site copies</b> to FTP/FTPS or S3-compatible storage, with a connection test.</sub></td>
+<td><img src=".wordpress-org/screenshot-14.png" alt="Search &amp; Replace"><br><sub><b>Search &amp; Replace</b>: a dry run shows what would change before anything is saved.</sub></td>
 </tr>
 <tr>
-<td><img src=".wordpress-org/screenshot-15.png" alt="Safe Updates"><br><sub><b>Safe Updates</b>: update several plugins, follow the progress, roll back later.</sub></td>
-<td><img src=".wordpress-org/screenshot-16.png" alt="Fix Links"><br><sub><b>Fix Links</b>: after a restore or a move, fix links that point to the old site or have a server folder in them, and see which media files are missing.</sub></td>
+<td><img src=".wordpress-org/screenshot-15.png" alt="Settings"><br><sub><b>Settings</b> grouped by task: backup folder, exclusions, updates, notifications.</sub></td>
+<td><img src=".wordpress-org/screenshot-16.png" alt="Dashboard widget"><br><sub><b>Dashboard widget</b>: newest backup, next run, off-site copy and Back up now.</sub></td>
 </tr>
 </table>
 
@@ -88,6 +88,7 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 ### Update safely
 - When you update a plugin, choose **Quick Update** (WordPress's standard update) or **Safe Update**: Wrensafe saves a copy, updates, checks the home page and admin area, and puts the previous version back if the update causes a fatal error, a server error or an empty page. You can turn the question off.
 - Update several plugins one by one or all at once, in the background; roll an update back later from the saved copy (kept 14 days by default).
+- Live progress for each plugin, and a plain reason when an update fails or is rolled back (a fatal error, a licence the plugin needs, a download refused, …).
 - Optionally clear the page cache and object cache after updating.
 
 ### Migrate
@@ -105,6 +106,8 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 - Site Health checks: an out-of-date backup, backups kept only on the server, a backup folder that can be downloaded from the web.
 - A Dashboard widget with the newest backup, the next scheduled one and a Back up now button.
 - A security scan: core files checked against WordPress.org, PHP in uploads, hidden encoded code, unsafe permissions.
+- Numbers in the Wrensafe menu when something needs you: updates waiting, links to fix, a failed backup or restore.
+- Settings → Import / Export: move Wrensafe's settings to another site after reviewing every change, or reset them, with an undo. Passwords and keys are never exported.
 - Fully translatable, with right-to-left language support.
 
 ## Privacy

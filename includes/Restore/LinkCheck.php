@@ -60,6 +60,9 @@ final class LinkCheck {
 	/** Seconds of work per step. */
 	const STEP_SECONDS = 8;
 
+	/** Seconds one step of the check runs: short, so the screen can show where it has got to. */
+	const SCAN_SECONDS = 1;
+
 	/** Rows read per query. */
 	const BATCH = 250;
 
@@ -317,7 +320,8 @@ final class LinkCheck {
 
 	/**
 	 * How a known folder can be written in a link: as stored ("C:/xampp/htdocs/"), with Windows
-	 * backslashes as WordPress writes them ("C:\xampp\htdocs/"), and with "%20" for spaces.
+	 * backslashes as WordPress writes them ("C:\xampp\htdocs/"), with them doubled as JSON keeps them, and
+	 * with "%20" for spaces.
 	 *
 	 * @return string[]
 	 */
@@ -325,8 +329,13 @@ final class LinkCheck {
 		$out = array( $folder, str_replace( ' ', '%20', $folder ) );
 
 		if ( 1 === preg_match( '#^[A-Za-z]:/#', $folder ) ) {
-			$out[] = str_replace( '/', '\\', rtrim( $folder, '/' ) ) . '/';
-			$out[] = str_replace( array( '/', ' ' ), array( '\\', '%20' ), rtrim( $folder, '/' ) ) . '/';
+			$back = str_replace( '/', '\\', rtrim( $folder, '/' ) );
+
+			foreach ( array( $back, str_replace( ' ', '%20', $back ) ) as $form ) {
+				$out[] = $form . '/';
+				// JSON keeps backslashes doubled; some page builders store it without escaping the slashes.
+				$out[] = str_replace( '\\', '\\\\', $form ) . '/';
+			}
 		}
 
 		return array_values( array_unique( $out ) );
@@ -474,11 +483,11 @@ final class LinkCheck {
 			return new \WP_Error( 'wpbp_link_check_token', __( 'This check is no longer active. Start it again.', 'wrensafe' ) );
 		}
 
-		$deadline = microtime( true ) + self::STEP_SECONDS;
-
 		if ( 'pending' === $s['status'] ) {
 			$s['status'] = 'checking';
 		}
+
+		$deadline = microtime( true ) + ( 'checking' === $s['status'] ? self::SCAN_SECONDS : self::STEP_SECONDS );
 
 		try {
 			if ( 'checking' === $s['status'] ) {
@@ -619,6 +628,8 @@ final class LinkCheck {
 	}
 
 	private static function scan( array &$s, float $deadline ): void {
+		global $wpdb;
+
 		$sources = self::sources();
 		$count   = count( $sources );
 		$tables  = self::tables();
@@ -629,32 +640,37 @@ final class LinkCheck {
 			// Left out of backups: a fix there couldn't be undone, so it isn't offered.
 			if ( ! in_array( $src['table'], $tables, true ) ) {
 				$s['not_checked'][] = $src['table'];
-				++$s['source'];
-				$s['after'] = 0;
+				self::next_source( $s );
 				continue;
 			}
+
+			self::measure( $s, $src['table'], $src['key'] );
 
 			$rows = self::rows( $src, (int) $s['after'] );
 
 			if ( ! $rows ) {
-				++$s['source'];
-				$s['after'] = 0;
+				self::next_source( $s );
 				continue;
 			}
 
 			foreach ( $rows as $row ) {
+				$where      = self::where( $src, $row );
 				$s['after'] = (int) $row[ $src['key'] ];
+				$s['read']  = (int) ( $s['read'] ?? 0 ) + 1;
+				$s['now']   = $where;
 
 				foreach ( $src['columns'] as $column ) {
-					self::inspect( $s, (string) $row[ $column ], self::where( $src, $row ), 'guid' === $column );
+					self::inspect( $s, (string) $row[ $column ], $where, 'guid' === $column );
 				}
 			}
 		}
 
 		// Then the Media Library: items whose file isn't on the disk.
 		while ( (int) $s['source'] === $count && microtime( true ) < $deadline ) {
+			self::measure( $s, $wpdb->postmeta, 'meta_id' );
+
 			if ( self::attachments( $s ) ) {
-				++$s['source'];
+				self::next_source( $s );
 			}
 		}
 
@@ -662,9 +678,26 @@ final class LinkCheck {
 			$s['status']  = 'checked';
 			$s['checked'] = time();
 
-			unset( $s['source'], $s['after'] );
+			unset( $s['source'], $s['after'], $s['upto'], $s['now'] );
 
 			Logger::info( 'link_check_finished: ' . self::summary_line( $s ) );
+		}
+	}
+
+	/** On to the next part of the scan. */
+	private static function next_source( array &$s ): void {
+		++$s['source'];
+		$s['after'] = 0;
+
+		unset( $s['upto'], $s['now'] );
+	}
+
+	/** Where the current part of the scan ends (its highest key), to show how far it has got. */
+	private static function measure( array &$s, string $table, string $key ): void {
+		global $wpdb;
+
+		if ( ! isset( $s['upto'] ) ) {
+			$s['upto'] = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT MAX(%i) FROM %i', $key, $table ) );
 		}
 	}
 
@@ -769,8 +802,7 @@ final class LinkCheck {
 		// 1. A server folder in a link.
 		$known = (array) ( $s['folders_ok'] ?? array() );
 
-		// Windows folders in JSON (page builders) have their backslashes doubled.
-		foreach ( self::folders_in( str_replace( '\\\\', '\\', $plain ), $known ) as $folder => $n ) {
+		foreach ( self::folders_in( $plain, $known ) as $folder => $n ) {
 			$folder = (string) $folder;
 
 			if ( in_array( $folder, $known, true ) ) {
@@ -1028,6 +1060,13 @@ final class LinkCheck {
 		foreach ( $rows as $row ) {
 			$s['after'] = (int) $row['meta_id'];
 			$file       = wp_normalize_path( (string) $row['meta_value'] );
+
+			$s['read'] = (int) ( $s['read'] ?? 0 ) + 1;
+			$s['now']  = array(
+				'kind'  => 'media',
+				'id'    => (int) $row['post_id'],
+				'label' => wp_html_excerpt( wp_basename( $file ), 80, '…' ),
+			);
 
 			// Only ever looks inside the uploads folder: never at a stream ("phar://…") or elsewhere.
 			if ( '' === $file || false !== strpos( $file, '://' ) || false !== strpos( '/' . $file . '/', '/../' ) ) {
@@ -1300,7 +1339,9 @@ final class LinkCheck {
 		$percent = 0;
 
 		if ( 'checking' === ( $s['status'] ?? '' ) ) {
-			$percent = (int) min( 99, floor( 100 * (int) ( $s['source'] ?? 0 ) / $sources ) );
+			$upto    = (int) ( $s['upto'] ?? 0 );
+			$within  = $upto > 0 ? min( 1, (int) ( $s['after'] ?? 0 ) / $upto ) : 0;
+			$percent = (int) min( 99, floor( 100 * ( (int) ( $s['source'] ?? 0 ) + $within ) / $sources ) );
 		} elseif ( 'fixing' === ( $s['status'] ?? '' ) ) {
 			$tables  = max( 1, count( (array) ( $s['tables'] ?? array() ) ) );
 			$percent = 'backup' === ( $s['phase'] ?? '' ) ? (int) floor( (int) ( $s['backup_progress'] ?? 0 ) / 2 ) : 50 + (int) floor( 50 * (int) ( $s['table'] ?? 0 ) / $tables );
@@ -1313,6 +1354,11 @@ final class LinkCheck {
 			'phase'     => (string) ( $s['phase'] ?? '' ),
 			'token'     => in_array( $s['status'] ?? '', array( 'pending', 'checking', 'fixing' ), true ) ? (string) ( $s['token'] ?? '' ) : '',
 			'percent'   => $percent,
+			'stage'     => min( (int) ( $s['source'] ?? 0 ), $sources - 1 ),
+			'read'      => (int) ( $s['read'] ?? 0 ),
+			'now'       => (array) ( $s['now'] ?? array() ),
+			'table'     => (string) ( ( (array) ( $s['tables'] ?? array() ) )[ (int) ( $s['table'] ?? 0 ) ] ?? '' ),
+			'rows'      => (int) ( $s['rows'] ?? 0 ),
 			'addresses' => (array) ( $s['addresses'] ?? array() ),
 			'skipped'   => array_values( array_unique( (array) ( $s['not_checked'] ?? array() ) ) ),
 			'found'     => $found,

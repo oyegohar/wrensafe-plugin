@@ -22,8 +22,8 @@ class RemoteStorageAjax {
 	public static function test(): void {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
 
-		if ( ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_SETTINGS ) ) {
-			wp_send_json_error( array( 'message' => __( 'You do not have permission to change settings.', 'wrensafe' ) ), 403 );
+		if ( ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_CLOUD ) ) {
+			wp_send_json_error( array( 'message' => __( 'You do not have permission to change off-site storage.', 'wrensafe' ) ), 403 );
 		}
 
 		// The form's fields as sent (filter_input() reads them before

@@ -1,0 +1,251 @@
+/*
+ * Wrensafe — the review card (Wrensafe's Dashboard and Support Us) and notice (also on the Dashboard, Plugins
+ * and Updates screens, where Wrensafe's main stylesheet isn't loaded).
+ *
+ * After editing, regenerate the RTL copy:
+ *   npx rtlcss assets/admin/css/review.css assets/admin/css/review-rtl.css
+ */
+
+.wpbp-review,
+.wpbp-wrap .wpbp-card.wpbp-review {
+	position: relative;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 14px 20px;
+	padding: 18px 22px;
+	border: 1px solid #d9e3ff;
+	border-radius: 14px;
+	background:
+		radial-gradient(circle at 100% 0%, rgba(98, 182, 255, 0.2), transparent 42%),
+		radial-gradient(circle at 0% 100%, rgba(36, 87, 245, 0.08), transparent 46%),
+		#fff;
+	box-shadow: 0 8px 24px rgba(16, 29, 66, 0.08);
+	color: #101d42;
+}
+
+/* "inline" keeps WordPress from moving it below the page title after the page has drawn: it stays first. */
+.notice.wpbp-review {
+	clear: both;
+	margin: 16px 2px 12px 20px;
+	padding: 18px 22px 18px 52px;
+	border-right-width: 1px;
+}
+
+.notice.wpbp-review .notice-dismiss {
+	top: 8px;
+	left: 8px;
+}
+
+.notice.wpbp-review.is-revealed {
+	animation: wpbp-review-in 0.2s ease-out;
+}
+
+@keyframes wpbp-review-in {
+	from {
+		opacity: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notice.wpbp-review.is-revealed {
+		animation: none;
+	}
+}
+
+.wpbp-review-mark {
+	display: inline-flex;
+	flex: 0 0 52px;
+	align-items: center;
+	justify-content: center;
+	width: 52px;
+	height: 52px;
+	border-radius: 14px;
+	background: #fff;
+	box-shadow: 0 4px 12px rgba(16, 29, 66, 0.14), inset 0 0 0 1px rgba(36, 87, 245, 0.1);
+}
+
+.wpbp-review-mark svg {
+	display: block;
+	width: 34px;
+	height: 34px;
+}
+
+.wpbp-review-body {
+	flex: 1 1 340px;
+	min-width: 0;
+}
+
+.wpbp-review-stars {
+	display: inline-flex;
+	gap: 2px;
+	margin-bottom: 4px;
+	color: #f5a623;
+}
+
+.wpbp-review-stars svg {
+	display: block;
+	width: 16px;
+	height: 16px;
+}
+
+.wpbp-review .wpbp-review-title,
+.wpbp-wrap .wpbp-review .wpbp-review-title {
+	margin: 0 0 2px;
+	padding: 0;
+	color: #101d42;
+	font-size: 15px;
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.wpbp-review .wpbp-review-text,
+.wpbp-wrap .wpbp-review .wpbp-review-text {
+	margin: 0;
+	padding: 0;
+	color: #50597a;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.wpbp-review-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 10px;
+}
+
+.wpbp-review .button.wpbp-review-go,
+.wpbp-wrap .wpbp-review .button.wpbp-review-go {
+	display: inline-flex;
+	align-items: center;
+	box-sizing: border-box;
+	height: 36px;
+	min-height: 36px;
+	padding: 0 18px;
+	border: 0;
+	border-radius: 6px;
+	line-height: 1.2;
+	background: linear-gradient(-145deg, #5a86ff 0%, #2457f5 55%, #1a41d6 100%);
+	box-shadow: 0 4px 12px rgba(36, 87, 245, 0.32);
+	color: #fff;
+	font-weight: 600;
+}
+
+.wpbp-review .button.wpbp-review-go:hover,
+.wpbp-review .button.wpbp-review-go:focus,
+.wpbp-wrap .wpbp-review .button.wpbp-review-go:hover,
+.wpbp-wrap .wpbp-review .button.wpbp-review-go:focus {
+	background: linear-gradient(-145deg, #4f7cf9 0%, #1e48d0 60%, #1737b8 100%);
+	color: #fff;
+}
+
+.wpbp-review .button.wpbp-review-later {
+	min-height: 36px;
+	padding: 0 14px;
+	border-color: #cfd8f2;
+	border-radius: 6px;
+	background: #fff;
+	color: #1e2b52;
+	line-height: 34px;
+}
+
+.wpbp-review .button.wpbp-review-done,
+.wpbp-wrap .wpbp-review .button.wpbp-review-done {
+	min-height: 36px;
+	padding: 0 12px;
+	border-color: transparent;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: #33415e;
+	line-height: 34px;
+}
+
+.wpbp-review .button.wpbp-review-done:hover,
+.wpbp-review .button.wpbp-review-done:focus,
+.wpbp-wrap .wpbp-review .button.wpbp-review-done:hover,
+.wpbp-wrap .wpbp-review .button.wpbp-review-done:focus {
+	border-color: transparent;
+	background: #e3ecff;
+	color: #1638c4;
+}
+
+/* The intro video (Settings → Support Us): a picture until play is pressed. */
+.wpbp-video {
+	position: relative;
+	max-width: 720px;
+	margin: 12px 0;
+	overflow: hidden;
+	border-radius: 12px;
+	background: #101d42;
+	box-shadow: 0 8px 24px rgba(16, 29, 66, 0.16);
+	aspect-ratio: 16 / 9;
+}
+
+.wpbp-video-play {
+	position: absolute;
+	inset: 0;
+	display: block;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	background: none;
+	cursor: pointer;
+}
+
+.wpbp-video-play img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.wpbp-video-icon {
+	position: absolute;
+	top: 50%;
+	right: 50%;
+	width: 72px;
+	height: 72px;
+	border-radius: 50%;
+	background: linear-gradient(-145deg, #5a86ff 0%, #2457f5 55%, #1a41d6 100%);
+	box-shadow: 0 8px 24px rgba(16, 29, 66, 0.4);
+	transform: translate(50%, -50%);
+	transition: transform 0.15s ease;
+}
+
+.wpbp-video-icon::after {
+	position: absolute;
+	top: 50%;
+	right: 54%;
+	border-width: 13px 21px 13px 0;
+	border-style: solid;
+	border-color: transparent #fff transparent transparent;
+	content: "";
+	transform: translate(50%, -50%);
+}
+
+.wpbp-video-play:hover .wpbp-video-icon,
+.wpbp-video-play:focus .wpbp-video-icon {
+	transform: translate(50%, -50%) scale(1.08);
+}
+
+.wpbp-video-play:focus-visible {
+	outline: 3px solid #2457f5;
+	outline-offset: -3px;
+}
+
+.wpbp-video-frame {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	border: 0;
+}
+
+@media screen and (max-width: 600px) {
+	.wpbp-review-actions {
+		flex: 1 1 100%;
+	}
+}

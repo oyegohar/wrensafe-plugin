@@ -48,17 +48,22 @@ class FixLinksPage extends AbstractPage {
 				<li><?php esc_html_e( 'links to media files that aren’t on this site, and Media Library items without their file.', 'wrensafe' ); ?></li>
 			</ul>
 			<p class="description"><?php esc_html_e( 'The check changes nothing. The fix makes a database backup first. Email addresses and other domains are left alone. A link to another site that contains the old address, such as a share or web-archive link, is updated too.', 'wrensafe' ); ?></p>
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row"><?php esc_html_e( 'Old addresses', 'wrensafe' ); ?></th>
-					<td>
-						<label for="wpbp-lc-more" class="screen-reader-text"><?php esc_html_e( 'Old addresses, one per line', 'wrensafe' ); ?></label>
-						<textarea id="wpbp-lc-more" class="large-text code" rows="<?php echo esc_attr( (string) max( 2, count( $old ) ) ); ?>" placeholder="<?php echo esc_attr( 'https://old-site.example' ); ?>"><?php echo esc_textarea( implode( "\n", array_map( 'strval', $old ) ) ); ?></textarea>
-						<p class="description"><?php esc_html_e( 'One per line: the address the site had before it was moved (filled in after a restore; remove any that is wrong). Each is also looked for with and without “www.”, over http and https. Links to this site’s media and folders are checked either way.', 'wrensafe' ); ?></p>
-					</td>
-				</tr>
-			</table>
-			<p>
+			<div class="wpbp-lc-field">
+				<div class="wpbp-lc-field-head">
+					<label class="wpbp-lc-field-label" for="wpbp-lc-add"><?php esc_html_e( 'Old site addresses', 'wrensafe' ); ?></label>
+					<?php if ( $old && ! empty( $state['restore'] ) ) : ?>
+						<span class="wpbp-lc-field-badge"><?php esc_html_e( 'Filled in from your restore', 'wrensafe' ); ?></span>
+					<?php endif; ?>
+				</div>
+				<div class="wpbp-lc-address-box" id="wpbp-lc-addresses" hidden>
+					<ul class="wpbp-lc-chips"></ul>
+					<input type="text" inputmode="url" class="wpbp-lc-add" id="wpbp-lc-add" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="wpbp-lc-address-help wpbp-lc-address-msg" />
+				</div>
+				<textarea id="wpbp-lc-more" class="large-text code" rows="<?php echo esc_attr( (string) max( 2, count( $old ) ) ); ?>" aria-label="<?php esc_attr_e( 'Old site addresses, one per line', 'wrensafe' ); ?>" placeholder="<?php echo esc_attr( 'https://old-site.example' ); ?>"><?php echo esc_textarea( implode( "\n", array_map( 'strval', $old ) ) ); ?></textarea>
+				<p class="wpbp-lc-field-error" id="wpbp-lc-address-msg" role="alert" hidden></p>
+				<p class="description" id="wpbp-lc-address-help"><?php esc_html_e( 'The address this site had before it moved. Each one is also looked for with and without “www.”, over http and https. Links to this site’s media and folders are checked either way.', 'wrensafe' ); ?></p>
+			</div>
+			<p class="wpbp-lc-check-row">
 				<button type="button" class="button button-primary" id="wpbp-lc-check"><?php esc_html_e( 'Check links and media', 'wrensafe' ); ?></button>
 			</p>
 		</div>
@@ -81,18 +86,11 @@ class FixLinksPage extends AbstractPage {
 		$out    = '';
 
 		if ( in_array( $status, array( 'pending', 'checking', 'fixing' ), true ) ) {
-			if ( 'fixing' === $status ) {
-				$label = 'backup' === $r['phase'] ? __( 'Backing up the database before fixing the links…', 'wrensafe' ) : __( 'Fixing links…', 'wrensafe' );
-			} else {
-				$label = ! empty( $r['fixed'] ) ? __( 'Checking the links again…', 'wrensafe' ) : __( 'Checking links and media…', 'wrensafe' );
-			}
-
-			$out .= '<p class="wpbp-lc-progress-label">' . esc_html( $label ) . '</p>';
-			$out .= '<div class="wpbp-lc-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' . esc_attr( (string) (int) $r['percent'] ) . '"><span style="width:' . esc_attr( (string) max( 3, (int) $r['percent'] ) ) . '%"></span></div>';
+			$out .= self::progress_html( $r, $compact );
 
 			// The notice can always be closed, even if this never finishes.
 			if ( $compact ) {
-				$out .= '<p class="wpbp-lc-actions"><button type="button" class="button-link wpbp-lc-dismiss">' . esc_html__( 'Dismiss', 'wrensafe' ) . '</button></p>';
+				$out .= '<p class="wpbp-lc-actions"><button type="button" class="button wpbp-lc-dismiss">' . esc_html__( 'Dismiss', 'wrensafe' ) . '</button></p>';
 			}
 
 			return $out;
@@ -233,7 +231,7 @@ class FixLinksPage extends AbstractPage {
 
 		if ( $compact ) {
 			$buttons .= '<a class="button" href="' . esc_url( admin_url( 'admin.php?page=' . self::SLUG ) ) . '">' . esc_html__( 'Details', 'wrensafe' ) . '</a> ';
-			$buttons .= '<button type="button" class="button-link wpbp-lc-dismiss">' . esc_html__( 'Dismiss', 'wrensafe' ) . '</button>';
+			$buttons .= '<button type="button" class="button wpbp-lc-dismiss">' . esc_html__( 'Dismiss', 'wrensafe' ) . '</button>';
 		}
 
 		if ( '' !== $buttons ) {
@@ -242,6 +240,126 @@ class FixLinksPage extends AbstractPage {
 
 		if ( (int) $r['fixable'] > 0 ) {
 			$out .= '<p class="description">' . esc_html__( 'A database backup is made first. Email addresses and other domains are left alone. A link to another site that contains the old address, such as a share or web-archive link, is updated too.', 'wrensafe' ) . '</p>';
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The live progress: what is being read, how far it has got, and the parts done and to come. The
+	 * script updates these parts in place (data-lc), so the bar moves instead of being redrawn.
+	 *
+	 * @param array<string,mixed> $r       LinkCheck::report().
+	 * @param bool                $compact For the notice: no list of parts.
+	 */
+	private static function progress_html( array $r, bool $compact ): string {
+		$fixing  = 'fixing' === $r['status'];
+		$backup  = $fixing && 'backup' === $r['phase'];
+		$again   = ! $fixing && ! empty( $r['fixed'] );
+		$percent = (int) $r['percent'];
+
+		if ( $fixing ) {
+			$label = $backup ? __( 'Backing up the database before fixing the links…', 'wrensafe' ) : __( 'Fixing links…', 'wrensafe' );
+			$stage = $backup ? 0 : 1;
+			$steps = array(
+				__( 'Database backup', 'wrensafe' ),
+				__( 'Fix links', 'wrensafe' ),
+				__( 'Check again', 'wrensafe' ),
+			);
+		} else {
+			$label = $again ? __( 'Checking the links again…', 'wrensafe' ) : __( 'Checking links and media…', 'wrensafe' );
+			$stage = (int) $r['stage'];
+			$steps = array(
+				__( 'Posts and pages', 'wrensafe' ),
+				__( 'Page builders and fields', 'wrensafe' ),
+				__( 'Settings', 'wrensafe' ),
+				__( 'Categories and tags', 'wrensafe' ),
+				__( 'Media Library', 'wrensafe' ),
+			);
+		}
+
+		$out  = '<div class="wpbp-lc-progress" data-run="' . esc_attr( $fixing ? 'fix' : ( $again ? 'again' : 'check' ) ) . '" data-percent="' . esc_attr( (string) $percent ) . '">';
+		$out .= '<div class="wpbp-lc-progress-head"><span class="wpbp-lc-ring" aria-hidden="true"></span><div class="wpbp-lc-progress-text">';
+		$out .= '<p class="wpbp-lc-progress-label" data-lc="label">' . esc_html( $label ) . '</p>';
+		$out .= '<p class="wpbp-lc-progress-now" data-lc="now" aria-hidden="true">' . esc_html( self::progress_now( $r ) ) . '</p>';
+		$out .= '</div><span class="wpbp-lc-progress-percent" data-lc="percent" aria-hidden="true">' . esc_html( number_format_i18n( $percent ) . '%' ) . '</span></div>';
+		$out .= '<div class="wpbp-lc-meter" role="progressbar" aria-label="' . esc_attr( $label ) . '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' . esc_attr( (string) $percent ) . '"><span style="width:' . esc_attr( (string) max( 3, $percent ) ) . '%"></span></div>';
+
+		if ( ! $compact ) {
+			$out .= '<ol class="wpbp-lc-steps">';
+
+			foreach ( $steps as $i => $step ) {
+				$state = $i < $stage ? 'is-done' : ( $i === $stage ? 'is-active' : 'is-waiting' );
+				$out  .= '<li class="' . esc_attr( $state ) . '"' . ( $i === $stage ? ' aria-current="step"' : '' ) . '><span class="wpbp-lc-step-dot" aria-hidden="true"></span><span class="wpbp-lc-step-name">' . esc_html( $step ) . '</span></li>';
+			}
+
+			$out .= '</ol>';
+		}
+
+		$out .= '<p class="wpbp-lc-progress-foot" data-lc="foot" aria-hidden="true">' . esc_html( self::progress_foot( $r ) ) . '</p>';
+
+		return $out . '</div>';
+	}
+
+	/** The item being read right now. */
+	private static function progress_now( array $r ): string {
+		if ( 'fixing' === $r['status'] ) {
+			if ( 'backup' === $r['phase'] ) {
+				return __( 'Saving a copy of the database first, so the fix can be undone.', 'wrensafe' );
+			}
+
+			/* translators: %s: database table name */
+			return '' !== (string) $r['table'] ? sprintf( __( 'Updating the table %s', 'wrensafe' ), (string) $r['table'] ) : __( 'Finishing…', 'wrensafe' );
+		}
+
+		$now   = (array) $r['now'];
+		$id    = (int) ( $now['id'] ?? 0 );
+		$label = wp_html_excerpt( (string) ( $now['label'] ?? '' ), 60, '…' );
+
+		switch ( (string) ( $now['kind'] ?? '' ) ) {
+			case 'post':
+				/* translators: 1: post title, 2: post ID */
+				return sprintf( __( 'Reading “%1$s” (#%2$d)', 'wrensafe' ), '' !== $label ? $label : __( '(no title)', 'wrensafe' ), $id );
+			case 'postmeta':
+				/* translators: 1: name of the custom field, 2: post ID */
+				return sprintf( __( 'Reading the field %1$s of post #%2$d', 'wrensafe' ), $label, $id );
+			case 'option':
+				/* translators: %s: option name */
+				return sprintf( __( 'Reading the setting %s', 'wrensafe' ), $label );
+			case 'term':
+				/* translators: %d: term ID */
+				return sprintf( __( 'Reading category or tag #%d', 'wrensafe' ), $id );
+			case 'media':
+				/* translators: %s: file name */
+				return sprintf( __( 'Looking for the file %s', 'wrensafe' ), $label );
+		}
+
+		return (int) $r['read'] > 0 ? __( 'Moving on to the next part…', 'wrensafe' ) : __( 'Getting started…', 'wrensafe' );
+	}
+
+	/** The running totals under the bar. */
+	private static function progress_foot( array $r ): string {
+		if ( 'fixing' === $r['status'] ) {
+			$rows = (int) $r['rows'];
+
+			/* translators: %s: number of database rows */
+			return $rows > 0 ? sprintf( _n( '%s item changed so far', '%s items changed so far', $rows, 'wrensafe' ), number_format_i18n( $rows ) ) : '';
+		}
+
+		$found    = (array) $r['found'];
+		$read     = (int) $r['read'];
+		$problems = (int) $found['folder_links'] + (int) ( $found['odd_links'] ?? 0 ) + (int) $found['old_links'] + (int) $found['http_links'] + (int) $found['missing'] + (int) $found['attachments'];
+
+		if ( 0 === $read ) {
+			return '';
+		}
+
+		/* translators: %s: number of items */
+		$out = sprintf( _n( '%s item read', '%s items read', $read, 'wrensafe' ), number_format_i18n( $read ) );
+
+		if ( $problems > 0 ) {
+			/* translators: %s: number of problems */
+			$out .= ' · ' . sprintf( _n( '%s problem found so far', '%s problems found so far', $problems, 'wrensafe' ), number_format_i18n( $problems ) );
 		}
 
 		return $out;

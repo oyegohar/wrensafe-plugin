@@ -51,14 +51,63 @@ abstract class AbstractUpdateType implements UpdateType {
 
 		$skin     = new \WP_Ajax_Upgrader_Skin();
 		$upgrader = new $upgrader_class( $skin );
-		// Keep WordPress's update list until the run ends: the next items need it.
-		$results = $upgrader->bulk_upgrade( $ids, array( 'clear_update_cache' => false ) );
-		$errors  = implode( ' ', array_map( 'wp_strip_all_tags', (array) $skin->get_error_messages() ) );
+		$sources  = array();
+		$refused  = array();
+
+		// Who serves each download, and whether a plugin stopped its own: this says why one failed.
+		$before = static function ( $reply, $package, $upgrader, $extra ) use ( &$sources ) {
+			$id = (string) ( $extra['plugin'] ?? $extra['theme'] ?? '' );
+
+			if ( '' !== $id ) {
+				$sources[ $id ] = UpdateFailure::source_of( (string) $package );
+				LiveProgress::stage( $id, 'download' );
+			}
+
+			return $reply;
+		};
+		$after  = static function ( $reply, $package, $upgrader, $extra ) use ( &$refused ) {
+			$id = (string) ( $extra['plugin'] ?? $extra['theme'] ?? '' );
+
+			if ( '' !== $id && is_wp_error( $reply ) ) {
+				$refused[ $id ] = true;
+			}
+
+			return $reply;
+		};
+
+		$installing = static function ( $response, $extra ) {
+			LiveProgress::stage( (string) ( $extra['plugin'] ?? $extra['theme'] ?? '' ), 'install' );
+
+			return $response;
+		};
+		$installed  = static function ( $response, $extra ) {
+			LiveProgress::stage( (string) ( $extra['plugin'] ?? $extra['theme'] ?? '' ), is_wp_error( $response ) ? 'failed' : 'installed' );
+
+			return $response;
+		};
+
+		add_filter( 'upgrader_pre_download', $before, 1, 4 );
+		add_filter( 'upgrader_pre_download', $after, PHP_INT_MAX, 4 );
+		add_filter( 'upgrader_pre_install', $installing, PHP_INT_MAX, 2 );
+		add_filter( 'upgrader_post_install', $installed, PHP_INT_MAX, 2 );
+
+		try {
+			// Keep WordPress's update list until the run ends: the next items need it.
+			$results = $upgrader->bulk_upgrade( $ids, array( 'clear_update_cache' => false ) );
+		} finally {
+			remove_filter( 'upgrader_pre_download', $before, 1 );
+			remove_filter( 'upgrader_pre_download', $after, PHP_INT_MAX );
+			remove_filter( 'upgrader_pre_install', $installing, PHP_INT_MAX );
+			remove_filter( 'upgrader_post_install', $installed, PHP_INT_MAX );
+		}
+
+		$errors = implode( ' ', array_map( 'wp_strip_all_tags', (array) $skin->get_error_messages() ) );
 
 		foreach ( $ids as $id ) {
 			$result = is_array( $results ) ? ( $results[ $id ] ?? null ) : null;
 
 			if ( is_wp_error( $result ) ) {
+				UpdateFailure::mark( $result, (string) ( $sources[ $id ] ?? UpdateFailure::PUBLISHER ), ! empty( $refused[ $id ] ) );
 				$out[ $id ] = $result;
 			} elseif ( false === $results ) {
 				$out[ $id ] = new \WP_Error( 'wpbp_no_filesystem', __( 'WordPress couldn’t connect to the file system.', 'wrensafe' ) );

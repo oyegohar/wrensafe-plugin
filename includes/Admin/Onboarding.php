@@ -186,8 +186,8 @@ class Onboarding {
 			</ol>
 
 			<div class="wpbp-onboarding-foot">
-				<button type="button" class="button-link" data-wpbp-welcome-open><?php esc_html_e( 'Show the welcome tour', 'wrensafe' ); ?></button>
-				<button type="button" class="button-link" id="wpbp-onboarding-dismiss"><?php esc_html_e( 'Hide this guide', 'wrensafe' ); ?></button>
+				<button type="button" class="button button-small wpbp-button-ghost" data-wpbp-welcome-open><?php esc_html_e( 'Show the welcome tour', 'wrensafe' ); ?></button>
+				<button type="button" class="button button-small wpbp-button-ghost" id="wpbp-onboarding-dismiss"><?php esc_html_e( 'Hide this guide', 'wrensafe' ); ?></button>
 			</div>
 		</section>
 		<?php

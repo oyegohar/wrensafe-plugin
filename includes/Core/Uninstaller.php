@@ -70,6 +70,13 @@ class Uninstaller {
 		// and theme and pausing cron, whatever the data setting says.
 		self::remove_restore_guard();
 
+		// A Safe Updates run's progress file, left by a run that was cut off: temporary, not the site's data.
+		$up = wp_upload_dir( null, false );
+
+		if ( ! empty( $up['basedir'] ) ) {
+			self::delete_folder( trailingslashit( wp_normalize_path( (string) $up['basedir'] ) ) . 'wrensafe-live' );
+		}
+
 		$settings = get_option( Settings::OPTION_NAME, array() );
 
 		if ( ! is_array( $settings ) || empty( $settings['delete_data_on_uninstall'] ) ) {
