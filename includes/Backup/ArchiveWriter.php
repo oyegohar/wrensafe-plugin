@@ -13,9 +13,9 @@
  * closes it, and persists its cursor in the job payload so the next AJAX
  * request resumes exactly where the last one stopped.
  *
- * Internal container: ZipArchive is used when available. When it isn't,
- * PharData (TAR) is used as a fallback so the engine still works on
- * minimal PHP builds — the user-facing format is always Wrensafe's
+ * Internal container: ZIP, written by ZipStreamWriter (it needs only zlib,
+ * not PHP's zip extension). Where zlib is missing too, PharData (TAR) is
+ * used as a fallback so the engine still works on minimal PHP builds — the user-facing format is always Wrensafe's
  * own .wbp envelope (manifest.json, metadata.json, checksums.json, etc.);
  * the low-level container is an implementation detail recorded in
  * manifest.json so the Restore Engine knows how to open it.
@@ -60,7 +60,9 @@ class ArchiveWriter {
 		FileSystem::ensure_protected_directory( FileSystem::backups_dir() );
 		$dest = FileSystem::backups_dir() . $filename;
 
-		$container_format = class_exists( '\ZipArchive' ) ? 'zip' : ( class_exists( '\PharData' ) ? 'tar' : '' );
+		// ZIP is written by ZipStreamWriter and read back by ZipFileReader, so
+		// it only needs zlib; TAR stays the fallback for PHP without zlib.
+		$container_format = ( class_exists( '\ZipArchive' ) || ZipStreamWriter::available() ) ? 'zip' : ( class_exists( '\PharData' ) ? 'tar' : '' );
 
 		if ( '' === $container_format ) {
 			throw new \RuntimeException( esc_html__( 'No archive backend available on this server (ZipArchive or Phar is required).', 'wrensafe' ) );

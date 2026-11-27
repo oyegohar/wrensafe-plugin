@@ -1,0 +1,544 @@
+/* Guided tours: the spotlight, its tooltip and the list of tours (Cobalt Ice). */
+
+.wpbp-gt,
+.wpbp-gt-picker {
+	--wpbp-gt-navy: #101d42;
+	--wpbp-gt-body: #4a5a78;
+	--wpbp-gt-cobalt: #2457f5;
+	--wpbp-gt-cobalt-dark: #1e48d0;
+	--wpbp-gt-ice: #62b6ff;
+	--wpbp-gt-line: #dce4f2;
+	--wpbp-gt-frost: #f4f7ff;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+	color: var(--wpbp-gt-navy);
+}
+
+.wpbp-gt[hidden] {
+	display: none;
+}
+
+/* The page behind the tour: deep navy and softly out of focus. The selected part is cut out of this layer. */
+.wpbp-gt-veil {
+	position: fixed;
+	inset: 0;
+	z-index: 160000;
+	background: radial-gradient(120% 95% at 50% 38%, rgba(24, 42, 104, 0.66) 0%, rgba(10, 18, 48, 0.82) 100%);
+	-webkit-backdrop-filter: blur(3px) saturate(0.78);
+	backdrop-filter: blur(3px) saturate(0.78);
+	pointer-events: none;
+	animation: wpbp-gt-fade 0.28s ease-out;
+}
+
+.wpbp-gt-block {
+	position: fixed;
+	inset: 0;
+	z-index: 160001;
+	background: transparent;
+	cursor: default;
+}
+
+/* rtl:begin:ignore */
+/* The selected part: one crisp light edge and a quiet neutral shadow. */
+.wpbp-gt-spot {
+	position: fixed;
+	z-index: 160002;
+	box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.96), 0 14px 36px rgba(6, 12, 32, 0.34);
+	pointer-events: none;
+}
+
+.wpbp-gt-spot.is-empty {
+	box-shadow: none;
+}
+
+.wpbp-gt-bubble {
+	position: fixed;
+	z-index: 160003;
+	box-sizing: border-box;
+	width: 372px;
+	max-width: calc(100vw - 24px);
+	padding: 16px 18px 16px;
+	background: linear-gradient(180deg, #fff 0%, #fff 62%, #f7f9ff 100%);
+	border: 1px solid rgba(255, 255, 255, 0.82);
+	border-radius: 18px;
+	box-shadow:
+		0 0 0 1px rgba(16, 29, 66, 0.05),
+		0 2px 6px rgba(16, 29, 66, 0.12),
+		0 26px 64px -6px rgba(8, 16, 44, 0.56);
+	outline: 0;
+	opacity: 1;
+	transform: translateY(0) scale(1);
+	transition: opacity 0.24s ease-out, transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+
+.wpbp-gt-bubble.is-travelling {
+	opacity: 0;
+	transform: translateY(7px) scale(0.985);
+	transition: none;
+}
+
+.wpbp-gt-arrow {
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	background: #fff;
+	transform: rotate(45deg);
+	border-radius: 3px;
+	display: none;
+}
+
+.wpbp-gt-bubble[data-side="bottom"] .wpbp-gt-arrow {
+	display: block;
+	top: -6px;
+}
+
+.wpbp-gt-bubble[data-side="top"] .wpbp-gt-arrow {
+	display: block;
+	bottom: -6px;
+	background: #f7f9ff;
+}
+
+.wpbp-gt-bubble[data-side="right"] .wpbp-gt-arrow {
+	display: block;
+	left: -6px;
+}
+
+.wpbp-gt-bubble[data-side="left"] .wpbp-gt-arrow {
+	display: block;
+	right: -6px;
+}
+/* rtl:end:ignore */
+
+@keyframes wpbp-gt-fade {
+	from {
+		opacity: 0;
+	}
+}
+
+.wpbp-gt-head {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.wpbp-gt-who {
+	display: inline-flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+}
+
+.wpbp-gt-bubble-tile {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	color: #fff;
+	background: linear-gradient(145deg, #6a95ff 0%, var(--wpbp-gt-cobalt) 55%, #1a43cf 100%);
+	border-radius: 8px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 3px 8px rgba(36, 87, 245, 0.32);
+}
+
+.wpbp-gt-bubble-tile .dashicons {
+	width: 15px;
+	height: 15px;
+	font-size: 15px;
+}
+
+.wpbp-gt-name {
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1.4;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--wpbp-gt-cobalt);
+}
+
+.wpbp-gt-close {
+	flex: none;
+	width: 28px;
+	height: 28px;
+	margin: -4px -6px -4px 0;
+	padding: 0;
+	font-size: 20px;
+	line-height: 1;
+	color: var(--wpbp-gt-body);
+	background: transparent;
+	border: 0;
+	border-radius: 8px;
+	cursor: pointer;
+}
+
+.wpbp-gt-close:hover {
+	color: var(--wpbp-gt-navy);
+	background: var(--wpbp-gt-frost);
+}
+
+.wpbp-gt-close:focus-visible,
+.wpbp-gt-choice:focus-visible {
+	outline: 2px solid var(--wpbp-gt-cobalt);
+	outline-offset: 2px;
+}
+
+.wpbp-gt-meter {
+	position: relative;
+	height: 4px;
+	margin-bottom: 14px;
+	overflow: hidden;
+	background: #e4e9f3;
+	border-radius: 4px;
+}
+
+.wpbp-gt-meter span {
+	display: block;
+	height: 100%;
+	background: linear-gradient(90deg, var(--wpbp-gt-cobalt) 0%, var(--wpbp-gt-ice) 100%);
+	border-radius: 4px;
+	box-shadow: 0 0 8px rgba(98, 182, 255, 0.7);
+	transition: width 0.36s cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.wpbp-gt-bubble .wpbp-gt-title {
+	position: relative;
+	margin: 0 0 5px;
+	padding: 0;
+	font-size: 17px;
+	font-family: "Wrensafe Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	font-weight: 800;
+	line-height: 1.3;
+	letter-spacing: -0.01em;
+	color: var(--wpbp-gt-navy);
+}
+
+.wpbp-gt-bubble .wpbp-gt-text {
+	position: relative;
+	margin: 0 0 14px;
+	font-size: 13.5px;
+	line-height: 1.55;
+	color: var(--wpbp-gt-body);
+}
+
+.wpbp-gt-foot {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.wpbp-gt-count {
+	margin-right: auto;
+	font-size: 12px;
+	font-weight: 600;
+	color: #5b6a85;
+	font-variant-numeric: tabular-nums;
+}
+
+.wpbp-gt-foot .button {
+	min-height: 34px;
+	padding: 0 14px;
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 32px;
+	border-radius: 8px;
+}
+
+.wpbp-gt-foot .button[hidden] {
+	display: none;
+}
+
+.wpbp-gt-foot .wpbp-gt-back {
+	color: var(--wpbp-gt-navy);
+	background: #fff;
+	border-color: var(--wpbp-gt-line);
+}
+
+.wpbp-gt-foot .wpbp-gt-back:hover {
+	color: var(--wpbp-gt-navy);
+	background: var(--wpbp-gt-frost);
+	border-color: #c3cee3;
+}
+
+.wpbp-gt-foot .wpbp-gt-next,
+.wpbp-gt-foot .wpbp-gt-next:focus {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	color: #fff;
+	background: linear-gradient(145deg, #5a86ff 0%, var(--wpbp-gt-cobalt) 55%, #1a43cf 100%);
+	border-color: transparent;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 5px 14px rgba(36, 87, 245, 0.38);
+	transition: box-shadow 0.15s ease, transform 0.15s ease, filter 0.15s ease;
+}
+
+.wpbp-gt-foot .wpbp-gt-next::after {
+	content: "\2192";
+	font-size: 14px;
+	line-height: 1;
+	transition: transform 0.15s ease;
+}
+
+[dir="rtl"] .wpbp-gt-foot .wpbp-gt-next::after {
+	content: "\2190";
+}
+
+.wpbp-gt-foot .wpbp-gt-next.is-last::after,
+.wpbp-gt-foot .wpbp-gt-next:disabled::after {
+	content: none;
+}
+
+.wpbp-gt-foot .wpbp-gt-next:hover {
+	color: #fff;
+	background: linear-gradient(145deg, #5a86ff 0%, var(--wpbp-gt-cobalt) 55%, #1a43cf 100%);
+	border-color: transparent;
+	filter: brightness(1.07);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 8px 20px rgba(36, 87, 245, 0.48);
+	transform: translateY(-1px);
+}
+
+.wpbp-gt-foot .wpbp-gt-next:hover::after {
+	transform: translateX(2px);
+}
+
+[dir="rtl"] .wpbp-gt-foot .wpbp-gt-next:hover::after {
+	transform: translateX(-2px);
+}
+
+.wpbp-gt-foot .button:focus {
+	outline: 0;
+}
+
+.wpbp-gt-foot .button:focus-visible {
+	outline: 2px solid var(--wpbp-gt-ice);
+	outline-offset: 2px;
+}
+
+.wpbp-gt-foot .wpbp-gt-back:focus {
+	box-shadow: none;
+}
+
+.wpbp-gt-foot .wpbp-gt-next:disabled {
+	color: #fff !important;
+	background: #6a95ff !important;
+	border-color: #6a95ff !important;
+}
+
+/* A phone: the tooltip sits along the bottom. */
+.wpbp-gt-bubble.is-docked {
+	left: 12px !important;
+	right: 12px;
+	top: auto !important;
+	bottom: 12px;
+	width: auto;
+	max-width: none;
+	max-height: 55vh;
+	overflow-y: auto;
+}
+
+/* The list of tours. */
+.wpbp-gt-picker {
+	position: fixed;
+	inset: 0;
+	z-index: 160004;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 20px;
+	box-sizing: border-box;
+	background: radial-gradient(120% 95% at 50% 38%, rgba(24, 42, 104, 0.66) 0%, rgba(10, 18, 48, 0.82) 100%);
+	-webkit-backdrop-filter: blur(3px) saturate(0.78);
+	backdrop-filter: blur(3px) saturate(0.78);
+	animation: wpbp-gt-fade 0.22s ease-out;
+	overflow-y: auto;
+}
+
+.wpbp-gt-picker-box {
+	box-sizing: border-box;
+	width: 620px;
+	max-width: 100%;
+	max-height: calc(100vh - 40px);
+	padding: 24px;
+	overflow-y: auto;
+	background: #fff;
+	border-radius: 18px;
+	box-shadow: 0 28px 70px rgba(16, 29, 66, 0.38);
+}
+
+.wpbp-gt-picker-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.wpbp-gt-picker-head h2 {
+	margin: 0;
+	padding: 0;
+	font-size: 22px;
+	font-family: "Wrensafe Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	font-weight: 800;
+	line-height: 1.25;
+	letter-spacing: -0.02em;
+	color: var(--wpbp-gt-navy);
+}
+
+.wpbp-gt-picker-intro {
+	margin: 6px 0 18px;
+	font-size: 14px;
+	line-height: 1.55;
+	color: var(--wpbp-gt-body);
+}
+
+.wpbp-gt-picker-list {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+}
+
+.wpbp-gt-choice {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	width: 100%;
+	padding: 13px;
+	font-family: inherit;
+	text-align: left;
+	color: var(--wpbp-gt-navy);
+	background: #fff;
+	border: 1px solid var(--wpbp-gt-line);
+	border-radius: 12px;
+	cursor: pointer;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.wpbp-gt-choice:hover {
+	border-color: var(--wpbp-gt-cobalt);
+	box-shadow: 0 8px 22px rgba(36, 87, 245, 0.14);
+	transform: translateY(-1px);
+}
+
+.wpbp-gt-choice.is-main {
+	grid-column: 1 / -1;
+	align-items: center;
+	background: linear-gradient(135deg, var(--wpbp-gt-frost) 0%, #e3ecff 100%);
+	border-color: #c9d8ff;
+}
+
+.wpbp-gt-tile {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	color: #fff;
+	background: linear-gradient(145deg, #6a95ff 0%, var(--wpbp-gt-cobalt) 55%, #1a43cf 100%);
+	border-radius: 10px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 3px 8px rgba(36, 87, 245, 0.28);
+}
+
+.wpbp-gt-tile .dashicons {
+	width: 19px;
+	height: 19px;
+	font-size: 19px;
+}
+
+.wpbp-gt-choice-body {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.wpbp-gt-choice-body strong {
+	font-size: 14px;
+	font-family: "Wrensafe Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	font-weight: 800;
+	line-height: 1.35;
+}
+
+.wpbp-gt-choice-body span {
+	font-size: 12.5px;
+	line-height: 1.45;
+	color: var(--wpbp-gt-body);
+}
+
+.wpbp-gt-choice-side {
+	display: flex;
+	flex: none;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4px;
+}
+
+.wpbp-gt-done {
+	padding: 2px 8px;
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1.4;
+	color: #166534;
+	background: #dcfce7;
+	border-radius: 999px;
+}
+
+.wpbp-gt-size {
+	font-size: 11.5px;
+	font-weight: 600;
+	color: #5b6a85;
+	white-space: nowrap;
+}
+
+/* The icon of the button in the header bar (its look is shared with the header links, in admin.css). */
+.wpbp-wrap .wpbp-brandbar-links .wpbp-brandbar-guide {
+	gap: 6px;
+}
+
+.wpbp-wrap .wpbp-brandbar-links .wpbp-brandbar-guide .dashicons {
+	width: 16px;
+	height: 16px;
+	font-size: 16px;
+}
+
+@media (max-width: 600px) {
+	.wpbp-gt-picker {
+		padding: 10px;
+		align-items: flex-end;
+	}
+
+	.wpbp-gt-picker-box {
+		padding: 18px;
+		max-height: calc(100vh - 20px);
+	}
+
+	.wpbp-gt-picker-list {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.wpbp-gt-bubble,
+	.wpbp-gt-meter span,
+	.wpbp-gt-choice,
+	.wpbp-gt-foot .wpbp-gt-next,
+	.wpbp-gt-foot .wpbp-gt-next::after {
+		transition: none;
+	}
+
+	.wpbp-gt-veil,
+	.wpbp-gt-picker {
+		animation: none;
+	}
+
+	.wpbp-gt-foot .wpbp-gt-next:hover {
+		transform: none;
+	}
+
+	.wpbp-gt-choice:hover {
+		transform: none;
+	}
+}

@@ -284,7 +284,8 @@ class PushToLive {
 					return Str::starts_with( $table, $staging_prefix )
 						&& ! Str::starts_with( strtolower( $table ), $own )
 						&& ! Str::ends_with( $table, '_wpbptmp' )
-						&& ! Str::ends_with( $table, '_wpbpold' );
+						&& ! Str::ends_with( $table, '_wpbpold' )
+						&& ! Str::ends_with( $table, \WPBP\Restore\RestoreTest::SUFFIX );
 				}
 			)
 		);

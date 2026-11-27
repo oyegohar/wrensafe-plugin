@@ -71,6 +71,11 @@ class Settings {
 			'safe_updates_order'            => 'one_by_one',
 			'safe_updates_clear_cache'      => true,
 			'safe_updates_keep_days'        => 14,
+			// AI assistants over MCP (1.3.0): off until an administrator turns them on; actions and requests are
+			// separate opt-ins (see WPBP\Mcp\Abilities).
+			'mcp_enabled'                   => false,
+			'mcp_actions'                   => false,
+			'mcp_requests'                  => false,
 		);
 	}
 
@@ -231,6 +236,14 @@ class Settings {
 				$current['woo_safe_mode_default'] = ! empty( $value['woo_safe_mode_default'] );
 				break;
 
+			case 'ai':
+				if ( CapabilityManager::current_user_can( CapabilityManager::MANAGE_SECURITY ) ) {
+					$current['mcp_enabled']  = ! empty( $value['mcp_enabled'] );
+					$current['mcp_actions']  = $current['mcp_enabled'] && ! empty( $value['mcp_actions'] );
+					$current['mcp_requests'] = $current['mcp_enabled'] && ! empty( $value['mcp_requests'] );
+				}
+				break;
+
 			case '':
 			case 'general':
 				$current['enable_activity_log'] = ! empty( $value['enable_activity_log'] );
@@ -386,7 +399,7 @@ class Settings {
 			}
 
 			// The Security tab needs its own capability (see sanitize_value()).
-			if ( $from_request && 'allow_locked_backup_downloads' === $key && ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_SECURITY ) ) {
+			if ( $from_request && in_array( $key, array( 'allow_locked_backup_downloads', 'mcp_enabled', 'mcp_actions', 'mcp_requests' ), true ) && ! CapabilityManager::current_user_can( CapabilityManager::MANAGE_SECURITY ) ) {
 				continue;
 			}
 

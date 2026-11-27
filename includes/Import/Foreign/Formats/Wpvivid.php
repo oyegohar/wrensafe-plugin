@@ -11,6 +11,7 @@
 namespace WPBP\Import\Foreign\Formats;
 
 use WPBP\Import\Foreign\AbstractFormat;
+use WPBP\Import\Foreign\ZipView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -52,22 +53,23 @@ class Wpvivid extends AbstractFormat {
 			if ( 'all' === $part ) {
 				self::require_zip();
 
-				$zip = new \ZipArchive();
+				$zip = ZipView::open( $path );
 
-				if ( true !== $zip->open( $path ) ) {
+				if ( null === $zip ) {
 					throw new \RuntimeException( esc_html__( 'The WPvivid backup could not be opened (it may be incomplete).', 'wrensafe' ) );
 				}
 
-				$info = json_decode( (string) $zip->getFromName( 'wpvivid_package_info.json' ), true );
+				$info = json_decode( (string) $zip->read( 'wpvivid_package_info.json' ), true );
 				$meta = array(
 					'home_url'    => (string) ( $info['home_url'] ?? '' ),
 					'wp_version'  => (string) ( $info['wp_version'] ?? '' ),
 					'php_version' => (string) ( $info['php_version'] ?? '' ),
 				);
 
-				// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
-				for ( $i = 0; $i < $zip->numFiles; $i++ ) {
-					$inner = (string) $zip->getNameIndex( $i );
+				$count = $zip->count();
+
+				for ( $i = 0; $i < $count; $i++ ) {
+					$inner = $zip->name( $i );
 
 					if ( preg_match( '/_backup_([a-z]+)(?:\.part\d+)?\.zip$/i', $inner, $im ) && 'core' !== strtolower( $im[1] ) ) {
 						$sources[] = array(

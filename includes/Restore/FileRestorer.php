@@ -365,6 +365,10 @@ class FileRestorer {
 	public function restore_entry_step( ArchiveReader $reader, string $entry_name, array &$state, float $deadline ): ?bool {
 		$span = $reader->stored_entry_span( $entry_name );
 
+		if ( null === $span && ( $reader->entry_size( $entry_name ) ?? 0 ) >= self::LARGE_ENTRY_BYTES ) {
+			return $this->restore_compressed_step( $reader, $entry_name, $state, $deadline );
+		}
+
 		if ( null === $span || $span['size'] < self::LARGE_ENTRY_BYTES ) {
 			$state = array();
 			return $this->restore_entry( $reader, $entry_name );
@@ -423,6 +427,49 @@ class FileRestorer {
 
 		fclose( $in );
 		fclose( $out );
+		$state = array();
+
+		return rename( $tmp, $destination );
+	}
+
+	/**
+	 * A large compressed file (a big .sql or .log kept in wp-content) is
+	 * unpacked in steps as well, continuing in the next request at $deadline.
+	 *
+	 * @param array<string,mixed> $state Progress of a paused large file.
+	 */
+	private function restore_compressed_step( ArchiveReader $reader, string $entry_name, array &$state, float $deadline ): ?bool {
+		$destination = $this->resolve_destination( $entry_name );
+
+		if ( null === $destination ) {
+			$state = array();
+			return false;
+		}
+
+		$tmp = $destination . '.extracting.tmp';
+
+		if ( ( $state['entry'] ?? '' ) !== $entry_name ) {
+			wp_mkdir_p( dirname( $destination ) );
+			$state = array( 'entry' => $entry_name );
+		}
+
+		$result = $reader->extract_step( $entry_name, $tmp, $state, $deadline );
+
+		if ( $result['failed'] ) {
+			if ( file_exists( $tmp ) ) {
+				wp_delete_file( $tmp );
+			}
+
+			$state = array();
+			return false;
+		}
+
+		if ( ! $result['done'] ) {
+			$state['position'] = $result['position'];
+			$state['crc']      = $result['crc'];
+			return null;
+		}
+
 		$state = array();
 
 		return rename( $tmp, $destination );

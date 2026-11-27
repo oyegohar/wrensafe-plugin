@@ -249,3 +249,193 @@
 		flex: 1 1 100%;
 	}
 }
+
+/* The optional tip, under Settings → Support Us: a cup of coffee and four ready amounts. */
+.wpbp-wrap .wpbp-card.wpbp-tip-card {
+	display: flex;
+	align-items: flex-start;
+	gap: 20px;
+	padding: 24px 26px 20px;
+	background:
+		radial-gradient(460px 240px at 100% 0%, rgba(98, 182, 255, 0.18), rgba(98, 182, 255, 0) 70%),
+		linear-gradient(-135deg, var(--wpbp-brand-50, #f4f7ff) 0%, #fff 62%);
+	border-color: var(--wpbp-brand-200, #c9d8ff);
+}
+
+.wpbp-tip-art {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 60px;
+	height: 60px;
+	color: #fff;
+	background: linear-gradient(-145deg, #6a95ff 0%, #2457f5 55%, #1a43cf 100%);
+	border-radius: 18px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 8px 20px rgba(36, 87, 245, 0.28);
+}
+
+.wpbp-tip-art svg {
+	width: 32px;
+	height: 32px;
+}
+
+.wpbp-tip-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.wpbp-wrap .wpbp-tip-card h2 {
+	margin: 2px 0 6px;
+	padding: 0;
+	font-family: var(--wpbp-font-display);
+	font-size: 19px;
+	font-weight: 800;
+	line-height: 1.3;
+	letter-spacing: -0.01em;
+}
+
+.wpbp-wrap .wpbp-tip-body p {
+	max-width: 70ch;
+	margin: 0;
+}
+
+.wpbp-wrap .wpbp-tip-amounts {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 148px));
+	gap: 10px;
+	margin: 18px 0 14px;
+	padding: 0;
+	list-style: none;
+}
+
+.wpbp-wrap .wpbp-tip-amounts li {
+	margin: 0;
+}
+
+.wpbp-wrap a.wpbp-tip-amount {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 3px;
+	box-sizing: border-box;
+	min-height: 76px;
+	padding: 10px 8px;
+	color: var(--wpbp-text, #101d42);
+	text-align: center;
+	text-decoration: none;
+	background: #fff;
+	border: 1px solid var(--wpbp-brand-200, #c9d8ff);
+	border-radius: 14px;
+	box-shadow: 0 1px 2px rgba(16, 29, 66, 0.05);
+	transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wpbp-wrap a.wpbp-tip-amount:hover,
+.wpbp-wrap a.wpbp-tip-amount:focus {
+	color: var(--wpbp-text, #101d42);
+	border-color: var(--wpbp-brand-600, #2457f5);
+	box-shadow: 0 8px 20px rgba(36, 87, 245, 0.16);
+	transform: translateY(-2px);
+}
+
+.wpbp-wrap a.wpbp-tip-amount:focus-visible {
+	outline: 2px solid var(--wpbp-brand-600, #2457f5);
+	outline-offset: 2px;
+}
+
+.wpbp-tip-sum {
+	font-family: var(--wpbp-font-display);
+	font-size: 22px;
+	font-weight: 800;
+	line-height: 1.15;
+	letter-spacing: -0.01em;
+	color: var(--wpbp-brand-900, #101d42);
+	font-variant-numeric: tabular-nums;
+}
+
+.wpbp-tip-what {
+	font-size: 12.5px;
+	line-height: 1.3;
+	color: var(--wpbp-text-muted, #5b6a85);
+}
+
+.wpbp-tip-foot {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 20px;
+	margin: 0 0 10px;
+}
+
+.wpbp-wrap a.wpbp-tip-other {
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.wpbp-wrap a.wpbp-tip-other:hover,
+.wpbp-wrap a.wpbp-tip-other:focus {
+	text-decoration: underline;
+}
+
+.wpbp-tip-secure {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12.5px;
+	color: var(--wpbp-text-muted, #5b6a85);
+	white-space: nowrap;
+}
+
+.wpbp-tip-secure .dashicons {
+	width: 15px;
+	height: 15px;
+	font-size: 15px;
+}
+
+.wpbp-wrap .wpbp-tip-body p.description {
+	font-size: 12px;
+}
+
+@media (max-width: 782px) {
+
+	.wpbp-wrap .wpbp-card.wpbp-tip-card {
+		gap: 14px;
+		padding: 18px;
+	}
+
+	.wpbp-tip-art {
+		width: 48px;
+		height: 48px;
+		border-radius: 14px;
+	}
+
+	.wpbp-tip-art svg {
+		width: 26px;
+		height: 26px;
+	}
+
+	.wpbp-wrap .wpbp-tip-amounts {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 600px) {
+
+	.wpbp-wrap .wpbp-card.wpbp-tip-card {
+		flex-direction: column;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.wpbp-wrap a.wpbp-tip-amount {
+		transition: none;
+	}
+
+	.wpbp-wrap a.wpbp-tip-amount:hover,
+	.wpbp-wrap a.wpbp-tip-amount:focus {
+		transform: none;
+	}
+}

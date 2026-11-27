@@ -26,8 +26,20 @@ class SearchReplaceEngine {
 
 	const ROWS_PER_CHUNK = 200;
 
+	/** Keys a step of the address replacement covers when MySQL picks the rows (see core_terms()). */
+	const RANGE_ROWS = 20000;
+
+	/** From this many rows on, MySQL picks the rows to read; smaller tables are read in full, as before. */
+	const LARGE_TABLE_ROWS = 50000;
+
 	/** @var array<string,string|null> Primary key per table, looked up once. */
 	private array $primary_keys = array();
+
+	/** @var array<string,string[]> Column names per table, looked up once. */
+	private array $columns = array();
+
+	/** @var array<string,bool> Whether each table is large (see is_large()). */
+	private array $large = array();
 
 	/**
 	 * Process one bounded batch of rows for a table.
@@ -132,6 +144,12 @@ class SearchReplaceEngine {
 			);
 		}
 
+		$cores = $whole_addresses && $this->is_large( $table ) ? self::core_terms( $map ) : null;
+
+		if ( null !== $cores ) {
+			return $this->process_matching_rows( $table, $after, $primary_key, $map, $cores, $dry_run, $skip_columns );
+		}
+
 		$rows = null === $after
 			? $wpdb->get_results(
 				$wpdb->prepare( 'SELECT * FROM %i ORDER BY %i LIMIT %d', $table, $primary_key, self::ROWS_PER_CHUNK ),
@@ -159,6 +177,186 @@ class SearchReplaceEngine {
 			'rows_changed' => $rows_changed,
 			'rows_seen'    => count( $rows ),
 		);
+	}
+
+	/**
+	 * What a value must contain before any replacement can touch it: for
+	 * each search term, its longest run of letters, digits, ".", "-" and
+	 * "_". The JSON-escaped and URL-encoded forms the replacement also
+	 * looks for (Serializer::expand_map()) keep such a run as it is, so a
+	 * row without one in any column can't change. Null when a term has no
+	 * run of 4 characters or more: then every row is read.
+	 *
+	 * @param array<string,string> $map Search => replace.
+	 * @return string[]|null
+	 */
+	public static function core_terms( array $map ): ?array {
+		$cores = array();
+
+		foreach ( array_keys( $map ) as $search ) {
+			$best = '';
+
+			if ( preg_match_all( '/[A-Za-z0-9._-]+/', (string) $search, $runs ) ) {
+				foreach ( $runs[0] as $run ) {
+					if ( strlen( $run ) > strlen( $best ) ) {
+						$best = $run;
+					}
+				}
+			}
+
+			if ( strlen( $best ) < 4 ) {
+				return null;
+			}
+
+			$cores[] = $best;
+		}
+
+		// A run that contains another adds nothing: the shorter one finds its rows too.
+		$cores = array_values( array_unique( $cores ) );
+		usort(
+			$cores,
+			static function ( string $a, string $b ): int {
+				return strlen( $a ) <=> strlen( $b );
+			}
+		);
+
+		$kept = array();
+
+		foreach ( $cores as $core ) {
+			foreach ( $kept as $shorter ) {
+				if ( false !== strpos( $core, $shorter ) ) {
+					continue 2;
+				}
+			}
+
+			$kept[] = $core;
+		}
+
+		return $kept;
+	}
+
+	/**
+	 * The address replacement of a restore or Fix Links, with MySQL picking
+	 * the rows: of the next RANGE_ROWS keys after $after, only rows where a
+	 * column contains one of $cores are read and checked, so a table of
+	 * millions of rows without the old address is passed over in a few
+	 * queries instead of read row by row. Every step stays bounded.
+	 *
+	 * @param array<string,string> $map
+	 * @param string[]             $cores        See core_terms().
+	 * @param string[]             $skip_columns
+	 * @return array{cursor:?string,done:bool,rows_changed:int,rows_seen?:int}
+	 */
+	private function process_matching_rows( string $table, ?string $after, string $primary_key, array $map, array $cores, bool $dry_run, array $skip_columns ): array {
+		global $wpdb;
+
+		$lower = null === $after
+			? $wpdb->get_var( $wpdb->prepare( 'SELECT %i FROM %i ORDER BY %i LIMIT 1', $primary_key, $table, $primary_key ) )
+			: $wpdb->get_var( $wpdb->prepare( 'SELECT %i FROM %i WHERE %i > %s ORDER BY %i LIMIT 1', $primary_key, $table, $primary_key, $after, $primary_key ) );
+
+		$columns = array_values( array_diff( $this->get_columns( $table ), array_merge( array( $primary_key ), $skip_columns ) ) );
+
+		if ( null === $lower || empty( $columns ) ) {
+			return array(
+				'cursor'       => $after,
+				'done'         => true,
+				'rows_changed' => 0,
+			);
+		}
+
+		$upper = $wpdb->get_var( $wpdb->prepare( 'SELECT %i FROM %i WHERE %i >= %s ORDER BY %i LIMIT 1 OFFSET %d', $primary_key, $table, $primary_key, $lower, $primary_key, self::RANGE_ROWS - 1 ) );
+		$last  = null === $upper;
+
+		if ( $last ) {
+			$upper = $wpdb->get_var( $wpdb->prepare( 'SELECT %i FROM %i ORDER BY %i DESC LIMIT 1', $primary_key, $table, $primary_key ) );
+		}
+
+		// The keys of the first matching rows, column by column. A row among
+		// the first ROWS_PER_CHUNK matches of the range is among the first
+		// ROWS_PER_CHUNK of a column it matches in, so the union holds them.
+		$keys = array();
+
+		foreach ( $columns as $column ) {
+			foreach ( $cores as $core ) {
+				$found = $wpdb->get_col( $wpdb->prepare( 'SELECT %i FROM %i WHERE %i >= %s AND %i <= %s AND INSTR(%i, %s) > 0 ORDER BY %i LIMIT %d', $primary_key, $table, $primary_key, $lower, $primary_key, (string) $upper, $column, $core, $primary_key, self::ROWS_PER_CHUNK ) );
+
+				foreach ( (array) $found as $key ) {
+					$keys[ (string) $key ] = true;
+				}
+			}
+		}
+
+		$rows = array();
+
+		if ( $keys ) {
+			// Keys in the table's own order (numeric or text), then the first batch of them.
+			$order = $wpdb->get_col(
+				$wpdb->prepare(
+					'SELECT %i FROM %i WHERE %i IN (' . implode( ', ', array_fill( 0, count( $keys ), '%s' ) ) . ') ORDER BY %i LIMIT %d',
+					array_merge( array( $primary_key, $table, $primary_key ), array_map( 'strval', array_keys( $keys ) ), array( $primary_key, self::ROWS_PER_CHUNK ) )
+				)
+			);
+
+			if ( $order ) {
+				$rows = $wpdb->get_results(
+					$wpdb->prepare(
+						'SELECT * FROM %i WHERE %i IN (' . implode( ', ', array_fill( 0, count( $order ), '%s' ) ) . ') ORDER BY %i',
+						array_merge( array( $table, $primary_key ), array_map( 'strval', $order ), array( $primary_key ) )
+					),
+					ARRAY_A
+				);
+			}
+		}
+
+		$rows = is_array( $rows ) ? $rows : array();
+
+		$rows_changed = $rows ? $this->apply_to_rows( $table, $rows, $primary_key, $map, $dry_run, $skip_columns, true ) : 0;
+
+		// A full batch can leave more matching rows in this range: continue after the last one.
+		if ( count( $rows ) === self::ROWS_PER_CHUNK ) {
+			$last_row = end( $rows );
+
+			return array(
+				'cursor'       => (string) $last_row[ $primary_key ],
+				'done'         => false,
+				'rows_changed' => $rows_changed,
+				'rows_seen'    => count( $rows ),
+			);
+		}
+
+		return array(
+			'cursor'       => (string) $upper,
+			'done'         => $last,
+			'rows_changed' => $rows_changed,
+			'rows_seen'    => count( $rows ),
+		);
+	}
+
+	/** Whether the table holds LARGE_TABLE_ROWS rows or more (MySQL's estimate, looked up once). */
+	private function is_large( string $table ): bool {
+		global $wpdb;
+
+		if ( ! isset( $this->large[ $table ] ) ) {
+			$rows                  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $table ) );
+			$this->large[ $table ] = $rows >= self::LARGE_TABLE_ROWS;
+		}
+
+		return $this->large[ $table ];
+	}
+
+	/**
+	 * The table's column names.
+	 *
+	 * @return string[]
+	 */
+	private function get_columns( string $table ): array {
+		global $wpdb;
+
+		if ( ! isset( $this->columns[ $table ] ) ) {
+			$this->columns[ $table ] = array_map( 'strval', (array) $wpdb->get_col( $wpdb->prepare( 'SHOW COLUMNS FROM %i', $table ) ) );
+		}
+
+		return $this->columns[ $table ];
 	}
 
 	/**

@@ -165,6 +165,7 @@ class BackupBrowserPage extends AbstractPage {
 				<?php if ( ! empty( $backup['is_encrypted'] ) ) : ?>
 					<span class="dashicons dashicons-shield" title="<?php esc_attr_e( 'Encrypted', 'wrensafe' ); ?>"></span>
 				<?php endif; ?>
+				<?php \WPBP\Admin\RestoreTestScreen::badge( (int) $backup['id'] ); ?>
 			</td>
 			<?php
 			$locked            = ! empty( $backup['is_locked'] );
@@ -178,6 +179,9 @@ class BackupBrowserPage extends AbstractPage {
 						<summary class="button button-small wpbp-icon-button" title="<?php esc_attr_e( 'More actions', 'wrensafe' ); ?>"><span class="dashicons dashicons-ellipsis" aria-hidden="true"></span><span class="screen-reader-text"><?php esc_html_e( 'More actions', 'wrensafe' ); ?></span></summary>
 						<div class="wpbp-menu-panel">
 							<button type="button" class="wpbp-menu-item wpbp-verify-backup" title="<?php esc_attr_e( 'Checks the archive, manifest, database files and file checksums to confirm the backup is not corrupted.', 'wrensafe' ); ?>"><?php esc_html_e( 'Verify integrity', 'wrensafe' ); ?></button>
+							<?php if ( \WPBP\Admin\RestoreTestScreen::available() ) : ?>
+								<button type="button" class="wpbp-menu-item wpbp-restore-test" title="<?php esc_attr_e( 'Restores the backup into a temporary copy to prove it works, without changing your site.', 'wrensafe' ); ?>"><?php esc_html_e( 'Test restore', 'wrensafe' ); ?><?php echo wp_kses( \WPBP\Admin\NewFeatures::badge( 'restore-test' ), \WPBP\Admin\Kses::allowed() ); ?></button>
+							<?php endif; ?>
 							<button type="button" class="wpbp-menu-item wpbp-toggle-lock"><?php echo $locked ? esc_html__( 'Unlock', 'wrensafe' ) : esc_html__( 'Lock', 'wrensafe' ); ?></button>
 							<hr class="wpbp-menu-separator">
 							<button type="button" class="wpbp-menu-item is-danger wpbp-delete-backup" <?php echo $locked ? 'disabled' : ''; ?>><?php esc_html_e( 'Delete', 'wrensafe' ); ?></button>

@@ -190,6 +190,21 @@ class Uninstaller {
 			$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', $wpdb->prefix . 'wpbp_' . $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the plugin's own tables.
 		}
 
+		// A Restore Test's copy left by a test that was cut off (its tables end
+		// in RestoreTest::SUFFIX). Done here with WordPress core only: uninstall
+		// runs without the plugin's autoloader.
+		$test_tables = (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $wpdb->prefix ) . '%' . $wpdb->esc_like( '_wpbptest' ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- the plugin's own temporary tables.
+
+		if ( $test_tables ) {
+			$wpdb->query( 'SET FOREIGN_KEY_CHECKS = 0' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- see above.
+
+			foreach ( $test_tables as $test_table ) {
+				$wpdb->query( $wpdb->prepare( 'DROP TABLE IF EXISTS %i', (string) $test_table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- see above.
+			}
+
+			$wpdb->query( 'SET FOREIGN_KEY_CHECKS = 1' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- see above.
+		}
+
 		foreach ( wp_roles()->role_objects as $role ) {
 			foreach ( self::CAPABILITIES as $cap ) {
 				$role->remove_cap( $cap );

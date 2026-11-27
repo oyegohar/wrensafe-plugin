@@ -11,6 +11,7 @@ namespace WPBP\Ajax;
 use WPBP\Import\Foreign\ForeignConverter;
 use WPBP\Import\Foreign\ForeignImportJob;
 use WPBP\Import\Foreign\ImportSet;
+use WPBP\Import\Foreign\ServerBackups;
 use WPBP\Security\CapabilityManager;
 use WPBP\Utils\Errors;
 use WPBP\Utils\FileSystem;
@@ -176,6 +177,73 @@ class ForeignImportAjax {
 		}
 
 		wp_send_json_success( $data );
+	}
+
+	/** Backups other plugins left on this server (ServerBackups), for the list on Import / Restore. */
+	public static function found(): void {
+		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
+		self::require_capability();
+
+		// Files on the server, like an import from a server path: administrators only.
+		if ( ! CapabilityManager::is_site_administrator() ) {
+			wp_send_json_success( array( 'sets' => array() ) );
+		}
+
+		$sets = array();
+
+		foreach ( ServerBackups::find() as $set ) {
+			$sets[] = array(
+				'id'       => $set['id'],
+				'name'     => $set['name'],
+				'monogram' => ServerBackups::MONOGRAMS[ $set['format'] ] ?? '',
+				'folder'   => $set['folder'],
+				'date'     => wp_date( (string) get_option( 'date_format' ) . ' ' . (string) get_option( 'time_format' ), $set['date'] ),
+				'size'     => $set['size'],
+				'files'    => count( $set['files'] ),
+			);
+		}
+
+		wp_send_json_success( array( 'sets' => $sets ) );
+	}
+
+	/** Start an import set with a backup found on this server: its files are read where they are. */
+	public static function use_found(): void {
+		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
+		self::require_capability();
+
+		if ( ! CapabilityManager::is_site_administrator() ) {
+			wp_send_json_error( array( 'message' => __( 'Restoring a backup found on the server requires administrator access.', 'wrensafe' ) ), 403 );
+		}
+
+		$set = ServerBackups::get( isset( $_POST['found_id'] ) ? sanitize_key( wp_unslash( $_POST['found_id'] ) ) : '' );
+
+		if ( null === $set ) {
+			wp_send_json_error( array( 'message' => __( 'That backup isn’t on the server any more. The list has been refreshed.', 'wrensafe' ) ), 404 );
+		}
+
+		$id = ImportSet::new_id();
+
+		try {
+			ImportSet::add_found( $id, $set['files'] );
+		} catch ( \Throwable $e ) {
+			wp_send_json_error( array( 'message' => Errors::text( $e ) ) );
+		}
+
+		wp_send_json_success(
+			array(
+				'set_id' => $id,
+				'files'  => array_map(
+					static function ( $name, $path ) {
+						return array(
+							'name' => $name,
+							'size' => (int) filesize( $path ),
+						);
+					},
+					array_keys( $set['files'] ),
+					array_values( $set['files'] )
+				),
+			)
+		);
 	}
 
 	/** Take one file back out of the set (uploaded by mistake). */

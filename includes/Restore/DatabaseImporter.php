@@ -18,6 +18,13 @@
  * server's data into it, and anything else stops the restore before the
  * live database is touched.
  *
+ * Speed: consecutive INSERTs into an InnoDB table are sent as one
+ * multi-row INSERT (up to MERGE_BYTES), so a table of millions of rows
+ * takes thousands of round trips to MySQL instead of millions. If such an
+ * INSERT fails, InnoDB has added none of its rows and they are run again
+ * one by one, so the result and any error stay those of the original
+ * statements.
+ *
  * Foreign keys: a CREATE TABLE's REFERENCES are pointed at the staging
  * tables of this restore (see foreign_key_map()), and explicit constraint
  * names are dropped so the staging table can't clash with the live table's
@@ -62,6 +69,12 @@ class DatabaseImporter {
 	 */
 	private const SKIPPED_STATEMENT = '/^(?:SET\s|LOCK\s+TABLES\s|UNLOCK\s+TABLES$|START\s+TRANSACTION|BEGIN$|COMMIT$|ROLLBACK$)/i';
 
+	/** Most bytes of rows sent in one merged INSERT (half of max_allowed_packet at most). */
+	private const MERGE_BYTES = 1048576;
+
+	/** Most bytes of SQL one chunk sends, so its memory and time stay bounded. */
+	private const CHUNK_BYTES = 16777216;
+
 	/**
 	 * Execute one chunk of statements from a schema or data SQL file,
 	 * starting at a byte offset, rewriting the source table's identifier to
@@ -93,9 +106,11 @@ class DatabaseImporter {
 		// finds the quoted strings with backslash escapes on and "…" as a
 		// string, so this connection doesn't use NO_BACKSLASH_ESCAPES or
 		// ANSI_QUOTES (part of ANSI).
+		// MariaDB's combined modes (DB2, MAXDB, MSSQL, ORACLE, POSTGRESQL)
+		// switch ANSI_QUOTES back on when the list is set again: they go too.
 		$mode   = (string) $wpdb->get_var( 'SELECT @@SESSION.sql_mode' );
 		$modes  = array_values( array_filter( array_map( 'trim', explode( ',', strtoupper( $mode ) ) ) ) );
-		$wanted = array_values( array_diff( $modes, array( 'NO_BACKSLASH_ESCAPES', 'ANSI_QUOTES', 'ANSI' ) ) );
+		$wanted = array_values( array_diff( $modes, array( 'NO_BACKSLASH_ESCAPES', 'ANSI_QUOTES', 'ANSI', 'DB2', 'MAXDB', 'MSSQL', 'ORACLE', 'POSTGRESQL' ) ) );
 
 		if ( ! in_array( 'NO_AUTO_VALUE_ON_ZERO', $wanted, true ) ) {
 			$wanted[] = 'NO_AUTO_VALUE_ON_ZERO';
@@ -103,16 +118,39 @@ class DatabaseImporter {
 
 		if ( $wanted !== $modes ) {
 			$wpdb->query( $wpdb->prepare( 'SET SESSION sql_mode = %s', implode( ',', $wanted ) ) );
+
+			// If the server still reads quotes another way, the checks above
+			// can't be trusted: stop before anything is imported.
+			$now = strtoupper( (string) $wpdb->get_var( 'SELECT @@SESSION.sql_mode' ) );
+
+			if ( false !== strpos( $now, 'ANSI_QUOTES' ) || false !== strpos( $now, 'NO_BACKSLASH_ESCAPES' ) ) {
+				$reader->close();
+
+				return array(
+					'offset'         => $offset,
+					'done'           => false,
+					'statements_run' => 0,
+					'error'          => __( 'the database server keeps ANSI_QUOTES or NO_BACKSLASH_ESCAPES on in its SQL mode, so the backup’s SQL can’t be checked safely. The restore stopped before the live database was changed.', 'wrensafe' ),
+				);
+			}
 		}
 
 		$count   = 0;
+		$queries = 0;
+		$sent    = 0;
 		$error   = null;
 		$started = microtime( true );
 
-		// Bounded by statement count AND time, so rows with very large
-		// values (page-builder content, big option blobs) can't stretch one
-		// chunk past the request budget.
-		while ( $count < self::statements_per_chunk() && ( 0 === $count || microtime( true ) - $started < 3 ) ) {
+		// Rows of consecutive INSERTs waiting to be sent as one statement.
+		$merge  = self::merge_bytes( $dest_table );
+		$prefix = '';
+		$rows   = array();
+		$bytes  = 0;
+
+		// Bounded by queries, bytes AND time, so rows with very large values
+		// (page-builder content, big option blobs) can't stretch one chunk
+		// past the request budget.
+		while ( $queries < self::statements_per_chunk() && $sent < self::CHUNK_BYTES && ( 0 === $count || microtime( true ) - $started < 3 ) ) {
 			$statement = $reader->read_statement();
 
 			if ( null === $statement ) {
@@ -144,11 +182,51 @@ class DatabaseImporter {
 				$checked = self::repair_placeholder_escapes( $checked );
 			}
 
+			$split = $merge > 0 ? self::split_insert( $checked ) : null;
+
+			if ( null !== $split && $split[0] === $prefix && $bytes + strlen( $split[1] ) < $merge ) {
+				$rows[] = $split[1];
+				$bytes += strlen( $split[1] ) + 1;
+				continue;
+			}
+
+			if ( $rows ) {
+				++$queries;
+				$sent  += $bytes;
+				$failed = self::run_rows( $prefix, $rows );
+				$prefix = '';
+				$rows   = array();
+				$bytes  = 0;
+
+				if ( '' !== $failed ) {
+					$error = $failed;
+					break;
+				}
+			}
+
+			if ( null !== $split ) {
+				$prefix = $split[0];
+				$rows   = array( $split[1] );
+				$bytes  = strlen( $split[1] );
+				continue;
+			}
+
+			++$queries;
+			$sent  += strlen( $checked );
 			$failed = self::run_statement( $checked );
 
 			if ( '' !== $failed ) {
 				$error = $failed;
 				break;
+			}
+		}
+
+		// The last rows read are sent before the offset is handed back.
+		if ( null === $error && $rows ) {
+			$failed = self::run_rows( $prefix, $rows );
+
+			if ( '' !== $failed ) {
+				$error = $failed;
 			}
 		}
 
@@ -162,6 +240,77 @@ class DatabaseImporter {
 			'statements_run' => $count,
 			'error'          => $error,
 		);
+	}
+
+	/**
+	 * How many bytes of rows may go into one merged INSERT into $table: 0
+	 * (each statement on its own, as before) unless the table is InnoDB,
+	 * where a failed INSERT leaves no rows behind and can be retried row by
+	 * row. Also 0 while SAVEQUERIES keeps every query in memory.
+	 */
+	private static function merge_bytes( string $table ): int {
+		global $wpdb;
+
+		if ( defined( 'SAVEQUERIES' ) && SAVEQUERIES ) {
+			return 0;
+		}
+
+		$engine = (string) $wpdb->get_var( $wpdb->prepare( 'SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $table ) );
+
+		if ( 0 !== strcasecmp( $engine, 'InnoDB' ) ) {
+			return 0;
+		}
+
+		$packet = (int) $wpdb->get_var( 'SELECT @@SESSION.max_allowed_packet' );
+
+		return (int) min( self::MERGE_BYTES, intdiv( max( 0, $packet ), 2 ) );
+	}
+
+	/**
+	 * An INSERT [IGNORE] / REPLACE … VALUES statement (already checked by
+	 * statement_for_table()) split into what comes before its rows and the
+	 * rows themselves; null for any other statement, or when anything
+	 * follows the rows (ON DUPLICATE KEY UPDATE, AS, RETURNING).
+	 *
+	 * @return array{0:string,1:string}|null
+	 */
+	public static function split_insert( string $statement ): ?array {
+		if ( 1 !== preg_match( '/^(?:INSERT(?: IGNORE)?|REPLACE) INTO `(?:[^`]|``)+`\s*(?:\((?:\s*`(?:[^`]|``)+`\s*,?)+\)\s*)?VALUES\s*(?=\()/', $statement, $m ) ) {
+			return null;
+		}
+
+		$rows = rtrim( substr( $statement, strlen( $m[0] ) ) );
+		$code = self::sql_outside_quotes( $rows );
+
+		if ( null === $code || ')' !== substr( $code, -1 ) || 1 === preg_match( '/\b(?:ON|AS|RETURNING)\b/i', $code ) ) {
+			return null;
+		}
+
+		return array( $m[0], $rows );
+	}
+
+	/**
+	 * Run the rows of consecutive INSERTs that share $prefix: as one
+	 * statement, and if that fails (a failed InnoDB INSERT adds no rows),
+	 * one statement per original INSERT, so the outcome and any error are
+	 * exactly what running them one by one gives.
+	 *
+	 * @param string[] $rows
+	 */
+	private static function run_rows( string $prefix, array $rows ): string {
+		if ( count( $rows ) > 1 && '' === self::run_statement( $prefix . implode( ',', $rows ) ) ) {
+			return '';
+		}
+
+		foreach ( $rows as $row ) {
+			$failed = self::run_statement( $prefix . $row );
+
+			if ( '' !== $failed ) {
+				return $failed;
+			}
+		}
+
+		return '';
 	}
 
 	/**
@@ -294,37 +443,40 @@ class DatabaseImporter {
 		$i      = 0;
 
 		while ( $i < $length ) {
-			$quote = $sql[ $i ];
+			// Up to the next quote in one run (strcspn), not character by character.
+			$run = strcspn( $sql, "`'\"", $i );
 
-			if ( '`' !== $quote && "'" !== $quote && '"' !== $quote ) {
-				$out .= $quote;
-				++$i;
+			if ( $run > 0 ) {
+				$out .= substr( $sql, $i, $run );
+				$i   += $run;
 				continue;
 			}
 
+			$quote  = $sql[ $i ];
+			$stops  = '`' === $quote ? '`' : $quote . '\\';
 			$closed = false;
 			++$i;
 
 			while ( $i < $length ) {
-				$ch = $sql[ $i ];
+				$i += strcspn( $sql, $stops, $i );
 
-				if ( '\\' === $ch && '`' !== $quote ) {
+				if ( $i >= $length ) {
+					break;
+				}
+
+				if ( '\\' === $sql[ $i ] ) {
 					$i += 2;
 					continue;
 				}
 
-				if ( $ch === $quote ) {
-					if ( $i + 1 < $length && $sql[ $i + 1 ] === $quote ) {
-						$i += 2;
-						continue;
-					}
-
-					$closed = true;
-					++$i;
-					break;
+				if ( $i + 1 < $length && $sql[ $i + 1 ] === $quote ) {
+					$i += 2;
+					continue;
 				}
 
+				$closed = true;
 				++$i;
+				break;
 			}
 
 			if ( ! $closed ) {

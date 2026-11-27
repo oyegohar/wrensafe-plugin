@@ -32,7 +32,7 @@ class SettingsTransfer {
 	const BEFORE_UPDATES = 'wpbp_backup_before_updates';
 
 	/** Settings a reset puts back and an undo restores, but a file can never set. */
-	const RESET_ONLY = array( 'delete_data_on_uninstall', 'allow_locked_backup_downloads' );
+	const RESET_ONLY = array( 'delete_data_on_uninstall', 'allow_locked_backup_downloads', 'mcp_enabled', 'mcp_actions', 'mcp_requests' );
 
 	/** @return array<string,string> Group => label. */
 	public static function groups(): array {
@@ -535,7 +535,7 @@ class SettingsTransfer {
 	}
 
 	private static function may_change( string $key ): bool {
-		return 'allow_locked_backup_downloads' !== $key || CapabilityManager::current_user_can( CapabilityManager::MANAGE_SECURITY );
+		return ! in_array( $key, array( 'allow_locked_backup_downloads', 'mcp_enabled', 'mcp_actions', 'mcp_requests' ), true ) || CapabilityManager::current_user_can( CapabilityManager::MANAGE_SECURITY );
 	}
 
 	/** @param array<string,mixed> $wrote The values the import or reset is about to write. */

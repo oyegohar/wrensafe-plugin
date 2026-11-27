@@ -391,24 +391,20 @@ class ForeignConverter {
 		}
 
 		if ( ! empty( $source['inner'] ) ) {
-			$zip = new \ZipArchive();
+			$zip = ZipView::open( $source['file'] );
 
-			if ( true !== $zip->open( $source['file'] ) ) {
+			if ( null === $zip ) {
 				fclose( $out );
 				throw new \RuntimeException( esc_html__( 'The backup file could not be opened (it may be incomplete).', 'wrensafe' ) );
 			}
 
-			$in = $zip->getStream( (string) $source['inner'] );
+			$copied = $zip->copy_to( (string) $source['inner'], $out );
+			$zip->close();
 
-			if ( false === $in ) {
+			if ( ! $copied ) {
 				fclose( $out );
-				$zip->close();
 				throw new \RuntimeException( esc_html__( 'A part of the backup could not be read.', 'wrensafe' ) );
 			}
-
-			stream_copy_to_stream( $in, $out );
-			fclose( $in );
-			$zip->close();
 		} else {
 			$wrapper = preg_match( '/\.bz2$/i', $source['file'] ) ? 'compress.bzip2://' : 'compress.zlib://';
 			$in      = fopen( $wrapper . $source['file'], 'rb' );

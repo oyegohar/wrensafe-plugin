@@ -32,6 +32,32 @@ class MigrationAssistant {
 	/** Site option holding the latest scan result so it persists across reloads. */
 	const LATEST_RESULT_OPTION = 'wpbp_latest_migration_assistant_result';
 
+	/** A scan older than this is run again where the readiness score is shown outside the Migration Assistant (one day). */
+	const READINESS_MAX_AGE = 86400;
+
+	/**
+	 * The one migration readiness score Wrensafe shows: the Dashboard, System Info and the Migration Assistant all use
+	 * its latest scan. With no scan yet, or one over a day old, the scan runs again here (quick: server limits, sizes
+	 * from the database and a few folder levels) and is saved, so the Migration Assistant shows the same result.
+	 *
+	 * @return array{score:int,warnings:string[],scanned_at:int}
+	 */
+	public static function readiness(): array {
+		$latest = self::latest_result();
+
+		if ( null === $latest || (int) ( $latest['scanned_at'] ?? 0 ) < time() - self::READINESS_MAX_AGE ) {
+			$assistant = new self();
+			$scan      = $assistant->scan();
+			$latest    = self::save_latest_result( $scan, $assistant->recommend( $scan ) );
+		}
+
+		return array(
+			'score'      => (int) ( $latest['recommend']['score'] ?? 0 ),
+			'warnings'   => array_values( array_map( 'strval', (array) ( $latest['recommend']['warnings'] ?? array() ) ) ),
+			'scanned_at' => (int) ( $latest['scanned_at'] ?? 0 ),
+		);
+	}
+
 	/**
 	 * Persist the latest scan + recommendation so the Migration Assistant page
 	 * can show it again until the user re-scans.
@@ -115,7 +141,7 @@ class MigrationAssistant {
 			'has_woocommerce'    => class_exists( 'WooCommerce' ),
 			'has_multisite'      => is_multisite(),
 			'has_openssl'        => ServerInfo::has_openssl(),
-			'has_zip'            => ServerInfo::has_zip_archive(),
+			'has_zip'            => ServerInfo::can_zip(),
 			'has_curl'           => ServerInfo::has_curl(),
 			// The HTTP API falls back to PHP streams without cURL.
 			'has_http'           => wp_http_supports( array( 'ssl' ) ),

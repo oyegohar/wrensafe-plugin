@@ -336,6 +336,9 @@ class PluginSafety {
 	 * Plugins that only the backup activates stay off until the restore is
 	 * done: some redirect the first admin request after activation to a
 	 * welcome screen (WPvivid does), which would cut the restore off.
+	 * Wrensafe's own restore requests (wpbp_restore_*) load Wrensafe alone:
+	 * a plugin the site already had can carry such a redirect in the
+	 * backup's database too, and the restore steps need no other plugin.
 	 *
 	 * @param string[] $site_plugins The destination's active plugins before the restore.
 	 */
@@ -348,7 +351,8 @@ class PluginSafety {
 			return false;
 		}
 
-		$step_plugins = array_values( array_unique( array_merge( self::always_active(), array_filter( $site_plugins, 'is_string' ) ) ) );
+		$own_plugins  = self::always_active();
+		$step_plugins = array_values( array_unique( array_merge( $own_plugins, array_filter( $site_plugins, 'is_string' ) ) ) );
 
 		$code = <<<'PHP'
 <?php
@@ -411,15 +415,20 @@ if ( ! in_array( $wpbp_script, array( 'themes.php', 'customize.php' ), true ) ) 
 	add_filter( 'stylesheet', $wpbp_no_theme, PHP_INT_MAX );
 }
 
+// Wrensafe's own restore requests load Wrensafe alone: they need no other
+// plugin, and a plugin this site already had can carry a welcome-screen
+// redirect in the backup's database that would answer them with a 302.
+$wpbp_own_request = wp_doing_ajax() && isset( $_POST['action'] ) && 0 === strpos( sanitize_key( wp_unslash( $_POST['action'] ) ), 'wpbp_restore_' );
+
 add_filter(
 	'option_active_plugins',
-	static function ( $plugins ) {
+	static function ( $plugins ) use ( $wpbp_own_request ) {
 		if ( ! is_array( $plugins ) ) {
 			return $plugins;
 		}
 
 		// Only this site's own plugins and Wrensafe (see above).
-		$plugins = array_values( array_intersect( $plugins, /*WPBP_STEP_PLUGINS*/ ) );
+		$plugins = array_values( array_intersect( $plugins, $wpbp_own_request ? /*WPBP_OWN_PLUGINS*/ : /*WPBP_STEP_PLUGINS*/ ) );
 
 		return array_values(
 			array_filter(
@@ -447,10 +456,14 @@ PHP;
 
 		// var_export() writes the values as PHP literals (strings and an
 		// array of strings only): nothing from them can become code.
-		$code    = str_replace(
-			array( '/*WPBP_STEP_PLUGINS*/', '/*WPBP_SCRAPE_TRANSIENT*/' ),
-			array( var_export( $step_plugins, true ), var_export( self::SCRAPE_TRANSIENT, true ) ), // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- writes PHP literals, see above.
-			$code
+		// strtr() replaces in one pass: a plugin name can't be read as another placeholder.
+		$code    = strtr(
+			$code,
+			array(
+				'/*WPBP_STEP_PLUGINS*/'     => var_export( $step_plugins, true ), // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- writes PHP literals, see above.
+				'/*WPBP_OWN_PLUGINS*/'      => var_export( $own_plugins, true ), // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- see above.
+				'/*WPBP_SCRAPE_TRANSIENT*/' => var_export( self::SCRAPE_TRANSIENT, true ), // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- see above.
+			)
 		);
 		$written = self::write_file( $path, $code );
 

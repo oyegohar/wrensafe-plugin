@@ -23,7 +23,11 @@ class Onboarding {
 	/** User meta: array( welcome_seen, dismissed, visited[] ). */
 	const META = 'wpbp_onboarding';
 
+	/** Transient: the user who just activated Wrensafe on a new install. */
+	const REDIRECT = 'wpbp_activation_redirect';
+
 	public function register_hooks(): void {
+		add_action( 'admin_init', array( $this, 'redirect_after_activation' ) );
 		add_action( 'admin_notices', array( $this, 'plugins_screen_notice' ) );
 		add_action( 'wp_ajax_wpbp_onboarding', array( $this, 'ajax' ) );
 		add_action( 'admin_post_wpbp_dismiss_ready_notice', array( $this, 'dismiss_ready_notice' ) );
@@ -32,7 +36,7 @@ class Onboarding {
 	/**
 	 * This user's onboarding state.
 	 *
-	 * @return array{welcome_seen:bool,dismissed:bool,notice_dismissed:bool,visited:string[]}
+	 * @return array{welcome_seen:bool,dismissed:bool,notice_dismissed:bool,visited:string[],tours:string[]}
 	 */
 	public static function state(): array {
 		$state = get_user_meta( get_current_user_id(), self::META, true );
@@ -43,6 +47,7 @@ class Onboarding {
 			'dismissed'        => ! empty( $state['dismissed'] ),
 			'notice_dismissed' => ! empty( $state['notice_dismissed'] ),
 			'visited'          => array_values( array_filter( (array) ( $state['visited'] ?? array() ), 'is_string' ) ),
+			'tours'            => array_values( array_filter( (array) ( $state['tours'] ?? array() ), 'is_string' ) ),
 		);
 	}
 
@@ -58,6 +63,39 @@ class Onboarding {
 	 */
 	public static function show_welcome(): bool {
 		return ! self::state()['welcome_seen'] && 0 === BackupsRepository::count_completed();
+	}
+
+	/**
+	 * On a new install, remember who activated Wrensafe from the Plugins screen, so the next screen they
+	 * see is Wrensafe's Dashboard with the welcome. Never for WP-CLI, AJAX, REST or a network activation.
+	 */
+	public static function queue_redirect(): void {
+		if ( wp_doing_ajax() || wp_doing_cron() || ( defined( 'WP_CLI' ) && WP_CLI ) || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || is_network_admin() || ! get_current_user_id() ) {
+			return;
+		}
+
+		set_transient( self::REDIRECT, get_current_user_id(), 5 * MINUTE_IN_SECONDS );
+	}
+
+	/**
+	 * The Plugins screen WordPress shows after that activation opens Wrensafe instead: once, for that user,
+	 * not after activating several plugins at once, and only while the welcome hasn't been seen.
+	 */
+	public function redirect_after_activation(): void {
+		$user = get_transient( self::REDIRECT );
+
+		if ( false === $user || get_current_user_id() !== (int) $user || 'plugins.php' !== ( $GLOBALS['pagenow'] ?? '' ) || wp_doing_ajax() ) {
+			return;
+		}
+
+		delete_transient( self::REDIRECT );
+
+		if ( isset( $_GET['activate-multi'] ) || is_network_admin() || ! CapabilityManager::current_user_can( CapabilityManager::VIEW_DASHBOARD ) || ! self::show_welcome() ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only: WordPress's own flag after a bulk activation.
+			return;
+		}
+
+		wp_safe_redirect( admin_url( 'admin.php?page=wrensafe' ) );
+		exit;
 	}
 
 	/**
@@ -186,6 +224,9 @@ class Onboarding {
 			</ol>
 
 			<div class="wpbp-onboarding-foot">
+				<?php if ( GuidedTours::available() ) : ?>
+					<button type="button" class="button button-small" data-wpbp-tours-open><?php esc_html_e( 'Take a guided tour', 'wrensafe' ); ?></button>
+				<?php endif; ?>
 				<button type="button" class="button button-small wpbp-button-ghost" data-wpbp-welcome-open><?php esc_html_e( 'Show the welcome tour', 'wrensafe' ); ?></button>
 				<button type="button" class="button button-small wpbp-button-ghost" id="wpbp-onboarding-dismiss"><?php esc_html_e( 'Hide this guide', 'wrensafe' ); ?></button>
 			</div>
@@ -211,6 +252,7 @@ class Onboarding {
 			data-back="<?php esc_attr_e( 'Back', 'wrensafe' ); ?>"
 			data-next="<?php esc_attr_e( 'Next', 'wrensafe' ); ?>"
 			data-finish="<?php esc_attr_e( 'Get started', 'wrensafe' ); ?>"
+			data-around="<?php echo esc_attr( GuidedTours::available() ? __( 'Show me around', 'wrensafe' ) : '' ); ?>"
 			data-finish-url="<?php echo esc_url( admin_url( 'admin.php?page=wrensafe#wpbp-onboarding' ) ); ?>"
 			<?php /* translators: 1: slide number, 2: number of slides */ ?>
 			data-counter="<?php esc_attr_e( 'Step %1$d of %2$d', 'wrensafe' ); ?>">
@@ -237,7 +279,7 @@ class Onboarding {
 
 	/**
 	 * After install, a one-time pointer on the Plugins screen until this user
-	 * opens Wrensafe (no redirect on activation).
+	 * opens Wrensafe (for whoever wasn't taken there after activating it).
 	 */
 	public function plugins_screen_notice(): void {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
@@ -279,7 +321,7 @@ class Onboarding {
 	}
 
 	/**
-	 * Save the tour and checklist state: welcome_seen, dismiss, restart.
+	 * Save the tour and checklist state: welcome_seen, dismiss, restart, tour_done.
 	 */
 	public function ajax(): void {
 		check_ajax_referer( 'wpbp_admin_ajax', '_wpbp_nonce' );
@@ -291,12 +333,25 @@ class Onboarding {
 		$state = self::state();
 		$do    = isset( $_POST['do'] ) ? sanitize_key( wp_unslash( $_POST['do'] ) ) : '';
 
+		if ( 'news_seen' === $do ) {
+			Changelog::mark_seen(); // "What's new" was shown: the header's Changelog dot goes too.
+			wp_send_json_success();
+		}
+
 		if ( 'welcome_seen' === $do ) {
 			$state['welcome_seen'] = true;
 		} elseif ( 'dismiss' === $do ) {
 			$state['dismissed'] = true;
 		} elseif ( 'restart' === $do ) {
 			$state['dismissed'] = false;
+		} elseif ( 'tour_done' === $do ) {
+			$tour = isset( $_POST['tour'] ) ? sanitize_key( wp_unslash( $_POST['tour'] ) ) : '';
+
+			if ( ! in_array( $tour, GuidedTours::ids(), true ) ) {
+				wp_send_json_error( array( 'message' => __( 'Unknown request.', 'wrensafe' ) ), 400 );
+			}
+
+			$state['tours'] = array_values( array_unique( array_merge( $state['tours'], array( $tour ) ) ) );
 		} else {
 			wp_send_json_error( array( 'message' => __( 'Unknown request.', 'wrensafe' ) ), 400 );
 		}

@@ -14,10 +14,10 @@ defined( 'ABSPATH' ) || exit;
 // Wrensafe's protected storage directory.
 // phpcs:disable WordPress.WP.AlternativeFunctions
 
-/** Zip archives through ZipArchive; the cursor is the entry index. */
+/** Zip archives (ZipArchive, or Wrensafe's own reader: see ZipView); the cursor is the entry index. */
 class ZipReader implements ContainerReader {
 
-	private ?\ZipArchive $zip = null;
+	private ?ZipView $zip = null;
 
 	private int $index = 0;
 
@@ -26,9 +26,9 @@ class ZipReader implements ContainerReader {
 	public function open( string $file, int $cursor ): void {
 		AbstractFormat::require_zip();
 
-		$zip = new \ZipArchive();
+		$zip = ZipView::open( $file );
 
-		if ( true !== $zip->open( $file ) ) {
+		if ( null === $zip ) {
 			throw new \RuntimeException( esc_html__( 'The .zip backup could not be opened (it may be incomplete or damaged).', 'wrensafe' ) );
 		}
 
@@ -37,33 +37,27 @@ class ZipReader implements ContainerReader {
 	}
 
 	public function next(): ?array {
-		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
-		if ( $this->index >= $this->zip->numFiles ) {
+		if ( $this->index >= $this->zip->count() ) {
 			return null;
 		}
 
-		$stat          = $this->zip->statIndex( $this->index );
+		$raw           = $this->zip->name( $this->index );
 		$this->current = $this->index;
 		++$this->index;
 
-		$name = str_replace( '\\', '/', (string) ( $stat['name'] ?? '' ) );
+		$name = str_replace( '\\', '/', $raw );
 
 		return array(
 			'path' => ltrim( $name, '/' ),
-			'size' => (int) ( $stat['size'] ?? 0 ),
+			'size' => (int) $this->zip->size( $raw ),
 			'dir'  => '/' === substr( $name, -1 ),
 		);
 	}
 
 	public function copy_to( $out ): void {
-		$stream = $this->zip->getStream( (string) $this->zip->getNameIndex( $this->current ) );
-
-		if ( false === $stream ) {
+		if ( ! $this->zip->copy_to( $this->zip->name( $this->current ), $out ) ) {
 			throw new \RuntimeException( esc_html__( 'A file inside the .zip backup could not be read.', 'wrensafe' ) );
 		}
-
-		stream_copy_to_stream( $stream, $out );
-		fclose( $stream );
 	}
 
 	public function skip(): void {

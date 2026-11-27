@@ -247,7 +247,7 @@ class BackupManager {
 				. ', WP ' . get_bloginfo( 'version' )
 				. ', memory_limit ' . (string) ini_get( 'memory_limit' )
 				. ', max_execution_time ' . (string) ini_get( 'max_execution_time' )
-				. ', archive backend ' . ( class_exists( '\ZipArchive' ) ? 'ZipArchive' : ( class_exists( '\PharData' ) ? 'PharData' : 'none' ) )
+				. ', archive backend ' . ( class_exists( '\ZipArchive' ) ? 'ZipArchive' : ( ZipStreamWriter::available() ? 'built-in ZIP (no zip extension)' : ( class_exists( '\PharData' ) ? 'PharData' : 'none' ) ) )
 				. ( false !== $disk_free ? ', disk free ' . size_format( (int) $disk_free ) : ', disk free unknown' ) . '.',
 			array(),
 			$job->id()

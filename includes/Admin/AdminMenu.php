@@ -8,7 +8,9 @@
 namespace WPBP\Admin;
 
 use WPBP\Admin\Pages\BackupBrowserPage;
+use WPBP\Admin\Pages\AbstractPage;
 use WPBP\Admin\Pages\BackupPage;
+use WPBP\Admin\Pages\ChangelogPage;
 use WPBP\Admin\Pages\DashboardPage;
 use WPBP\Admin\Pages\DirectMigrationPage;
 use WPBP\Admin\Pages\ImportRestorePage;
@@ -66,6 +68,7 @@ class AdminMenu {
 			. $item . ' .wp-submenu a:has(> .wpbp-menu-badge){white-space:nowrap}'
 			. $item . ' .wpbp-menu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;margin-inline-start:6px;border-radius:999px;background:#2457f5;color:#fff;font-size:11px;font-weight:600;line-height:18px;vertical-align:middle;box-sizing:border-box}'
 			. $item . ' .wpbp-menu-badge.is-alert{background:#d63638}'
+			. $item . ' .wp-submenu a[href$="page=' . ChangelogPage::SLUG . '"]{display:none}'
 		);
 	}
 
@@ -110,6 +113,11 @@ class AdminMenu {
 			'wrensafe-system-info'         => array( __( 'System Info', 'wrensafe' ), SystemInfoPage::class, CapabilityManager::VIEW_DASHBOARD ),
 		);
 
+		// Opened from the link in the header, so it isn't listed in the menu (see enqueue_badge_styles()). Not with White Label.
+		if ( AbstractPage::brand()['credit'] ) {
+			$pages[ ChangelogPage::SLUG ] = array( __( 'Changelog', 'wrensafe' ), ChangelogPage::class, CapabilityManager::VIEW_DASHBOARD );
+		}
+
 		/**
 		 * Filters the Wrensafe admin pages: slug => array( menu label,
 		 * page class extending AbstractPage, capability ). Pages added by an
@@ -127,6 +135,13 @@ class AdminMenu {
 		$position = false === $position ? count( $pages ) : $position;
 
 		return array_slice( $pages, 0, $position, true ) + $extra + array_slice( $pages, $position, null, true );
+	}
+
+	/** The capability a Wrensafe page needs ('' for a page that doesn't exist). */
+	public static function capability_of( string $slug ): string {
+		$pages = ( new self() )->pages();
+
+		return (string) ( $pages[ $slug ][2] ?? '' );
 	}
 
 	public function register_menu(): void {
@@ -187,6 +202,9 @@ class AdminMenu {
 					esc_attr( $mark['label'] ),
 					esc_html( $mark['text'] )
 				);
+			} elseif ( current_user_can( $capability ) && NewFeatures::for_page( $slug ) ) {
+				// Something this release added, until the user has opened it.
+				$menu_title .= ' <span class="wpbp-menu-badge is-new">' . esc_html__( 'New', 'wrensafe' ) . '</span>';
 			}
 
 			add_submenu_page(

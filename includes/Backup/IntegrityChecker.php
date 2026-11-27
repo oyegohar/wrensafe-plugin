@@ -295,19 +295,29 @@ class IntegrityChecker {
 					'schema_file' => 'schema_checksum',
 					'data_file'   => 'data_checksum',
 				) as $file_key => $checksum_key ) {
-					if ( empty( $entry[ $file_key ] ) ) {
+					// The schema file was checked before a large data file paused.
+					if ( empty( $entry[ $file_key ] ) || ( 'schema_file' === $file_key && ! empty( $cursor['db_schema_done'] ) ) ) {
 						continue;
 					}
 
-					$check = $this->verify_entry( $reader, 'database/' . $entry[ $file_key ], (string) ( $entry[ $checksum_key ] ?? '' ) );
+					$check = $this->verify_entry_step( $reader, 'database/' . $entry[ $file_key ], (string) ( $entry[ $checksum_key ] ?? '' ), $cursor, $deadline );
+
+					if ( false === $check ) {
+						return null;
+					}
 
 					if ( null !== $check ) {
 						return $invalid( $check );
 					}
 
 					++$cursor['checked_db'];
+
+					if ( 'schema_file' === $file_key ) {
+						$cursor['db_schema_done'] = true;
+					}
 				}
 
+				unset( $cursor['db_schema_done'] );
 				++$cursor['db_index'];
 
 				if ( $cursor['db_index'] < $total && $out_of_time() ) {
@@ -330,7 +340,11 @@ class IntegrityChecker {
 
 		while ( $cursor['file_index'] < $total ) {
 			$entry_name = (string) $names[ $cursor['file_index'] ];
-			$check      = $this->verify_entry( $reader, $entry_name, (string) $files_map[ $entry_name ] );
+			$check      = $this->verify_entry_step( $reader, $entry_name, (string) $files_map[ $entry_name ], $cursor, $deadline );
+
+			if ( false === $check ) {
+				return null;
+			}
 
 			if ( null !== $check ) {
 				return $invalid( $check );
@@ -354,13 +368,34 @@ class IntegrityChecker {
 	}
 
 	/**
-	 * Checksum one archive entry and compare it to the expected value.
-	 * Returns null when the entry is fine, or a human-readable error
-	 * message naming the failing entry when it isn't.
+	 * verify_entry() in steps (ArchiveReader::checksum_entry_step()): null
+	 * when the entry is fine, a message when it isn't, or false when the
+	 * deadline came first; the progress is then kept in $cursor['entry'].
+	 *
+	 * @param array<string,mixed> $cursor
+	 * @return string|false|null
 	 */
-	private function verify_entry( ArchiveReader $reader, string $entry_name, string $expected_checksum ): ?string {
-		$actual = $reader->checksum_entry( $entry_name, $expected_checksum );
+	private function verify_entry_step( ArchiveReader $reader, string $entry_name, string $expected_checksum, array &$cursor, ?float $deadline ) {
+		$saved = (array) ( $cursor['entry'] ?? array() );
+		$state = ( $saved['name'] ?? '' ) === $entry_name ? (array) ( $saved['state'] ?? array() ) : array();
+		$step  = $reader->checksum_entry_step( $entry_name, $expected_checksum, $state, $deadline );
 
+		if ( ! $step['done'] ) {
+			$cursor['entry'] = array(
+				'name'  => $entry_name,
+				'state' => $step['state'],
+			);
+
+			return false;
+		}
+
+		unset( $cursor['entry'] );
+
+		return self::compare_checksum( $entry_name, $expected_checksum, $step['checksum'] );
+	}
+
+	/** Null when $actual matches, or a message naming the entry. */
+	private static function compare_checksum( string $entry_name, string $expected_checksum, ?string $actual ): ?string {
 		if ( null === $actual ) {
 			return sprintf(
 				/* translators: %s: archive entry path */

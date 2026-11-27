@@ -47,6 +47,7 @@ class SettingsPage extends AbstractPage {
 			'security'    => CapabilityManager::MANAGE_SECURITY,
 			'team-access' => CapabilityManager::MANAGE_TEAM_ACCESS,
 			'remote'      => CapabilityManager::MANAGE_CLOUD,
+			'ai'          => CapabilityManager::MANAGE_SECURITY,
 		);
 
 		return $map[ $tab ] ?? CapabilityManager::MANAGE_SETTINGS;
@@ -65,6 +66,7 @@ class SettingsPage extends AbstractPage {
 			'woocommerce'      => __( 'WooCommerce Safe Mode', 'wrensafe' ),
 			'notifications'    => __( 'Notifications', 'wrensafe' ),
 			'security'         => __( 'Security', 'wrensafe' ),
+			'ai'               => __( 'AI assistants', 'wrensafe' ),
 			'support-us'       => __( 'Support Us', 'wrensafe' ),
 			'tools'            => __( 'Import / Export', 'wrensafe' ),
 			'advanced'         => __( 'Advanced', 'wrensafe' ),
@@ -127,7 +129,7 @@ class SettingsPage extends AbstractPage {
 			__( 'Backups', 'wrensafe' )           => array( 'general', 'backup', 'updates', 'remote', 'cloud' ),
 			__( 'Migration', 'wrensafe' )         => array( 'direct-migration', 'woocommerce' ),
 			__( 'Reporting', 'wrensafe' )         => array( 'notifications', 'reports' ),
-			__( 'Access & security', 'wrensafe' ) => array( 'security', 'team-access' ),
+			__( 'Access & security', 'wrensafe' ) => array( 'security', 'team-access', 'ai' ),
 			__( 'More', 'wrensafe' )              => array( 'support-us', 'tools', 'advanced' ),
 		);
 
@@ -157,7 +159,7 @@ class SettingsPage extends AbstractPage {
 								continue;
 							}
 							?>
-							<a class="wpbp-settings-nav-link" href="<?php echo esc_url( self::page_url( self::MENU_SLUG, array( 'tab' => $slug ) ) ); ?>"<?php echo $slug === $current_tab ? ' aria-current="page"' : ''; ?>><?php echo esc_html( $tabs[ $slug ] ); ?></a>
+							<a class="wpbp-settings-nav-link" href="<?php echo esc_url( self::page_url( self::MENU_SLUG, array( 'tab' => $slug ) ) ); ?>"<?php echo $slug === $current_tab ? ' aria-current="page"' : ''; ?>><?php echo esc_html( $tabs[ $slug ] ); ?><?php echo 'ai' === $slug ? wp_kses( \WPBP\Admin\NewFeatures::badge( 'ai' ), \WPBP\Admin\Kses::allowed() ) : ''; ?></a>
 						<?php endforeach; ?>
 					</div>
 				<?php endforeach; ?>
@@ -297,6 +299,11 @@ class SettingsPage extends AbstractPage {
 				<?php
 			}
 		);
+	}
+
+	/** AI assistants over MCP (WPBP\Mcp\Abilities): the switches, what is needed, and how to connect each assistant. */
+	private function render_tab_ai(): void {
+		\WPBP\Admin\McpSettings::render();
 	}
 
 	private function render_restore_lock_card(): void {
@@ -472,6 +479,7 @@ class SettingsPage extends AbstractPage {
 
 	private function render_tab_support_us(): void {
 		SupportUs::render_card();
+		SupportUs::render_tip();
 		SupportUs::render_video();
 
 		// The Roadmap box only once there is a roadmap page to link to.

@@ -659,6 +659,11 @@ final class LinkCheck {
 				$s['read']  = (int) ( $s['read'] ?? 0 ) + 1;
 				$s['now']   = $where;
 
+				// WordPress's caches (transients) aren't the site's content and are rebuilt on their own.
+				if ( 'option' === $src['kind'] && 1 === preg_match( '/^_(?:site_)?transient_/', (string) $row['option_name'] ) ) {
+					continue;
+				}
+
 				foreach ( $src['columns'] as $column ) {
 					self::inspect( $s, (string) $row[ $column ], $where, 'guid' === $column );
 				}
@@ -846,7 +851,7 @@ final class LinkCheck {
 		}
 
 		// 4. Media files that aren't here (attachment GUIDs are checked through the Media Library).
-		$stale = 'revision' === ( $where['type'] ?? '' ) || ( 'option' === $where['kind'] && 1 === preg_match( '/^_(?:site_)?transient_/', (string) $where['label'] ) );
+		$stale = 'revision' === ( $where['type'] ?? '' );
 
 		if ( ! $guid && ! $stale ) {
 			self::media_in( $s, $plain, $where );

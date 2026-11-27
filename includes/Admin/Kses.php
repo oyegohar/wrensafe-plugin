@@ -25,9 +25,10 @@ final class Kses {
 		if ( null === $tags ) {
 			$tags = Icons::allowed_svg();
 
-			$tags['g']            = array( 'transform' => true );
-			$tags['path']['fill'] = true;
-			$tags['span']         = array(
+			$tags['g']              = array( 'transform' => true );
+			$tags['path']['fill']   = true;
+			$tags['path']['stroke'] = true;
+			$tags['span']           = array(
 				'class'          => true,
 				'title'          => true,
 				'data-utc'       => true,

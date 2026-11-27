@@ -140,6 +140,22 @@
 			return $.post( wpbpAdmin.ajaxUrl, { action: 'wpbp_onboarding', _wpbp_nonce: wpbpAdmin.nonce, do: what } );
 		}
 
+		// The next page decides whether the tour opens, so it loads after the save
+		// has landed (or after 3 seconds, so a stuck request can't trap anyone here).
+		function goAfterSave( request, url ) {
+			var gone = false;
+
+			function go() {
+				if ( ! gone ) {
+					gone = true;
+					window.location.href = url;
+				}
+			}
+
+			$.when( request ).always( go );
+			window.setTimeout( go, 3000 );
+		}
+
 		function openTour() {
 			if ( ! template ) {
 				return;
@@ -151,15 +167,17 @@
 			var $slides = $tour.find( '.wpbp-welcome-slide' );
 			var $dots = $tour.find( '.wpbp-welcome-dots span' );
 			var index = 0;
+			var saving = null;
 
 			modal.$modal.addClass( 'wpbp-welcome-modal' );
 			modal.$body.append( $tour );
 
 			var $counter = $( '<span class="wpbp-welcome-counter"></span>' );
 			var $skip = $( '<button type="button" class="button wpbp-button-ghost wpbp-welcome-skip"></button>' ).text( data.skip );
+			var $around = $( '<button type="button" class="button wpbp-button-ghost wpbp-welcome-around" hidden></button>' ).text( data.around || '' );
 			var $back = $( '<button type="button" class="button"></button>' ).text( data.back );
 			var $next = $( '<button type="button" class="button button-primary"></button>' );
-			modal.$footer.append( $skip, $counter, $back, $next );
+			modal.$footer.append( $skip, $around, $counter, $back, $next );
 
 			function show( i ) {
 				index = i;
@@ -169,6 +187,9 @@
 				$counter.text( wpbpFormat( data.counter, i + 1, $slides.length ) );
 				$back.prop( 'hidden', 0 === i );
 				$next.text( i === $slides.length - 1 ? data.finish : data.next );
+				// "Show me around" starts the full guided tour from any slide; the last slide has no "Skip tour".
+				$skip.prop( 'hidden', i === $slides.length - 1 );
+				$around.prop( 'hidden', ! data.around );
 			}
 
 			$back.on( 'click', function () {
@@ -184,17 +205,21 @@
 				if ( $( '#wpbp-onboarding' ).length ) {
 					document.getElementById( 'wpbp-onboarding' ).scrollIntoView( { behavior: 'smooth', block: 'start' } );
 				} else {
-					window.location.href = data.finishUrl;
+					goAfterSave( saving, data.finishUrl );
 				}
 			} );
 
 			$skip.on( 'click', modal.close );
+			$around.on( 'click', function () {
+				modal.close();
+				$( document ).trigger( 'wpbp:tour-start', [ 'everything' ] );
+			} );
 
 			// However it closes (Skip, ×, Esc, Get started), it isn't shown again.
 			modal.onClose( function () {
 				if ( wpbpAdmin.showWelcome ) {
 					wpbpAdmin.showWelcome = false;
-					saveState( 'welcome_seen' );
+					saving = saveState( 'welcome_seen' );
 				}
 			} );
 
@@ -225,7 +250,8 @@
 			} );
 		} );
 
-		if ( wpbpAdmin.showWelcome && template ) {
+		// A guided tour arriving on this page has already passed the welcome.
+		if ( wpbpAdmin.showWelcome && template && ! /[?&]wpbp_tour=/.test( window.location.search ) ) {
 			openTour();
 		}
 	}
@@ -2572,6 +2598,9 @@
 			var $input = $( '#wpbp-foreign-input' );
 			var $list = $( '#wpbp-foreign-files' );
 			var $result = $( '#wpbp-foreign-result' );
+			var $found = $( '#wpbp-found-box' );
+			var $foundList = $( '#wpbp-found-list' );
+			var $callout = $( '#wpbp-found-callout' );
 			var state = { setId: null, items: [], busy: false, converting: false, jobId: null };
 
 			function post( action, data, timeout ) {
@@ -2702,7 +2731,7 @@
 					queued: i18n.foreignQueued,
 					uploading: i18n.uploading,
 					retrying: text,
-					done: i18n.foreignUploaded,
+					done: item.found ? i18n.foreignOnServer : i18n.foreignUploaded,
 					error: text || i18n.uploadFailed
 				};
 				var pct = 'done' === item.status ? 100 : Math.floor( ( item.offset / Math.max( 1, item.size ) ) * 100 );
@@ -2910,7 +2939,7 @@
 				return $( '<div class="wpbp-foreign-found"></div>' ).addClass( 'is-' + kind )
 					.append( $( '<span class="wpbp-foreign-found-icon" aria-hidden="true"></span>' ).html( wpbpIcon( icon ) ) )
 					.append(
-						$( '<span class="wpbp-foreign-found-text"></span>' )
+						$( '<span class="wpbp-found-text"></span>' )
 							.append( $( '<span class="wpbp-foreign-kicker"></span>' ).text( kicker ) )
 							.append( $( '<strong></strong>' ).text( title ) )
 							.append( line ? $( '<span class="wpbp-foreign-found-line"></span>' ).text( line ) : null )
@@ -3115,6 +3144,99 @@
 			function show() {
 				$importSourceGrid.find( '[data-value="plugins"]' ).trigger( 'click' );
 			}
+
+			// -- Backups other plugins left on this server ---------------------------
+
+			function loadFound() {
+				post( 'wpbp_foreign_found', {}, 90000 ).done( function ( response ) {
+					renderFound( response && response.success ? response.data.sets || [] : [] );
+				} );
+			}
+
+			function renderFound( sets ) {
+				var names = [];
+
+				$foundList.empty();
+				$found.prop( 'hidden', ! sets.length );
+				$callout.prop( 'hidden', ! sets.length );
+				$importSourceGrid.find( '.wpbp-found-count' ).remove();
+
+				if ( ! sets.length ) {
+					return;
+				}
+
+				sets.forEach( function ( set ) {
+					if ( -1 === names.indexOf( set.name ) ) {
+						names.push( set.name );
+					}
+
+					var $logo = set.monogram
+						? $( '<span class="wpbp-foreign-logo" aria-hidden="true"></span>' ).toggleClass( 'is-long', set.monogram.length > 2 ).text( set.monogram )
+						: $( '<span class="wpbp-foreign-logo is-generic" aria-hidden="true"></span>' ).html( wpbpIcon( 'file' ) );
+					var files = 1 === set.files ? i18n.foundFile : wpbpFormat( i18n.foundFiles, wpbpNumber( set.files ) );
+					var $use = $( '<button type="button" class="button"></button>' ).text( i18n.foundUse );
+
+					$use.attr( 'aria-label', set.name + ', ' + set.date + ': ' + i18n.foundUse );
+					$use.on( 'click', function () {
+						useFound( set, $use );
+					} );
+
+					$( '<li class="wpbp-found-item"></li>' )
+						.append( $logo )
+						.append(
+							$( '<span class="wpbp-found-text"></span>' )
+								.append( $( '<strong></strong>' ).text( set.name ) )
+								.append( $( '<span class="wpbp-found-meta"></span>' ).text( [ set.date, formatBytes( set.size ), files ].join( ' · ' ) ) )
+								.append( $( '<code class="wpbp-found-folder"></code>' ).text( set.folder ) )
+						)
+						.append( $use )
+						.appendTo( $foundList );
+				} );
+
+				$callout.find( '.wpbp-found-callout-text' ).text(
+					1 === sets.length ? wpbpFormat( i18n.foundOne, sets[ 0 ].name ) : wpbpFormat( i18n.foundMany, wpbpNumber( sets.length ), names.join( ', ' ) )
+				);
+				$importSourceGrid.find( '[data-value="plugins"]' ).append(
+					$( '<span class="wpbp-found-count"></span>' ).text( wpbpFormat( i18n.foundBadge, wpbpNumber( sets.length ) ) )
+				);
+			}
+
+			function useFound( set, $use ) {
+				if ( state.busy || state.converting ) {
+					return;
+				}
+
+				$foundList.find( 'button' ).prop( 'disabled', true );
+
+				post( 'wpbp_foreign_found_use', { found_id: set.id } ).done( function ( response ) {
+					$foundList.find( 'button' ).prop( 'disabled', false );
+
+					if ( ! response || ! response.success ) {
+						wpbpToast( errorOf( response ) || i18n.foreignNotUsable, 'error' );
+						return loadFound();
+					}
+
+					startOver();
+					state.setId = response.data.set_id;
+					response.data.files.forEach( function ( file ) {
+						addItem( { file: null, name: file.name, size: parseInt( file.size, 10 ) || 0, status: 'done', stored: file.name, found: true } );
+					} );
+					pump();
+					$list[ 0 ].scrollIntoView( { behavior: 'smooth', block: 'center' } );
+				} ).fail( function ( xhr ) {
+					$foundList.find( 'button' ).prop( 'disabled', false );
+					wpbpToast( wpbpXhrMessage( xhr ) || errorOf( null, xhr ), 'error' );
+					$use.trigger( 'focus' );
+				} );
+			}
+
+			$( '#wpbp-found-show' ).on( 'click', function () {
+				show();
+				$found[ 0 ].scrollIntoView( { behavior: 'smooth', block: 'start' } );
+				$foundList.find( 'button' ).first().trigger( 'focus', { preventScroll: true } );
+			} );
+
+			loadFound();
 
 			return {
 				accepts: function ( name ) {

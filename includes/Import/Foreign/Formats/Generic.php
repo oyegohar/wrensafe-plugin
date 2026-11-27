@@ -10,6 +10,7 @@
 namespace WPBP\Import\Foreign\Formats;
 
 use WPBP\Import\Foreign\AbstractFormat;
+use WPBP\Import\Foreign\ZipView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -88,18 +89,17 @@ class Generic extends AbstractFormat {
 	private function zip_has_site_content( string $path ): bool {
 		self::require_zip();
 
-		$zip = new \ZipArchive();
+		$zip = ZipView::open( $path );
 
-		if ( true !== $zip->open( $path ) ) {
+		if ( null === $zip ) {
 			throw new \RuntimeException( esc_html__( 'The .zip file could not be opened. It may be damaged or incomplete.', 'wrensafe' ) );
 		}
 
 		$found = false;
-
-		$count = (int) $zip->numFiles; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
+		$count = $zip->count();
 
 		for ( $i = 0; $i < $count && ! $found; $i++ ) {
-			$found = 'skip' !== $this->auto_target( (string) $zip->getNameIndex( $i ) )[0];
+			$found = 'skip' !== $this->auto_target( $zip->name( $i ) )[0];
 		}
 
 		$zip->close();

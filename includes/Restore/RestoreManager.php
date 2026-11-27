@@ -126,6 +126,83 @@ class RestoreManager {
 		return microtime( true ) + ( ( $max > 0 && $max < 20 ) ? max( 4, $max - 6 ) : 10 );
 	}
 
+	/**
+	 * Unpack a table's schema and data files from the archive for import,
+	 * in steps: a large dump (a 2 GB log table) continues in the next
+	 * request instead of having to fit in this one. Returns null when both
+	 * files are ready, or [bytes unpacked, bytes in all] while the data file
+	 * is still being unpacked (the progress is kept in $payload['db_extract']).
+	 *
+	 * @param array<string,mixed> $entry   The table, from filter_db_tables().
+	 * @param array<string,mixed> $payload The job payload.
+	 * @return array{0:int,1:int}|null
+	 */
+	public static function unpack_table_files( ArchiveReader $reader, array $entry, string $schema_path, string $data_path, array &$payload, float $deadline ): ?array {
+		$state = (array) ( $payload['db_extract'] ?? array() );
+		$part  = 'data' === ( $state['part'] ?? '' ) ? 'data' : 'schema';
+
+		while ( true ) {
+			$entry_name = 'database/' . $entry[ $part . '_file' ];
+			$path       = 'schema' === $part ? $schema_path : $data_path;
+			$result     = $reader->extract_step( $entry_name, $path, $state, $deadline );
+
+			if ( $result['failed'] ) {
+				if ( null !== $reader->entry_size( $entry_name ) ) {
+					throw new \RuntimeException(
+						esc_html(
+							sprintf(
+								/* translators: %s: database table name */
+								__( 'The backup’s data for table %s couldn’t be unpacked: the backup file may be damaged. The live database wasn’t changed.', 'wrensafe' ),
+								(string) $entry['dest_table']
+							)
+						)
+					);
+				}
+
+				// Not in the archive at all (as before: nothing to import).
+				file_put_contents( $path, '' );
+				$result['done'] = true;
+			}
+
+			if ( ! $result['done'] ) {
+				$payload['db_extract'] = array(
+					'part'     => $part,
+					'position' => $result['position'],
+					'crc'      => $result['crc'],
+				);
+
+				return array( (int) $result['position'], (int) $reader->entry_size( $entry_name ) );
+			}
+
+			if ( 'data' === $part ) {
+				unset( $payload['db_extract'] );
+				return null;
+			}
+
+			$part  = 'data';
+			$state = array();
+		}
+	}
+
+	/**
+	 * Progress through the database stage (50–68 %), weighted by each
+	 * table's rows so a single huge table moves the bar as well.
+	 *
+	 * @param array<int,array<string,mixed>> $tables
+	 * @param float                          $within How much of the current table is done (0–1).
+	 */
+	public static function db_progress( array $tables, int $index, float $within ): int {
+		$weights = array_map(
+			static function ( $table ): int {
+				return 1 + (int) ( $table['rows'] ?? 0 );
+			},
+			array_values( $tables )
+		);
+		$done    = array_sum( array_slice( $weights, 0, $index ) ) + ( $weights[ $index ] ?? 0 ) * $within;
+
+		return 50 + (int) floor( 18 * $done / max( 1, array_sum( $weights ) ) );
+	}
+
 	public function tmp_dir_for_job( int $job_id ): string {
 		return FileSystem::job_tmp_dir( $job_id );
 	}
@@ -1087,9 +1164,24 @@ class RestoreManager {
 		$data_path   = $tmp_dir . 'db-restore-data.sql';
 
 		if ( 'extract' === $payload['db_stage'] ) {
-			$reader = new ArchiveReader( $payload['archive_path'] );
-			$reader->extract_to( 'database/' . $entry['schema_file'], $schema_path );
-			$reader->extract_to( 'database/' . $entry['data_file'], $data_path );
+			$reader   = new ArchiveReader( $payload['archive_path'] );
+			$unpacked = self::unpack_table_files( $reader, $entry, $schema_path, $data_path, $payload, self::step_deadline() );
+
+			if ( null !== $unpacked ) {
+				// A large dump is unpacked across requests: report how far it is.
+				$job->set_payload( $payload );
+				$job->update_progress(
+					self::db_progress( $tables, $index, 0.0 ),
+					sprintf(
+						/* translators: 1: database table name, 2: size unpacked so far, 3: size of the table's data */
+						__( 'Unpacking table %1$s… %2$s of %3$s', 'wrensafe' ),
+						$entry['dest_table'],
+						size_format( $unpacked[0] ),
+						size_format( $unpacked[1] )
+					)
+				);
+				return;
+			}
 
 			// A staging table an interrupted restore left behind (a dump from
 			// another plugin has no DROP TABLE before its CREATE TABLE).
@@ -1135,12 +1227,21 @@ class RestoreManager {
 			);
 		}
 
-		$progress = 50 + (int) ( ( $index / max( 1, count( $tables ) ) ) * 18 );
+		$data_size = 'data' === $payload['db_stage'] ? (int) filesize( $data_path ) : 0;
+		$within    = $data_size > 0 ? min( 1.0, $offset / $data_size ) : 0.0;
+		$progress  = self::db_progress( $tables, $index, $within );
 
 		if ( ! $result['done'] ) {
 			$payload['db_offset'] = $result['offset'];
 			$job->set_payload( $payload );
-			$job->update_progress( min( 68, $progress ), sprintf( /* translators: %s: database table name */ __( 'Restoring table %s…', 'wrensafe' ), $entry['dest_table'] ) );
+			$job->update_progress(
+				min( 68, $progress ),
+				$data_size > 8388608
+					/* translators: 1: database table name, 2: percentage of the table restored */
+					? sprintf( __( 'Restoring table %1$s… %2$d%%', 'wrensafe' ), $entry['dest_table'], (int) floor( $within * 100 ) )
+					/* translators: %s: database table name */
+					: sprintf( __( 'Restoring table %s…', 'wrensafe' ), $entry['dest_table'] )
+			);
 			return;
 		}
 
@@ -1228,6 +1329,7 @@ class RestoreManager {
 				'tmp_table'    => $this->temp_table_name( $dest_table ),
 				'schema_file'  => (string) $entry['schema_file'],
 				'data_file'    => (string) $entry['data_file'],
+				'rows'         => (int) ( $entry['rows'] ?? 0 ),
 			);
 		}
 

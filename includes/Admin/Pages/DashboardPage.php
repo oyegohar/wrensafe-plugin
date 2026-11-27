@@ -14,7 +14,7 @@ use WPBP\Core\Settings;
 use WPBP\Security\CapabilityManager;
 use WPBP\Utils\Time;
 use WPBP\Core\Database\SchedulesRepository;
-use WPBP\Migration\HealthCheck;
+use WPBP\Migration\MigrationAssistant;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -203,9 +203,10 @@ class DashboardPage extends AbstractPage {
 		$recent      = BackupsRepository::list_all( 5 );
 		$latest_any  = $recent[0] ?? null;
 		$enabled     = SchedulesRepository::count_enabled();
-		$health      = ( new HealthCheck() )->run();
-		$warnings    = count( array_filter( $health['checks'], static fn( $c ) => 'pass' !== $c['status'] ) );
-		$points      = count( RestorePointsRepository::list_all( 200 ) );
+		// The Migration Assistant's score and warnings: the same numbers there and on System Info.
+		$readiness = MigrationAssistant::readiness();
+		$warnings  = count( $readiness['warnings'] );
+		$points    = count( RestorePointsRepository::list_all( 200 ) );
 
 		$next_schedule = null;
 		foreach ( SchedulesRepository::list_all() as $schedule ) {
@@ -286,13 +287,13 @@ class DashboardPage extends AbstractPage {
 			</div>
 			<div class="wpbp-stat">
 				<p class="wpbp-stat-label"><span class="dashicons dashicons-search" aria-hidden="true"></span><?php esc_html_e( 'Migration readiness', 'wrensafe' ); ?></p>
-				<p class="wpbp-stat-value"><?php echo esc_html( (string) (int) $health['score'] ); ?><small>/100</small></p>
+				<p class="wpbp-stat-value"><?php echo esc_html( (string) (int) $readiness['score'] ); ?><small>/100</small></p>
 				<?php if ( 0 === $warnings ) : ?>
 					<p class="wpbp-stat-meta is-success"><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span><?php esc_html_e( 'All checks passed', 'wrensafe' ); ?></p>
 				<?php else : ?>
 					<p class="wpbp-stat-meta is-warning"><span class="dashicons dashicons-warning" aria-hidden="true"></span><?php /* translators: %d: number of warnings */ echo esc_html( sprintf( _n( '%d warning', '%d warnings', $warnings, 'wrensafe' ), $warnings ) ); ?></p>
 				<?php endif; ?>
-				<a class="wpbp-stat-link" href="<?php echo esc_url( self::page_url( 'wrensafe-system-info' ) ); ?>"><?php esc_html_e( 'View checks', 'wrensafe' ); ?></a>
+				<a class="wpbp-stat-link" href="<?php echo esc_url( self::page_url( CapabilityManager::current_user_can( CapabilityManager::RESTORE_BACKUPS ) ? 'wrensafe-migration-assistant' : 'wrensafe-system-info' ) ); ?>"><?php esc_html_e( 'View checks', 'wrensafe' ); ?></a>
 			</div>
 			<div class="wpbp-stat">
 				<p class="wpbp-stat-label"><span class="dashicons dashicons-undo" aria-hidden="true"></span><?php esc_html_e( 'Rollback points', 'wrensafe' ); ?></p>

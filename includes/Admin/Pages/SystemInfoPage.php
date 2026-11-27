@@ -9,6 +9,7 @@
 namespace WPBP\Admin\Pages;
 
 use WPBP\Migration\HealthCheck;
+use WPBP\Migration\MigrationAssistant;
 use WPBP\Security\MalwareScanner;
 
 defined( 'ABSPATH' ) || exit;
@@ -27,7 +28,8 @@ class SystemInfoPage extends AbstractPage {
 		global $wp_version, $wpdb;
 
 		$result      = ( new HealthCheck() )->run();
-		$score       = $result['score'];
+		$readiness   = MigrationAssistant::readiness(); // The same score as the Dashboard and the Migration Assistant.
+		$score       = $readiness['score'];
 		$score_class = $score >= 80 ? 'completed' : ( $score >= 50 ? 'verifying' : 'failed' );
 		?>
 		<div class="wpbp-card">
@@ -36,6 +38,20 @@ class SystemInfoPage extends AbstractPage {
 				<span class="wpbp-backup-status wpbp-backup-status-<?php echo esc_attr( $score_class ); ?>" style="font-size:18px;">
 					<?php echo esc_html( $score ); ?>/100
 				</span>
+			</p>
+			<p class="description">
+				<?php
+				// The Migration Assistant needs the restore capability; a view-only user gets the sentence without the link.
+				if ( \WPBP\Security\CapabilityManager::current_user_can( \WPBP\Security\CapabilityManager::RESTORE_BACKUPS ) ) {
+					printf(
+						/* translators: %s: link to the Migration Assistant */
+						esc_html__( 'From the Migration Assistant’s scan, which lists what affects moving this site: %s. Below are this server’s details for Wrensafe.', 'wrensafe' ),
+						'<a href="' . esc_url( self::page_url( 'wrensafe-migration-assistant' ) ) . '">' . esc_html__( 'Migration Assistant', 'wrensafe' ) . '</a>'
+					);
+				} else {
+					esc_html_e( 'From the Migration Assistant’s scan of this site. Below are this server’s details for Wrensafe.', 'wrensafe' );
+				}
+				?>
 			</p>
 			<table class="widefat striped">
 				<thead>

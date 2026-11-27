@@ -66,6 +66,11 @@ class ServerInfo {
 		return class_exists( 'ZipArchive' );
 	}
 
+	/** Whether Wrensafe can write and read ZIP backups here (ZipArchive or its built-in engine). */
+	public static function can_zip(): bool {
+		return self::has_zip_archive() || \WPBP\Backup\ZipStreamWriter::available();
+	}
+
 	public static function has_openssl(): bool {
 		return extension_loaded( 'openssl' );
 	}
@@ -100,7 +105,7 @@ class ServerInfo {
 			'post_max_size'      => self::post_max_size(),
 			'disk_free'          => size_format( self::disk_free_bytes() ),
 			'disk_total'         => size_format( self::disk_total_bytes() ),
-			'zip_archive'        => self::has_zip_archive() ? 'Available' : 'Not available',
+			'zip_archive'        => self::has_zip_archive() ? 'Available' : ( self::can_zip() ? 'Not available (Wrensafe uses its built-in ZIP engine)' : 'Not available' ),
 			'openssl'            => self::has_openssl() ? 'Available' : 'Not available',
 			'curl'               => self::has_curl() ? 'Available' : 'Not available',
 			'phar_data'          => self::has_phar() ? 'Available' : 'Not available',

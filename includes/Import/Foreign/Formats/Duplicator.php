@@ -12,6 +12,7 @@ namespace WPBP\Import\Foreign\Formats;
 
 use WPBP\Import\Foreign\AbstractFormat;
 use WPBP\Import\Foreign\DafReader;
+use WPBP\Import\Foreign\ZipView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -119,18 +120,19 @@ class Duplicator extends AbstractFormat {
 	private function zip_meta( string $path ): array {
 		self::require_zip();
 
-		$zip = new \ZipArchive();
+		$zip = ZipView::open( $path );
 
-		if ( true !== $zip->open( $path ) ) {
+		if ( null === $zip ) {
 			throw new \RuntimeException( esc_html__( 'The Duplicator .zip archive could not be opened.', 'wrensafe' ) );
 		}
 
-		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
-		for ( $i = 0; $i < $zip->numFiles; $i++ ) {
-			$name = (string) $zip->getNameIndex( $i );
+		$count = $zip->count();
+
+		for ( $i = 0; $i < $count; $i++ ) {
+			$name = $zip->name( $i );
 
 			if ( preg_match( '#^dup-installer/(?:dup_descriptors_[^/]+/archive\.txt|dup-archive__[^/]+\.txt)$#', $name ) ) {
-				$meta = self::descriptor_meta( (string) $zip->getFromIndex( $i ) );
+				$meta = self::descriptor_meta( (string) $zip->read( $name ) );
 				$zip->close();
 				return $meta;
 			}

@@ -1,10 +1,11 @@
 === Wrensafe – Backup, Restore & Migration ===
 Contributors: oyegohar
+Donate link: https://buy.stripe.com/4gMaEXfvddbfdVV2j65os00
 Tags: backup, restore, migration, staging, clone
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.8
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -71,7 +72,8 @@ https://www.youtube.com/watch?v=uYh1AkgG6Kk
 ### Stay informed
 
 * **Dashboard:** protection status, recent backups, schedules and migration readiness at a glance.
-* **Activity Logs** that record every step with the exact reason when something fails (passwords and keys are never logged), plus a one-click debug bundle for support.
+* **AI assistants (MCP)**: let Claude, Cursor, Codex, Gemini CLI and others check your backups, make and test them, or ask you for a restore (WordPress 6.9+, with the MCP Adapter plugin). Off by default; you approve every restore yourself, and deleting backups is never available.
+* **Activity Logs** as a timeline: each backup, restore, update run or move with how it went and the exact reason when something fails, every step one click away (passwords and keys are never logged), plus a one-click debug bundle for support.
 * **Email notifications** when a backup or restore fails, and, if you like, when one completes.
 * **Site Health checks:** Tools → Site Health tells you when the newest backup is out of date, when backups are only on this server, and when the backup folder can be downloaded from the web.
 * **Dashboard widget:** the newest backup, the next scheduled one and the off-site copy status on the WordPress Dashboard, with a Back up now button.
@@ -79,6 +81,8 @@ https://www.youtube.com/watch?v=uYh1AkgG6Kk
 ### Credits
 
 Wrensafe includes the Manrope typeface by The Manrope Project Authors (github.com/googlefonts/manrope), licensed under the SIL Open Font License 1.1; the licence is in `assets/admin/fonts/OFL.txt`.
+
+The AI client logos under Settings → AI assistants come from Simple Icons 16.38.1 (simpleicons.org), CC0 1.0, except the GitHub Copilot icon: MIT License, Copyright (c) GitHub Inc. (Primer Octicons); its license text is in `includes/Admin/McpClients.php`. Each name and logo is a trademark of its owner, shown only to say which client a setup is for.
 
 == Installation ==
 
@@ -200,6 +204,14 @@ Nothing is deleted unless you turn on **Settings → Advanced → Uninstall**. T
 
 Only while it needs them. During a restore or a Safe Update it adds a small file to `wp-content/mu-plugins` (`wpbp-restore-plugin-guard.php` or `wpbp-safe-update-guard.php`) and removes it when it finishes, when Wrensafe is deactivated and when it is deleted. A staging site is a copy in a `staging-…` folder inside your WordPress folder, with its own database tables; a password-protected one gets `wrensafe-staging-guard.php` in its own `mu-plugins` folder, and page caching is turned off in its own `wp-config.php` (WP_CACHE). Where that can't be done, the staging site's cache folder is emptied and the Activity Log says how to turn caching off. Backups, logs and temporary files are kept in the `wrensafe-storage` folder (or the folder you chose). While Safe Updates runs, a small progress file (only the position and state of each update) is kept in `wp-content/uploads/wrensafe-live/` and removed when the run ends, when Wrensafe is deactivated and when it is deleted.
 
+= Can AI assistants like Claude or Cursor use Wrensafe? =
+
+Yes, on WordPress 6.9 or newer, with the free MCP Adapter plugin by WordPress.org. Turn it on under **Settings → AI assistants**: assistants can then read the backup status, the backups and recent activity. You choose whether they may also create, verify and test backups, and whether they may ask for a restore, a rollback or a Search & Replace, which you approve and run yourself in wp-admin. Deleting backups is never available to them, and every call is recorded in Activity Logs. The tab shows a copy-paste setup for Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Codex, Gemini CLI and Antigravity.
+
+= How can I support Wrensafe? =
+
+A review on WordPress.org helps the most, and so do bug reports in the support forum. If you'd like, you can also send a small tip with the Donate link on this page or under **Settings → Support Us**. Wrensafe stays free: a tip doesn't unlock features.
+
 = What are the minimum requirements? =
 
 WordPress 6.2 or later and PHP 7.4 or later (PHP 8.3 or newer is recommended). Tested up to WordPress 7.1 and PHP 8.4. The PHP ZIP extension is recommended.
@@ -219,6 +231,8 @@ Wrensafe only contacts the services below, and only after a site administrator c
 * **Site Health check of the backup folder** — requests a short test file from the site's own address, to check that backups can't be downloaded from the web. It runs when Tools → Site Health is opened and during WordPress's own weekly Site Health check. No other server is contacted.
 * **Plugin updates (Safe Updates)** — updates run through WordPress's own updater, which downloads each update from the address WordPress lists for it (WordPress.org, or the author's server for a premium plugin). "Check again" on the Safe Updates page runs WordPress's own update check with WordPress.org. To check the site after an update, Wrensafe loads the site's own home page and admin area; no other server is contacted.
 * **YouTube (intro video)** — under Settings → Support Us the intro video is a picture stored in the plugin. Only when an administrator presses play, their browser loads the player from youtube-nocookie.com and other YouTube and Google addresses, which receive their IP address, browser details and this site's address (as the referrer); once the video plays, YouTube may store cookies or similar data in the browser. [YouTube terms](https://www.youtube.com/t/terms), [Google privacy policy](https://policies.google.com/privacy).
+* **Stripe (optional tip)** — The tip card under Settings → Support Us and "Send a tip" on the Plugins screen link to a payment page at buy.stripe.com (an amount button fills in that amount). Nothing is loaded or sent until an administrator selects one. Their browser then opens Stripe's page, and what they enter there goes to Stripe. Tips are received by Tech and Webs, the agency behind Wrensafe. [Terms](https://stripe.com/legal) and [Privacy Policy](https://stripe.com/privacy).
+* **AI assistants (MCP)** — off by default. Wrensafe contacts no AI service itself. After an administrator turns on Settings → AI assistants and connects a client (such as Claude, Cursor, VS Code or Gemini CLI), that client signs in to this site with an Application Password and receives what it asks for: the backup status, the list of backups and their file names, recent activity (which includes user names), updates waiting, and the progress and results of the backups, checks and requests it starts (for Fix Links: the old addresses and server folders it found, example links with their post titles, and the names of missing media files). The client may pass this on to the AI service it uses (for example Anthropic, OpenAI or Google), under that service's own terms and privacy policy. Turning the setting off or revoking the Application Password stops it.
 * **Email notifications** — backup, restore and copy results are sent with WordPress's own `wp_mail()` to the addresses set under Settings → Notifications, through whatever mail service the site uses.
 
 == Screenshots ==
@@ -230,7 +244,7 @@ Wrensafe only contacts the services below, and only after a site administrator c
 5. When you update a plugin, choose Quick Update or Safe Update, which checks your site and rolls a breaking update back.
 6. Back up the whole site, or only the database, files, media, themes or plugins, with optional AES-256 encryption.
 7. Every backup shows live, step-by-step progress and can be cancelled safely.
-8. Backup Browser: restore, download, verify, lock, tag and delete the backups stored on your server.
+8. Backup Browser: restore, test, download, verify, lock, tag and delete the backups stored on your server.
 9. Review before you restore: where the backup comes from, what's inside, what will change, and which parts to restore.
 10. Integrity verification checks the archive, manifest, database files and checksums before you restore.
 11. Automatic backups: the whole site and the database on separate schedules, keeping only the newest copies.
@@ -241,6 +255,35 @@ Wrensafe only contacts the services below, and only after a site administrator c
 16. The Dashboard widget: the newest backup, the next scheduled one, the off-site copy, and Back up now.
 
 == Changelog ==
+
+= 1.3.0 =
+* New: "What's new" after an update: once, on the first Wrensafe screen, each new feature with a link to try it and a tour of them all.
+* New: "New" labels in the Wrensafe menu and on each new feature, until you have opened it.
+* Improved: the guided tours show AI assistants, Restore Test and the activity timeline, and a "What's new in 1.3.0" tour walks through them.
+* Improved: AI assistants turn on with one button, then you connect in four steps: a new or an existing Application Password, or WP-CLI; Claude Code, Cursor, VS Code, Windsurf and Gemini CLI connect directly, without Node.js.
+* New: AI assistants (MCP). Claude, Cursor, Codex, Gemini CLI and other assistants can check your backups, make and test them, and ask for a restore, through WordPress's Abilities API and the MCP Adapter plugin (WordPress 6.9 or newer). Off by default; actions and requests are separate switches; a person approves every restore, rollback or Search & Replace in wp-admin and runs it there; deleting backups is never available, and backups an assistant makes stay on this server (never copied off-site, so off-site clean-up can't remove older copies because of them), up to 6 a day; every call is in Activity Logs. Copy-paste setup for each assistant under Settings → AI assistants.
+* New: Restore Test. In the Backup Browser, "Test restore" restores a backup into a temporary copy to prove it works: every file is checked, the database is imported, and the copy is checked for its settings, an administrator, its theme and its plugins. The live site isn't changed and stays online. Like a restore, it first checks there is enough free disk space. The result shows next to the backup and in Activity Logs.
+* New: after you install and activate Wrensafe, it opens on its Dashboard with the welcome. "Show me around" (on every welcome slide) starts the full guided tour. This happens once, only for the person who activated it, and not when several plugins are activated together.
+* New: Import / Restore finds backups other plugins left on this server (UpdraftPlus, All-in-One WP Migration, Duplicator, WPvivid, BackWPup and others) and restores one without uploading anything (for administrators, like an import from a server path). Wrensafe reads them where they are; nothing is moved or deleted.
+* New: Activity Logs as a timeline. Each backup, restore, Safe Updates run or move is one card with how it went, the reason when something went wrong, and its steps one click away, grouped by day. Totals for the last 30 days, filters (Backups, Restores, Safe Updates, Moves, Fix Links, Problems) and search. "All entries" keeps the full list.
+* New: Changelog. A link in the header opens every release of Wrensafe, newest first, with filters and search.
+* New: Guided tours. A button in the header opens short tours (See everything, Make a backup, Restore a backup, Move a site, Update plugins safely, Fix broken links). Each one highlights a part of the screen, explains it and moves from page to page. A tour never changes anything on your site.
+* New: a Support Us link in the header, and a softer highlight on the header links.
+* New: an optional tip under Settings → Support Us ($3, $5, $10, $25 or your own amount) and on the Plugins screen. It opens Stripe's checkout page; a tip doesn't unlock features.
+* Fixed: a backup couldn't be restored or imported where PHP's zip extension is turned off: the upload ended with "This file is not a readable archive". This is common on local setups on Windows (Laragon, XAMPP and others leave it off since PHP 8.2) and on some hosts. Wrensafe now reads its backups with its own built-in reader there, and .zip backups from other plugins (UpdraftPlus, Duplicator, WPvivid, BackWPup, Backup Migration and others) too.
+* Improved: on servers without PHP's zip extension, backups are now compressed .wbp files like everywhere else (they were uncompressed TAR files).
+* Improved: large database tables restore much faster. Rows are sent to the database in batches (about ten times faster on a table with millions of rows), and the progress shows how far each large table is.
+* Fixed: a very large table (gigabytes of data) had to be unpacked from the backup within one request, which could time out on slower servers. It is now unpacked in steps, and so are large compressed files in wp-content.
+* Fixed: if a table's data can't be unpacked from the backup, the restore now stops before the live database is changed, instead of possibly restoring that table empty.
+* Fixed: checking a backup (before a restore, and with Verify) could run out of time on a very large table on hosts with a strict time limit. A large table is now checked in steps (always on PHP 8.1 or newer; on PHP 7.4 and 8.0, in backups made by Wrensafe 1.3.0 or later).
+* Fixed: a restore could stop partway, on "Database restored", when a plugin the site already had was waiting to show its welcome screen in the backup's database (WPvivid, for one): it redirected the restore's own requests. Those requests now load Wrensafe alone.
+* Improved: checking and restoring a backup with thousands of files is much faster on PHP 7.4 and 8.0 (a backup check went from almost 10 minutes to under a minute).
+* Improved: clearer messages when a backup file can't be read (an incomplete download or upload, a file PHP isn't allowed to open, PHP without zip and zlib), and Activity Logs records the technical reason.
+* Fixed: the welcome tour opened a second time after "Get started" when it was started on a Wrensafe page other than the Dashboard.
+* Fixed: Fix Links counted links inside WordPress's caches (transients), which aren't part of the site's content and are rebuilt on their own.
+* Fixed: the Dashboard and System Info showed a different migration readiness score than the Migration Assistant. All three now show the Migration Assistant's score and warnings, from its latest scan, which runs again when it's a day old.
+* Fixed: one backup, update run or other job that went wrong long ago could keep the review request away for good. Only the last 14 days count now.
+* Improved: the review request's check reads less from the database on each Wrensafe screen.
 
 = 1.2.8 =
 * New: numbers in the Wrensafe menu when something needs you: updates waiting (Safe Updates) and links to fix (Fix Links). Rollback and Scheduled Backups show a "!" only when a restore or a scheduled backup failed, or schedules stopped running.
@@ -307,94 +350,12 @@ The first 1.2 release on WordPress.org. Versions 1.2.0 to 1.2.3 were tested on a
 * Fixed: the Plugins and Updates screens no longer connect to the file system (FTP on some hosts) on every visit; that check runs when updates start.
 * Changed: with "Delete Wrensafe's data" on, uninstalling also removes the copies Safe Updates saved, wherever the storage folder is. The setting and this readme now list everything it removes.
 
-= 1.1.7 =
-* Fixed: during a restore with WooCommerce Safe Mode, visitors could see blank pages instead of the maintenance notice (only the checkout was paused). Visitors now see the maintenance notice during every restore, and Safe Mode still pauses the checkout.
-
-= 1.1.6 =
-* Security: a TAR backup is checked before PHP opens it, so a crafted file can no longer make PHP 7 create objects from data hidden in the archive. Wrensafe's own TAR backups (made where ZipArchive is missing) open as before.
-* Security: a restore now refuses SQL statements that would copy another table, a file on the server or another server's data into the table being restored (subqueries, LOAD_FILE, MERGE/FEDERATED/CONNECT tables, CREATE TABLE … LIKE, variables). Backups made by Wrensafe and the supported plugins restore as before.
-* Fixed: restoring a TAR backup (made on a server without ZipArchive) restored only the database and none of the site's files, while reporting success. It restores the files now.
-* Changed: removed two unused nonce helpers.
-* Changed: External services in this readme now say exactly what Direct Migration sends, and where the security scan is.
-
-= 1.1.5 =
-* Fixed: a backup could miss database rows when the site deleted others while the backup ran (for example WordPress removing its ping notes for new posts, or expired sessions). Tables are now read in the order of their primary key, so rows deleted during a backup no longer make it skip rows that still exist.
-
-= 1.1.4 =
-* Changed: the plugin is now called "Wrensafe – Backup, Restore & Migration".
-* Changed: Wrensafe now needs WordPress 6.2 or later (PHP 7.4 or later, as before). On an older WordPress or PHP it stays inactive and says what it needs instead of stopping the site.
-* Changed: off-site copies go to FTP/FTPS or S3-compatible storage. SFTP is no longer included: its connection relied on a PHP feature many hosts block. Saved SFTP settings are kept and Settings → Remote storage explains what to do.
-* Security: Direct Migration's receiving site now checks the key, the request limits and every field before it accepts a request, and "Restrict to one IP address" now locks the key to the first server that sends with it, as described.
-* Security: temporary database files made during a backup, restore or import now have names that can't be guessed, and the storage folder is protected on Apache 2.2 and 2.4 (without errors) and on IIS.
-* Security: settings saved by any route are checked like the Settings screen checks them, a backup can only be deleted from the backup folders, Import from URL no longer reaches addresses on the server's own network, and on multisite only network administrators can use Wrensafe.
-* Security: a restore only runs the table statements of the backup it restores; anything else stops the restore before the live site changes.
-* Fixed: "Push to live" copied the staging site's own Wrensafe records and its address and "discourage search engines" setting to the live site.
-* Fixed: backups included the tables of staging sites, so each new staging site copied the earlier ones.
-* Fixed: a restore's clean-up could remove the temporary tables of another WordPress site that shares the database.
-* Fixed: the safety file a restore uses stayed behind when Wrensafe was deactivated during a restore, which could leave the site blank; it is now removed on deactivation and can't be opened directly.
-* Fixed: migration keys expired early on sites ahead of UTC, and a key could expire during a long transfer.
-* Fixed: a remote storage password with a backslash didn't work after saving.
-* Fixed: a missing Zip, Zlib, bz2 or OpenSSL extension now gives a clear message instead of an error; backup encryption is turned off with the reason when OpenSSL is missing.
-* Fixed: some error messages showed a character code instead of an apostrophe or a quote.
-* Changed: emails are sent as plain text; Wrensafe's menu icon styles load only for users who see the menu; WordPress's own notices are no longer moved on Wrensafe's screens; the 5-minute background check runs only while a schedule is on (otherwise once a day).
-
-= 1.1.3 =
-* Fixed: Direct Migration stopped with "Too many requests" partway through a larger backup, and new attempts were refused too. The receiving site no longer counts the parts of a transfer that uses a valid key, its limits no longer extend themselves while you retry, and the sending site waits and continues when asked to slow down (also with a receiving site on an older version).
-* Fixed: starting a transfer again with the same key now continues where it stopped instead of starting over, and short connection problems are retried automatically.
-* Changed: before sending, Wrensafe checks the receiving site: that it can be reached, the key is valid, and it accepts this connection (HTTP or HTTPS). Problems are shown as an error that names the site to change, for example which site's "Require HTTPS" setting blocks the transfer, an address that redirects to another one, or a local site's self-made HTTPS certificate.
-* Fixed: an error during Direct Migration was shown as a plain status line, and some lost their reason ("An error occurred").
-* Changed: the Wrensafe icon in the admin menu is now the colour logo (on a small white tile while the item is open or hovered, so it stays clear on any colour scheme).
-
-= 1.1.2 =
-* Fixed: a Wrensafe zip installed from a folder with another name (for example GitHub's "Source code" download, which unpacks to "wrensafe-plugin-1.1.0") was added as a second plugin when you uploaded a new version, instead of replacing the installed one. Wrensafe now says when it runs from such a folder and how to fix it once.
-* Fixed: when two copies are active, the notice now says which version is running and has a button to deactivate the older copy.
-* Fixed: deleting one copy of Wrensafe while another is still installed never removes the shared settings and backup records, even when Settings → Advanced → Uninstall is on.
-
-= 1.1.1 =
-* Changed: the new Wrensafe look (Cobalt Ice). The new logo in each page header and the welcome tour, the Wrensafe icon in the admin menu (it follows your admin colour scheme), the brand's cobalt, navy and ice-blue colours, a light frost background on Wrensafe's pages, and the Manrope typeface for headings. Manrope is bundled with the plugin; nothing is loaded from other sites.
-* Changed: new WordPress.org banner, icon and screenshots.
-* Fixed: the backup progress window now lists "Checking the backup" and the off-site copy as their own steps when they're turned on, and its percentage no longer steps back during the check.
-* Fixed: the Backup Browser count in the admin menu no longer wraps onto a second line.
-
-= 1.1.0 =
-* New: off-site copies (Settings → Remote storage). Each backup can be copied to FTP/FTPS, SFTP or S3-compatible storage right after it's made, in parts that resume after an interruption, keeping only the newest copies there. Choose whether automatic backups, backups you make yourself, or both are copied. Passwords and keys are stored encrypted with the site's own security keys. The Backup Browser shows each backup's copy status, and a failed copy is emailed when failure emails are on.
-* New: a separate schedule for the database, next to the full-site schedule, on the Scheduled Backups page.
-* New: leave chosen database tables out of backups (Settings → Backup → Exclusions). WordPress's own tables are always backed up, and a left-out table keeps its current version when you restore.
-* New: leave out files larger than a size you set. Plugin and theme files are always backed up.
-* New: check each backup right after it's made (Settings → Backup → Checks). A backup that fails the check is marked damaged, isn't copied off-site, and is reported.
-* New: Search & Replace page with a dry run, for serialized and JSON data too. Post GUIDs are left alone by default.
-* New: Site Health checks for a recent backup, off-site copies and a private backup folder, and a Wrensafe section under Site Health → Info.
-* New: Dashboard widget with the newest backup, the next scheduled one, the off-site copy status and Back up now.
-
-= 1.0.3 =
-* Fixed: some hosting malware scanners (SiteGround's among them) reported a file of the security scan as malicious, because it listed the PHP function names that malware uses, and could suspend the site. The security scan no longer keeps such a list; it now looks for long encoded payloads in PHP files instead. Nothing in the plugin matches common malware signatures (checked with ClamAV, Linux Malware Detect and PHP Malware Finder).
-* Security: the staging site password is no longer stored in the database (only its hash, in the staging site's `.htpasswd`), and passwords kept by earlier versions are removed. The hash now uses a random salt.
-* Security: settings read from a backup during a restore can't create PHP objects.
-* Changed: an import from a URL stops downloading at the size limit instead of after the whole file.
-
-= 1.0.2 =
-* New name: Wrensafe (slug `wrensafe`). Settings, backups and the backup list carry over, and the backup folder moves to `wp-content/wrensafe-storage/` automatically.
-* Fixed: after a site had no visitors for a few days, automatic backups stayed "overdue" and ran again on each check until they caught up. Missed runs are now skipped, and daily, weekly and monthly backups always run at the time you set.
-
-= 1.0.1 =
-* Security: `wp-config.php` (and any copy of it) is no longer included in backups, so the database password and the authentication keys and salts are never stored in a backup, downloaded or sent by Direct Migration. The keys and salts WordPress can keep in the database are left out of backups too, and a restore keeps the destination site's own.
-* Security: staging sites get their own new authentication keys and salts.
-* Fixed: when `wp-config.php` sets the table prefix through a function (for example Docker's `getenv_docker()`), a staging site ran on the live site's database tables. The staging copy now always gets its own prefix, or is not created.
-* Fixed: sites that keep wp-content, plugins, must-use plugins, themes or uploads outside the WordPress folder are now backed up completely, and every file is restored into the matching folder of the destination site, whatever its layout.
-* Fixed: after restoring a backup from another site, the URL and path rewrite also changed Wrensafe's own backup list, so existing backups could point at folders that don't exist. Only the restored tables are rewritten now, and the WordPress folder path is matched as a whole folder.
-* Changed: every folder location comes from WordPress (`WP_PLUGIN_DIR`, `WPMU_PLUGIN_DIR`, `get_theme_root()`, `wp_upload_dir()`, `WPINC`) instead of assumed paths.
-* Fixed: staging copies skipped plugin folders named "cache" (only the page cache folder is skipped now), and a new staging site no longer includes copies of other staging sites. The Staging page explains when a site's folder layout can't be copied.
-* Changed: Settings and Import / Restore name the site's real content folder instead of assuming "wp-content".
-* Changed: the "plugins were turned off after your restore" notice shows on the Dashboard, the Plugins screen and Wrensafe's pages only.
-
-= 1.0.0 =
-* First stable release.
-* Removed: the beta notice and the "Beta" label in Wrensafe's header.
-
-= Earlier versions =
-* Test releases before the first stable version.
+Older versions are in the [full changelog](https://plugins.svn.wordpress.org/wrensafe/trunk/changelog.txt), and under Changelog in the header of every Wrensafe screen.
 
 == Upgrade Notice ==
+
+= 1.3.0 =
+Restores now work on servers without PHP's zip extension (Laragon, XAMPP), and huge databases restore far faster. New: AI assistants (MCP, opt-in), Restore Test, Activity Logs as a timeline, guided tours and a Changelog.
 
 = 1.2.8 =
 Fix Links shows live progress, the menu shows when something needs you, buttons match on every screen, short screens no longer leave empty space, plus a new review card, the intro video and safer restore starts.

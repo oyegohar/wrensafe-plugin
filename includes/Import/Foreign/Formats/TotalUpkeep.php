@@ -10,6 +10,7 @@
 namespace WPBP\Import\Foreign\Formats;
 
 use WPBP\Import\Foreign\AbstractFormat;
+use WPBP\Import\Foreign\ZipView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -83,23 +84,13 @@ class TotalUpkeep extends AbstractFormat {
 
 	/** The first bytes of a zip entry. */
 	private function entry_head( string $zip_path, string $entry ): string {
-		if ( ! class_exists( 'ZipArchive' ) ) {
+		$zip = ZipView::open( $zip_path );
+
+		if ( null === $zip ) {
 			return '';
 		}
 
-		$zip = new \ZipArchive();
-
-		if ( true !== $zip->open( $zip_path ) ) {
-			return '';
-		}
-
-		$stream = $zip->getStream( $entry );
-		$head   = false === $stream ? '' : (string) fread( $stream, 256 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- reading a zip entry stream.
-
-		if ( false !== $stream ) {
-			fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
-		}
-
+		$head = $zip->head( $entry, 256 );
 		$zip->close();
 
 		return $head;

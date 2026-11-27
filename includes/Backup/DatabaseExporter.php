@@ -142,11 +142,11 @@ class DatabaseExporter {
 	}
 
 	/**
-	 * Staging/old tables a restore creates temporarily (see RestoreManager)
-	 * must never be exported as site content.
+	 * Staging/old tables a restore creates temporarily (see RestoreManager), and a Restore Test's copy
+	 * (RestoreTest), must never be exported as site content.
 	 */
 	private static function is_restore_work_table( string $table ): bool {
-		foreach ( array( '_wpbptmp', '_wpbpold' ) as $suffix ) {
+		foreach ( array( '_wpbptmp', '_wpbpold', \WPBP\Restore\RestoreTest::SUFFIX ) as $suffix ) {
 			if ( substr( $table, -strlen( $suffix ) ) === $suffix ) {
 				return true;
 			}

@@ -409,7 +409,8 @@ class UploadAjax {
 		if ( ! $result['valid'] ) {
 			self::discard_session( $upload_id );
 
-			Logger::failed( 'upload_archive_validation_failed: ' . $filename . ' — ' . $result['message'] . ' (user #' . $user . ').' );
+			$detail = $reader->open_detail();
+			Logger::failed( 'upload_archive_validation_failed: ' . $filename . ' — ' . $result['message'] . ( '' !== $detail ? ' [' . $detail . ']' : '' ) . ' (user #' . $user . ').' );
 			/* translators: %s: why the uploaded file is not a usable backup */
 			wp_send_json_error( array( 'message' => sprintf( __( 'The upload finished, but the file isn’t a usable backup: %s', 'wrensafe' ), $result['message'] ) ) );
 		}

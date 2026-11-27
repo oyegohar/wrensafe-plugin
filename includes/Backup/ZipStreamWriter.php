@@ -25,7 +25,8 @@
  * it keeps the classic SHA-256 that older versions of Wrensafe check.
  *
  * The output is a standard ZIP (ZIP64 when sizes, offsets or entry counts
- * need it), read back by ArchiveReader through ZipArchive like before.
+ * need it), read back by ArchiveReader through ZipArchive, or through
+ * ZipFileReader where PHP's zip extension is off: neither side needs it.
  *
  * @package WPBP
  */
@@ -160,6 +161,14 @@ class ZipStreamWriter {
 			'cd_bytes' => 0,
 			'pending'  => null,
 		);
+	}
+
+	/**
+	 * Whether this server can write (and Wrensafe read back) ZIP backups
+	 * without PHP's zip extension: zlib's incremental deflate and inflate.
+	 */
+	public static function available(): bool {
+		return function_exists( 'deflate_init' ) && function_exists( 'deflate_add' ) && in_array( 'crc32b', hash_algos(), true ) && \WPBP\Restore\ZipFileReader::available();
 	}
 
 	/**

@@ -24,6 +24,20 @@ class SqlStatementReader {
 
 	const CHUNK_SIZE = 65536;
 
+	/**
+	 * Per state, the characters that can change it. Everything between them
+	 * is taken in one run (strcspn) instead of one character at a time,
+	 * which made reading a multi-gigabyte dump slow in PHP.
+	 */
+	private const STOPS = array(
+		'normal'        => "'\"`-#/;",
+		'single_quote'  => "'\\",
+		'double_quote'  => '"\\',
+		'backtick'      => '`',
+		'line_comment'  => "\n",
+		'block_comment' => '*',
+	);
+
 	/** @var resource|null */
 	private $handle = null;
 
@@ -95,6 +109,20 @@ class SqlStatementReader {
 		$state = 'normal';
 
 		while ( true ) {
+			// Characters that can't change the state: taken as one run.
+			if ( $this->ensure_buffer() ) {
+				$run = strcspn( $this->buffer, self::STOPS[ $state ], $this->buf_pos );
+
+				if ( $run > 0 ) {
+					if ( 'line_comment' !== $state && 'block_comment' !== $state ) {
+						$stmt .= substr( $this->buffer, $this->buf_pos, $run );
+					}
+
+					$this->buf_pos += $run;
+					continue;
+				}
+			}
+
 			$ch = $this->read_char();
 
 			if ( null === $ch ) {

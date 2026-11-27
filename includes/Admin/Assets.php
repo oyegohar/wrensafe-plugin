@@ -132,6 +132,17 @@ class Assets {
 					'foreignRejected'           => __( 'Not a backup file Wrensafe can read: %s', 'wrensafe' ),
 					'foreignQueued'             => __( 'Waiting', 'wrensafe' ),
 					'foreignUploaded'           => __( 'Uploaded', 'wrensafe' ),
+					'foreignOnServer'           => __( 'On this server', 'wrensafe' ),
+					/* translators: %s: name of the plugin that made the backup */
+					'foundOne'                  => __( 'Wrensafe found a backup made by %s on this server. You can restore it without uploading anything.', 'wrensafe' ),
+					/* translators: 1: number of backups, 2: names of the plugins that made them */
+					'foundMany'                 => __( 'Wrensafe found %1$s backups made by other plugins on this server (%2$s). You can restore one without uploading anything.', 'wrensafe' ),
+					/* translators: %s: number of backups found */
+					'foundBadge'                => __( '%s found on this server', 'wrensafe' ),
+					'foundFile'                 => __( '1 file', 'wrensafe' ),
+					/* translators: %s: number of files */
+					'foundFiles'                => __( '%s files', 'wrensafe' ),
+					'foundUse'                  => __( 'Use this backup', 'wrensafe' ),
 					/* translators: %s: file name */
 					'foreignRemove'             => __( 'Remove %s', 'wrensafe' ),
 					'foreignTryAgain'           => __( 'Try again', 'wrensafe' ),

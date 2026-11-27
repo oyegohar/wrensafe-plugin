@@ -40,7 +40,7 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 </tr>
 <tr>
 <td><img src=".wordpress-org/screenshot-7.png" alt="Backup progress"><br><sub><b>Live progress</b>, step by step; cancel safely at any time.</sub></td>
-<td><img src=".wordpress-org/screenshot-8.png" alt="Backup Browser"><br><sub><b>Backup Browser</b>: restore, download, verify, lock, tag and delete.</sub></td>
+<td><img src=".wordpress-org/screenshot-8.png" alt="Backup Browser"><br><sub><b>Backup Browser</b>: restore, test, download, verify, lock, tag and delete.</sub></td>
 </tr>
 <tr>
 <td><img src=".wordpress-org/screenshot-9.png" alt="Review before restore"><br><sub><b>Review before you restore</b>: what's inside and what will change.</sub></td>
@@ -79,11 +79,14 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 ### Restore safely
 - Review before you restore: where the backup comes from, what's inside, what will change.
 - Restore everything, or only the database, files, media, themes, plugins, or selected tables.
+- **Restore Test**: restore a backup into a temporary copy to prove it works (every file checked, the database imported, the copy checked for its settings, an administrator, its theme and plugins). The live site isn't changed and stays online.
 - Every file is checked first, and a rollback point is saved automatically so a restore can be undone.
+- Works where PHP's zip extension is off (Laragon, XAMPP and some hosts): Wrensafe reads its own backups and other plugins' `.zip` backups with a built-in reader.
+- Large tables (gigabytes, millions of rows) are unpacked, checked and imported in steps, in batches.
 - The database switches over in one step; visitors see a maintenance page meanwhile and you stay logged in.
 - Plugin safety: a plugin that would break the restored site is turned off, and you're told which one and why.
 - WooCommerce Safe Mode keeps new orders, customers and stock.
-- Restore backups made by **All-in-One WP Migration, UpdraftPlus, Duplicator, WPvivid, BackWPup, Backup Migration, Total Upkeep, Solid Backups, WP Migrate and Jetpack VaultPress Backup**, or a plain `.sql` / `.zip` / `.tar`.
+- Restore backups made by **All-in-One WP Migration, UpdraftPlus, Duplicator, WPvivid, BackWPup, Backup Migration, Total Upkeep, Solid Backups, WP Migrate and Jetpack VaultPress Backup**, or a plain `.sql` / `.zip` / `.tar`. Backups those plugins left on the server are found and restored without uploading anything.
 
 ### Update safely
 - When you update a plugin, choose **Quick Update** (WordPress's standard update) or **Safe Update**: Wrensafe saves a copy, updates, checks the home page and admin area, and puts the previous version back if the update causes a fatal error, a server error or an empty page. You can turn the question off.
@@ -101,7 +104,9 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 
 ### Stay informed
 - Dashboard with protection status, backups, schedules and migration readiness.
-- Activity Logs and a one-click debug bundle for support.
+- **AI assistants (MCP)**: Claude, Cursor, Codex, Gemini CLI and others can check your backups, make and test them, or ask you for a restore (WordPress 6.9+, with the MCP Adapter plugin). Off by default; a person approves every restore in wp-admin, deleting backups is never available, and every call is logged.
+- Activity Logs as a timeline: each backup, restore, update run or move with how it went and the reason when something fails, every step one click away; plus a one-click debug bundle for support.
+- Guided tours, a "What's new" after each update and a Changelog in the header.
 - Email when a backup or restore fails (and, if you like, when one succeeds), or when an off-site copy fails.
 - Site Health checks: an out-of-date backup, backups kept only on the server, a backup folder that can be downloaded from the web.
 - A Dashboard widget with the newest backup, the next scheduled one and a Back up now button.
@@ -112,7 +117,7 @@ Wrensafe is in the WordPress.org plugin directory: **[wordpress.org/plugins/wren
 
 ## Privacy
 
-Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP/FTPS or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, Direct Migration to another site, or a plugin update (through WordPress's own updater and update check; the site check after an update only loads your own site).
+Backups stay on your server unless you set up off-site copies. Nothing is sent to Wrensafe, and there is no tracking. Data leaves your site only when an administrator sets up or starts one of these: off-site copies to the FTP/FTPS or S3-compatible server they choose, the core-file check (WordPress.org checksums API), Import from URL, Direct Migration to another site, or a plugin update (through WordPress's own updater and update check; the site check after an update only loads your own site). AI assistants are off by default: Wrensafe contacts no AI service itself, and an assistant an administrator connects receives only what it asks for (it may pass that on to the AI service it uses). The intro video loads from YouTube only when you press play, and the optional tip opens Stripe's page only when you choose an amount.
 
 ## Found a problem?
 

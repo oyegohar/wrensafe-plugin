@@ -34,6 +34,8 @@ class Activator {
 
 		if ( false === get_option( 'wpbp_version', false ) ) {
 			add_option( 'wpbp_version', WPBP_VERSION );
+			// A new install: open Wrensafe once, right after this activation.
+			\WPBP\Admin\Onboarding::queue_redirect();
 		} else {
 			update_option( 'wpbp_version', WPBP_VERSION );
 		}

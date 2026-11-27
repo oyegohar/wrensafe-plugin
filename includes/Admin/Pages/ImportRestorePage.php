@@ -85,6 +85,12 @@ class ImportRestorePage extends AbstractPage {
 			<li class="wpbp-step"><?php esc_html_e( '3. Restore', 'wrensafe' ); ?></li>
 		</ol>
 
+		<div class="wpbp-found-callout" id="wpbp-found-callout" role="status" hidden>
+			<span class="wpbp-found-callout-icon" aria-hidden="true"><span class="dashicons dashicons-search"></span></span>
+			<p class="wpbp-found-callout-text"></p>
+			<button type="button" class="button" id="wpbp-found-show"><?php esc_html_e( 'Show them', 'wrensafe' ); ?></button>
+		</div>
+
 		<div class="wpbp-card">
 			<h2><?php esc_html_e( 'Where is the backup coming from?', 'wrensafe' ); ?></h2>
 			<div class="wpbp-selectable-grid" id="wpbp-import-source-grid" role="radiogroup" aria-label="<?php esc_attr_e( 'Import source', 'wrensafe' ); ?>">
@@ -356,6 +362,12 @@ class ImportRestorePage extends AbstractPage {
 		<div class="wpbp-card wpbp-import-source-panel wpbp-foreign" data-source="plugins" id="wpbp-foreign-card" hidden>
 			<h2><?php esc_html_e( 'Restore a backup made by another plugin', 'wrensafe' ); ?></h2>
 			<p class="wpbp-foreign-lead"><?php esc_html_e( 'Upload the backup files just as the other plugin saved them. Wrensafe reads them, shows you what’s inside, and restores them with the same safety checks as its own backups. The other plugin doesn’t need to be installed.', 'wrensafe' ); ?></p>
+
+			<div class="wpbp-found-box" id="wpbp-found-box" hidden>
+				<h3><?php esc_html_e( 'Found on this server', 'wrensafe' ); ?></h3>
+				<p class="description"><?php esc_html_e( 'Backups another plugin left in its folder on this server. Wrensafe reads them where they are: nothing is uploaded, moved or deleted.', 'wrensafe' ); ?></p>
+				<ul class="wpbp-found-list" id="wpbp-found-list"></ul>
+			</div>
 
 			<ul class="wpbp-foreign-formats">
 				<?php foreach ( $formats as list( $name, $hint, $monogram, $extensions ) ) : ?>

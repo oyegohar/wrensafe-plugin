@@ -37,6 +37,9 @@ class ReviewRequest {
 	const MIN_BACKUPS = 3;
 	const MIN_DAYS    = 14;
 
+	/** Work that went wrong holds the request back for this many days, then it's in the past. */
+	const RECENT_DAYS = 14;
+
 	/** @var bool|null This request's answer (asked by both the styles and the notice). */
 	private static $ask = null;
 
@@ -122,12 +125,13 @@ class ReviewRequest {
 	}
 
 	/**
-	 * The latest backup, update run, transfer, import or staging job that ended didn't go well: it failed, a backup's
-	 * off-site copy failed, or an update run had an update fail or put back. Not the moment to ask for a review.
+	 * The latest backup, update run, transfer, import or staging job of the last RECENT_DAYS days that ended didn't go
+	 * well: it failed, a backup's off-site copy failed, or an update run had an update fail or put back. Not the moment
+	 * to ask for a review. Older work doesn't count, so one failure long ago doesn't hold the request back for good.
 	 */
 	private static function last_work_went_wrong(): bool {
 		foreach ( array( 'backup', SafeUpdateJob::TYPE, 'migration_transfer', 'import', 'staging' ) as $type ) {
-			foreach ( JobsRepository::list_by_type( $type, 5 ) as $job ) {
+			foreach ( JobsRepository::recent_outcomes( $type, 5, self::RECENT_DAYS ) as $job ) {
 				$status = (string) $job['status'];
 
 				if ( 'failed' === $status ) {

@@ -205,13 +205,14 @@ abstract class AbstractFormat {
 	}
 
 	/**
-	 * Stop with a readable reason when PHP can't open .zip files.
+	 * Stop with a readable reason when PHP can't open .zip files: neither
+	 * ZipArchive nor zlib for Wrensafe's own reader (see ZipView).
 	 *
-	 * @throws \RuntimeException When the Zip extension (ZipArchive) is missing.
+	 * @throws \RuntimeException When the server can't read .zip files.
 	 */
 	public static function require_zip(): void {
-		if ( ! class_exists( 'ZipArchive' ) ) {
-			throw new \RuntimeException( esc_html__( 'This backup is a .zip file and this server\'s PHP has no Zip extension (ZipArchive). Ask your host to enable the PHP Zip extension, then try again.', 'wrensafe' ) );
+		if ( ! ZipView::available() ) {
+			throw new \RuntimeException( esc_html__( 'This backup is a .zip file and this server\'s PHP can\'t read .zip files (it has neither the Zip nor the Zlib extension). Ask your host to enable the PHP Zip extension, then try again.', 'wrensafe' ) );
 		}
 	}
 
@@ -239,63 +240,50 @@ abstract class AbstractFormat {
 		}
 	}
 
-	/** Whether a zip has an entry (false when it can't be read, or PHP has no Zip extension). */
+	/** Whether a zip has an entry (false when it can't be read). */
 	protected static function zip_has( string $zip_path, string $entry ): bool {
-		if ( ! class_exists( 'ZipArchive' ) ) {
+		$zip = ZipView::open( $zip_path );
+
+		if ( null === $zip ) {
 			return false;
 		}
 
-		$zip = new \ZipArchive();
-
-		if ( true !== $zip->open( $zip_path ) ) {
-			return false;
-		}
-
-		$found = false !== $zip->locateName( $entry );
+		$found = $zip->has( $entry );
 		$zip->close();
 
 		return $found;
 	}
 
-	/** Contents of a small zip entry, or null (also when PHP has no Zip extension). */
+	/** Contents of a small zip entry, or null. */
 	protected static function zip_entry( string $zip_path, string $entry, int $max = 1048576 ): ?string {
-		if ( ! class_exists( 'ZipArchive' ) ) {
+		$zip = ZipView::open( $zip_path );
+
+		if ( null === $zip ) {
 			return null;
 		}
 
-		$zip = new \ZipArchive();
-
-		if ( true !== $zip->open( $zip_path ) ) {
-			return null;
-		}
-
-		$stat = $zip->statName( $entry );
-		$data = ( false !== $stat && $stat['size'] <= $max ) ? $zip->getFromName( $entry ) : false;
+		$data = $zip->read( $entry, $max );
 		$zip->close();
 
-		return false === $data ? null : (string) $data;
+		return $data;
 	}
 
 	/**
 	 * First entry name of a zip matching $pattern (reads only the zip's
-	 * index), or null (also when PHP has no Zip extension).
+	 * index), or null.
 	 */
 	protected static function zip_find( string $zip_path, string $pattern ): ?string {
-		if ( ! class_exists( 'ZipArchive' ) ) {
-			return null;
-		}
+		$zip = ZipView::open( $zip_path );
 
-		$zip = new \ZipArchive();
-
-		if ( true !== $zip->open( $zip_path ) ) {
+		if ( null === $zip ) {
 			return null;
 		}
 
 		$found = null;
-		$count = (int) $zip->numFiles; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- ZipArchive property.
+		$count = $zip->count();
 
 		for ( $i = 0; $i < $count && null === $found; $i++ ) {
-			$name = (string) $zip->getNameIndex( $i );
+			$name = $zip->name( $i );
 
 			if ( preg_match( $pattern, $name ) ) {
 				$found = $name;

@@ -93,6 +93,64 @@ class JobsRepository {
 	}
 
 	/**
+	 * The newest jobs of a type that were active in the last $days days, with only their status and
+	 * result (not the payload): what the review request needs to know how recent work went.
+	 *
+	 * @return array<int,array{status:string,result:?string}>
+	 */
+	public static function recent_outcomes( string $job_type, int $limit, int $days ): array {
+		global $wpdb;
+
+		$since = gmdate( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) - ( $days * DAY_IN_SECONDS ) );
+
+		return (array) $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT status, result FROM %i WHERE job_type = %s AND COALESCE( completed_at, updated_at, created_at ) >= %s ORDER BY id DESC LIMIT %d',
+				self::table(),
+				$job_type,
+				$since,
+				$limit
+			),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Type, status and error of these jobs (those still recorded), for the Activity Logs timeline.
+	 *
+	 * @param int[] $ids
+	 * @return array<int,array{job_type:string,status:string,error_message:string}>
+	 */
+	public static function types_of( array $ids ): array {
+		global $wpdb;
+
+		$ids = array_values( array_unique( array_filter( array_map( 'intval', $ids ) ) ) );
+
+		if ( ! $ids ) {
+			return array();
+		}
+
+		$jobs = array();
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT id, job_type, status, error_message FROM %i WHERE id IN (' . implode( ', ', array_fill( 0, count( $ids ), '%d' ) ) . ')',
+				array_merge( array( self::table() ), $ids )
+			),
+			ARRAY_A
+		);
+
+		foreach ( (array) $rows as $row ) {
+			$jobs[ (int) $row['id'] ] = array(
+				'job_type'      => (string) $row['job_type'],
+				'status'        => (string) $row['status'],
+				'error_message' => (string) $row['error_message'],
+			);
+		}
+
+		return $jobs;
+	}
+
+	/**
 	 * Jobs of a given type still marked running/pending whose heartbeat
 	 * (updated_at, bumped by every progress/payload write) is older than the
 	 * given number of minutes — i.e. jobs whose PHP request the server killed

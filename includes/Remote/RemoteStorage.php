@@ -481,10 +481,12 @@ final class RemoteStorage {
 
 	/**
 	 * Whether this backup job should be copied off-site. Rollback points
-	 * (made in the middle of a restore) never are.
+	 * (made in the middle of a restore) never are, nor backups an AI
+	 * assistant made: a copy applies the off-site retention, which deletes
+	 * older copies there, and an assistant must never cause a deletion.
 	 */
 	public static function wants( array $payload ): bool {
-		if ( ! self::is_enabled() || 0 === strpos( (string) ( $payload['note'] ?? '' ), 'Automatic rollback point' ) ) {
+		if ( ! self::is_enabled() || 0 === strpos( (string) ( $payload['note'] ?? '' ), 'Automatic rollback point' ) || 'ai_assistant' === ( $payload['made_by'] ?? '' ) ) {
 			return false;
 		}
 

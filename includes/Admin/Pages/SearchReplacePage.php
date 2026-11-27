@@ -62,20 +62,25 @@ class SearchReplacePage extends AbstractPage {
 			</div>
 		</div>
 
+		<?php
+		// An AI assistant's request a person approved (Mcp\Requests): the values are filled in; the person runs it.
+		$asked = isset( $_GET['wpbp_request'] ) ? \WPBP\Mcp\Requests::approved( sanitize_key( wp_unslash( $_GET['wpbp_request'] ) ) ) : null; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only: fills in the form; the request was approved with a nonce.
+		$asked = null !== $asked && 'search_replace' === $asked['type'] ? $asked['args'] : array();
+		?>
 		<form class="wpbp-card wpbp-sr-form" id="wpbp-sr-form" novalidate>
 			<h2><?php esc_html_e( 'Find and replace', 'wrensafe' ); ?></h2>
 			<table class="form-table" role="presentation">
 				<tr>
 					<th scope="row"><label for="wpbp-sr-search"><?php esc_html_e( 'Search for', 'wrensafe' ); ?></label></th>
 					<td>
-						<input type="text" id="wpbp-sr-search" class="large-text code" autocomplete="off" spellcheck="false" placeholder="<?php echo esc_attr( 'http://old-site.example' ); ?>" required />
+						<input type="text" id="wpbp-sr-search" class="large-text code" autocomplete="off" spellcheck="false" placeholder="<?php echo esc_attr( 'http://old-site.example' ); ?>" value="<?php echo esc_attr( (string) ( $asked['search'] ?? '' ) ); ?>" required />
 						<p class="description"><?php esc_html_e( 'Exact text, case-sensitive.', 'wrensafe' ); ?></p>
 					</td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wpbp-sr-replace"><?php esc_html_e( 'Replace with', 'wrensafe' ); ?></label></th>
 					<td>
-						<input type="text" id="wpbp-sr-replace" class="large-text code" autocomplete="off" spellcheck="false" placeholder="<?php echo esc_attr( home_url() ); ?>" />
+						<input type="text" id="wpbp-sr-replace" class="large-text code" autocomplete="off" spellcheck="false" placeholder="<?php echo esc_attr( home_url() ); ?>" value="<?php echo esc_attr( (string) ( $asked['replace'] ?? '' ) ); ?>" />
 						<p class="description"><?php esc_html_e( 'Leave empty to remove the text.', 'wrensafe' ); ?></p>
 					</td>
 				</tr>

@@ -3,11 +3,17 @@
  * Opens and validates a .wbp archive, regardless of whether it was written
  * with the ZipArchive or PharData (TAR fallback) container.
  *
+ * ZIP archives are read through ZipArchive when PHP's zip extension is there
+ * and accepts the file, and otherwise through ZipFileReader (plain PHP and
+ * zlib), so a backup can be restored on any server. Large entries are
+ * unpacked across requests with extract_step().
+ *
  * @package WPBP\Restore
  */
 
 namespace WPBP\Restore;
 
+use WPBP\Backup\ArchiveChecksum;
 use WPBP\Backup\BackupEncryption;
 use WPBP\Backup\ManifestBuilder;
 use WPBP\Backup\SliceHash;
@@ -35,6 +41,24 @@ class ArchiveReader {
 
 	/** Why this server can't decrypt the archive (no OpenSSL), or ''. */
 	private string $decryption_unavailable = '';
+
+	/**
+	 * The plain-PHP reader of a ZIP: used for everything when ZipArchive is
+	 * missing or refused the file, and for extract_step() always. Opened on
+	 * first use; false once it failed to open.
+	 *
+	 * @var ZipFileReader|false|null
+	 */
+	private $plain = null;
+
+	/** Whether ZipArchive is the backend for this ZIP (false: ZipFileReader). */
+	private bool $use_zip_archive = false;
+
+	/** Why opening failed, for the log: ZipArchive's error and the plain reader's. */
+	private string $open_detail = '';
+
+	/** Why the plain reader couldn't open the file (a ZipFileReader::ERROR_* code), or ''. */
+	private string $plain_error = '';
 
 	/**
 	 * A single ZipArchive handle kept open for this reader's lifetime and
@@ -105,7 +129,7 @@ class ArchiveReader {
 			return null;
 		}
 
-		if ( 'zip' !== $this->container_format ) {
+		if ( 'zip' !== $this->container_format || ! $this->use_zip_archive ) {
 			return null;
 		}
 
@@ -168,14 +192,8 @@ class ArchiveReader {
 			fclose( $handle );
 		}
 
-		if ( "PK\x03\x04" === $header && class_exists( '\ZipArchive' ) ) {
-			$zip = new \ZipArchive();
-			if ( true === $zip->open( $this->path ) ) {
-				$zip->close();
-				$this->container_format = 'zip';
-				$this->opened           = true;
-				return true;
-			}
+		if ( "PK\x03\x04" === $header ) {
+			return $this->open_zip();
 		}
 
 		// A TAR backup (written where ZipArchive is missing). PharData reads
@@ -194,6 +212,66 @@ class ArchiveReader {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Open a ZIP: through ZipArchive when it is installed and accepts the
+	 * file, otherwise with the plain-PHP reader. PHP's zip extension is off
+	 * on some servers (a separate DLL on Windows since PHP 8.2: Laragon,
+	 * XAMPP), and a .wbp is a standard ZIP that zlib alone can read.
+	 */
+	private function open_zip(): bool {
+		$detail = 'ZipArchive not installed';
+
+		if ( class_exists( '\ZipArchive' ) ) {
+			$zip    = new \ZipArchive();
+			$result = $zip->open( $this->path );
+
+			if ( true === $result ) {
+				$zip->close();
+				$this->container_format = 'zip';
+				$this->use_zip_archive  = true;
+				$this->opened           = true;
+				return true;
+			}
+
+			$detail = 'ZipArchive error ' . (int) $result;
+		}
+
+		$plain = $this->plain();
+
+		if ( null !== $plain ) {
+			$this->container_format = 'zip';
+			$this->use_zip_archive  = false;
+			$this->opened           = true;
+			return true;
+		}
+
+		$this->open_detail = $detail . '; built-in reader: ' . $this->plain_error;
+
+		return false;
+	}
+
+	/** The plain-PHP ZIP reader, opened once; null when it can't read this file. */
+	private function plain(): ?ZipFileReader {
+		if ( null === $this->plain ) {
+			$reader      = new ZipFileReader( $this->path );
+			$this->plain = $reader->open() ? $reader : false;
+
+			if ( false === $this->plain ) {
+				$this->plain_error = $reader->error();
+			}
+		}
+
+		return false === $this->plain ? null : $this->plain;
+	}
+
+	/**
+	 * Why the archive couldn't be opened, for the log (empty when it opened):
+	 * e.g. "ZipArchive not installed; built-in reader: no_end".
+	 */
+	public function open_detail(): string {
+		return $this->open_detail;
 	}
 
 	public function container_format(): string {
@@ -224,6 +302,14 @@ class ArchiveReader {
 		}
 
 		if ( 'zip' === $this->container_format ) {
+			if ( ! $this->use_zip_archive ) {
+				$plain = $this->plain();
+
+				// 256 MB: far above any real manifest or checksums.json, low enough
+				// that a crafted entry can't exhaust the server's memory.
+				return null !== $plain ? $plain->read( $entry_name, 268435456 ) : null;
+			}
+
 			$zip = $this->zip();
 
 			if ( null === $zip ) {
@@ -273,6 +359,22 @@ class ArchiveReader {
 	 * @return array{offset:int,size:int}|null
 	 */
 	public function stored_entry_span( string $entry_name ): ?array {
+		if ( ( $this->opened || $this->open() ) && 'zip' === $this->container_format && ! $this->use_zip_archive ) {
+			$plain = $this->plain();
+			$stat  = null !== $plain ? $plain->stat( $entry_name ) : null;
+
+			if ( null === $stat || 0 !== $stat['method'] || $stat['encrypted'] ) {
+				return null;
+			}
+
+			$offset = $plain->data_offset( $entry_name );
+
+			return null === $offset ? null : array(
+				'offset' => $offset,
+				'size'   => $stat['size'],
+			);
+		}
+
 		$zip = $this->zip();
 
 		if ( null === $zip ) {
@@ -442,6 +544,27 @@ class ArchiveReader {
 		}
 
 		if ( 'zip' === $this->container_format ) {
+			// The built-in reader first: it reads the archive's index once, while
+			// ZipArchive::getStream() reopens the whole archive for every entry
+			// on older PHP (minutes for a backup of thousands of files on 7.4).
+			$plain  = $this->plain();
+			$result = null !== $plain ? $plain->copy( $entry_name, self::file_sink( $out ) ) : null;
+
+			if ( null !== $result && $result['done'] ) {
+				fclose( $out );
+				return true;
+			}
+
+			// Damaged data or a failed write: ZipArchive wouldn't do better.
+			if ( ! $this->use_zip_archive || ( null !== $result && ! self::zip_archive_may_help( $result['error'] ) ) ) {
+				fclose( $out );
+				return false;
+			}
+
+			// An entry it can't read goes through ZipArchive, from the start.
+			ftruncate( $out, 0 );
+			rewind( $out );
+
 			$zip = $this->zip();
 
 			if ( null === $zip ) {
@@ -493,6 +616,184 @@ class ArchiveReader {
 	}
 
 	/**
+	 * Unpack one entry to $tmp_path in bounded steps: call again with the
+	 * returned state until it is done. A paused ZIP entry continues where it
+	 * stopped (ZipFileReader::copy()), so a 2 GB table dump no longer has to
+	 * be unpacked within one request, and its CRC-32 is checked at the end.
+	 *
+	 * @param array{position?:int,crc?:int} $state array() for a new entry.
+	 * @return array{done:bool,failed:bool,position:int,crc:int}
+	 */
+	public function extract_step( string $entry_name, string $tmp_path, array $state, float $deadline ): array {
+		$failed = array(
+			'done'     => false,
+			'failed'   => true,
+			'position' => 0,
+			'crc'      => 0,
+		);
+
+		if ( ! $this->opened && ! $this->open() ) {
+			return $failed;
+		}
+
+		$position = (int) ( $state['position'] ?? 0 );
+		$crc      = (int) ( $state['crc'] ?? 0 );
+
+		// A part file shorter than the recorded progress was removed or
+		// replaced in between: start the entry again.
+		clearstatcache( true, $tmp_path );
+
+		if ( $position > 0 && ( ! file_exists( $tmp_path ) || (int) filesize( $tmp_path ) < $position ) ) {
+			$position = 0;
+			$crc      = 0;
+		}
+
+		$plain = 'zip' === $this->container_format ? $this->plain() : null;
+
+		if ( null === $plain && 'tar' !== $this->container_format ) {
+			// Only ZipArchive can read this file (zlib is missing): in one go, as before.
+			return $this->extract_to( $entry_name, $tmp_path )
+				? array(
+					'done'     => true,
+					'failed'   => false,
+					'position' => 0,
+					'crc'      => 0,
+				)
+				: $failed;
+		}
+
+		wp_mkdir_p( dirname( $tmp_path ) );
+		$out = fopen( $tmp_path, 0 === $position ? 'wb' : 'c+b' );
+
+		if ( false === $out ) {
+			return $failed;
+		}
+
+		if ( $position > 0 ) {
+			// A request that died mid-write may have left bytes past the recorded position.
+			ftruncate( $out, $position );
+			fseek( $out, $position );
+		}
+
+		if ( null !== $plain ) {
+			$result = $plain->copy( $entry_name, self::file_sink( $out ), $position, $crc, $deadline );
+			fclose( $out );
+
+			if ( '' !== $result['error'] ) {
+				return $failed;
+			}
+
+			return array(
+				'done'     => $result['done'],
+				'failed'   => false,
+				'position' => $result['position'],
+				'crc'      => $result['crc'],
+			);
+		}
+
+		// TAR: the entry's bytes are stored as they are, so it can seek.
+		try {
+			$phar = new \PharData( $this->path, 0, null, \Phar::TAR );
+
+			if ( ! isset( $phar[ $entry_name ] ) ) {
+				fclose( $out );
+				return $failed;
+			}
+
+			$file = $phar[ $entry_name ]->openFile( 'rb' );
+			$file->fseek( $position );
+
+			while ( ! $file->eof() ) {
+				$chunk = $file->fread( 1048576 );
+
+				if ( false === $chunk || '' === $chunk ) {
+					break;
+				}
+
+				if ( fwrite( $out, $chunk ) !== strlen( $chunk ) ) {
+					fclose( $out );
+					return $failed;
+				}
+
+				$position += strlen( $chunk );
+
+				if ( microtime( true ) >= $deadline && ! $file->eof() ) {
+					fclose( $out );
+
+					return array(
+						'done'     => false,
+						'failed'   => false,
+						'position' => $position,
+						'crc'      => 0,
+					);
+				}
+			}
+		} catch ( \Throwable $e ) {
+			fclose( $out );
+			return $failed;
+		}
+
+		fclose( $out );
+
+		return array(
+			'done'     => true,
+			'failed'   => false,
+			'position' => $position,
+			'crc'      => 0,
+		);
+	}
+
+	/** An entry's unpacked size in bytes, or null when it isn't in the archive. */
+	public function entry_size( string $entry_name ): ?int {
+		if ( ! $this->opened && ! $this->open() ) {
+			return null;
+		}
+
+		if ( 'zip' === $this->container_format ) {
+			if ( ! $this->use_zip_archive ) {
+				$plain = $this->plain();
+				$stat  = null !== $plain ? $plain->stat( $entry_name ) : null;
+
+				return null !== $stat ? $stat['size'] : null;
+			}
+
+			$zip  = $this->zip();
+			$stat = null !== $zip ? $zip->statName( $entry_name ) : false;
+
+			return false !== $stat ? (int) $stat['size'] : null;
+		}
+
+		try {
+			$phar = new \PharData( $this->path, 0, null, \Phar::TAR );
+
+			return isset( $phar[ $entry_name ] ) ? (int) $phar[ $entry_name ]->getSize() : null;
+		} catch ( \Throwable $e ) {
+			return null;
+		}
+	}
+
+	/**
+	 * Whether ZipArchive may read an entry the built-in reader couldn't: a
+	 * compression method or encryption it doesn't support, or a name it
+	 * didn't find. Not for damaged data or a failed write.
+	 */
+	private static function zip_archive_may_help( string $error ): bool {
+		return in_array( $error, array( ZipFileReader::ERROR_METHOD, ZipFileReader::ERROR_ENCRYPTED, ZipFileReader::ERROR_MISSING, ZipFileReader::ERROR_UNOPENED ), true );
+	}
+
+	/**
+	 * A ZipFileReader sink that appends to an open file.
+	 *
+	 * @param resource $out
+	 * @return callable(string):bool
+	 */
+	private static function file_sink( $out ): callable {
+		return static function ( string $bytes ) use ( $out ): bool {
+			return fwrite( $out, $bytes ) === strlen( $bytes );
+		};
+	}
+
+	/**
 	 * Stream-hash a single archive entry's content, without ever loading the
 	 * whole entry into memory — needed since data files can be as large as
 	 * the table they were exported from. Returns null if the entry doesn't
@@ -514,6 +815,29 @@ class ArchiveReader {
 		$chunk_size = ChunkSizeCalculator::bytes_per_chunk();
 
 		if ( 'zip' === $this->container_format ) {
+			$plain = $this->plain();
+
+			if ( null !== $plain && null !== $plain->stat( $entry_name ) ) {
+				$result = $plain->copy(
+					$entry_name,
+					static function ( string $bytes ) use ( $ctx, $slices ): bool {
+						self::hash_chunk( $ctx, $slices, $bytes );
+						return true;
+					}
+				);
+
+				// A damaged entry stops early: its checksum then doesn't match.
+				if ( $result['done'] || ! $this->use_zip_archive || ! self::zip_archive_may_help( $result['error'] ) ) {
+					return null !== $slices ? $slices->result() : hash_final( $ctx );
+				}
+
+				// Anything else it can't read: ZipArchive, with fresh hashes.
+				$slices = null !== $format && $format['sliced'] ? new SliceHash( $format['slice'] ) : null;
+				$ctx    = null === $slices ? hash_init( 'sha256' ) : null;
+			} elseif ( ! $this->use_zip_archive ) {
+				return null;
+			}
+
 			$zip = $this->zip();
 
 			if ( null === $zip ) {
@@ -561,6 +885,127 @@ class ArchiveReader {
 		}
 	}
 
+	/**
+	 * checksum_entry() in steps: hashes until $deadline and hands back the
+	 * progress, so one very large entry (a 2 GB table dump) no longer has to
+	 * be hashed within one request. A ZIP entry continues where it stopped
+	 * (ZipFileReader::copy()): a classic SHA-256 anywhere on PHP 8.1+ (its
+	 * state is saved), a sliced checksum at a slice boundary on any PHP.
+	 * Otherwise (a classic SHA-256 before PHP 8.1, a TAR archive, no
+	 * deadline) the entry is hashed in one go, as checksum_entry() does.
+	 *
+	 * @param array<string,mixed> $state array() for a new entry.
+	 * @return array{done:bool,checksum:?string,state:array<string,mixed>}
+	 */
+	public function checksum_entry_step( string $entry_name, string $like, array $state, ?float $deadline ): array {
+		$format = '' !== $like ? SliceHash::parse( $like ) : null;
+		$sliced = null !== $format && ! empty( $format['sliced'] );
+		$plain  = null;
+
+		if ( null !== $deadline && ( $sliced || SliceHash::can_save_hash_state() ) && ( $this->opened || $this->open() ) && 'zip' === $this->container_format ) {
+			$plain = $this->plain();
+		}
+
+		if ( null === $plain ) {
+			return array(
+				'done'     => true,
+				'checksum' => $this->checksum_entry( $entry_name, $like ),
+				'state'    => array(),
+			);
+		}
+
+		if ( null === $plain->stat( $entry_name ) ) {
+			return array(
+				'done'     => true,
+				'checksum' => null,
+				'state'    => array(),
+			);
+		}
+
+		$position = max( 0, (int) ( $state['position'] ?? 0 ) );
+		$slices   = null;
+		$whole    = null;
+
+		try {
+			if ( $sliced ) {
+				$slices = $position > 0 ? SliceHash::resume( (array) ( $state['slices'] ?? array() ) ) : new SliceHash( (int) $format['slice'] );
+			} else {
+				$whole = $position > 0 ? ArchiveChecksum::restore_context( (string) ( $state['context'] ?? '' ) ) : hash_init( 'sha256' );
+			}
+		} catch ( \RuntimeException $e ) {
+			$position = -1; // Unreadable saved progress: start the entry again below.
+		}
+
+		if ( $position < 0 || ( null !== $slices && $slices->length() !== $position ) ) {
+			$position = 0;
+			$slices   = $sliced ? new SliceHash( (int) $format['slice'] ) : null;
+			$whole    = $sliced ? null : hash_init( 'sha256' );
+		}
+
+		$slice_bytes = $sliced ? (int) $format['slice'] : 0;
+		$hashed      = $position;
+		$paused      = false;
+		$pause_at    = null;
+
+		$sink = static function ( string $bytes ) use ( $whole, $slices, $slice_bytes, $deadline, &$hashed, &$paused, &$pause_at ): bool {
+			// New work starts once a resumed entry has caught up (see ZipFileReader::MIN_RUN_SECONDS).
+			if ( null === $pause_at ) {
+				$pause_at = max( (float) $deadline, microtime( true ) + ZipFileReader::MIN_RUN_SECONDS );
+			}
+
+			if ( null !== $whole ) {
+				hash_update( $whole, $bytes );
+				$hashed += strlen( $bytes );
+				$paused  = microtime( true ) >= $pause_at;
+
+				return ! $paused;
+			}
+
+			// A sliced checksum can only stop on a slice boundary.
+			$offset = 0;
+			$total  = strlen( $bytes );
+
+			while ( $offset < $total ) {
+				$take = (int) min( $slice_bytes - ( $slices->length() % $slice_bytes ), $total - $offset );
+				$slices->update( substr( $bytes, $offset, $take ) );
+				$offset += $take;
+				$hashed += $take;
+
+				if ( $slices->at_boundary() && microtime( true ) >= $pause_at ) {
+					$paused = true;
+					return false;
+				}
+			}
+
+			return true;
+		};
+
+		$plain->copy( $entry_name, $sink, $position, -1 );
+
+		if ( $paused ) {
+			return array(
+				'done'     => false,
+				'checksum' => null,
+				'state'    => null !== $whole
+					? array(
+						'position' => $hashed,
+						'context'  => ArchiveChecksum::save_context( $whole ),
+					)
+					: array(
+						'position' => $hashed,
+						'slices'   => $slices->state(),
+					),
+			);
+		}
+
+		// Finished, or stopped by damaged data: the checksum decides either way.
+		return array(
+			'done'     => true,
+			'checksum' => null !== $whole ? hash_final( $whole ) : $slices->result(),
+			'state'    => array(),
+		);
+	}
+
 	/** @param \HashContext|null $ctx */
 	private static function hash_chunk( $ctx, ?SliceHash $slices, string $chunk ): void {
 		if ( null !== $slices ) {
@@ -584,6 +1029,18 @@ class ArchiveReader {
 		$entries = array();
 
 		if ( 'zip' === $this->container_format ) {
+			if ( ! $this->use_zip_archive ) {
+				$plain = $this->plain();
+
+				foreach ( null !== $plain ? $plain->names() : array() as $name ) {
+					if ( Str::starts_with( $name, 'files/' ) ) {
+						$entries[] = $name;
+					}
+				}
+
+				return $entries;
+			}
+
 			$zip = $this->zip();
 
 			if ( null === $zip ) {
@@ -753,6 +1210,23 @@ class ArchiveReader {
 		return $prefixes;
 	}
 
+	/** Why the file can't be read, in words the person restoring can act on. */
+	private function unreadable_message(): string {
+		switch ( $this->plain_error ) {
+			case ZipFileReader::ERROR_NO_END:
+			case ZipFileReader::ERROR_INDEX:
+				return __( 'This backup file is incomplete or damaged: the index at the end of the file is missing or unreadable. Download or upload the backup again.', 'wrensafe' );
+
+			case ZipFileReader::ERROR_UNOPENED:
+				return __( 'PHP couldn’t open this file. Check the file’s permissions, and whether security software is blocking it.', 'wrensafe' );
+
+			case ZipFileReader::ERROR_NO_ZLIB:
+				return __( 'This server’s PHP can’t read ZIP files: both its zip and zlib extensions are turned off. Turn on the zip extension in php.ini (or ask your host to), then try again.', 'wrensafe' );
+		}
+
+		return __( 'This file is not a readable archive.', 'wrensafe' );
+	}
+
 	/**
 	 * Validate that this is a genuine, supported Wrensafe archive.
 	 *
@@ -767,7 +1241,7 @@ class ArchiveReader {
 			} elseif ( $this->decryption_failed ) {
 				$message = __( 'Incorrect password, or the backup file is corrupted.', 'wrensafe' );
 			} else {
-				$message = __( 'This file is not a readable archive.', 'wrensafe' );
+				$message = $this->unreadable_message();
 			}
 
 			return array(

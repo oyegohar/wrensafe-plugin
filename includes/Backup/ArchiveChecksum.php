@@ -211,12 +211,13 @@ final class ArchiveChecksum {
 	}
 
 	/** Hex: the serialized state holds raw bytes, and it is kept in JSON. */
-	private static function save_context( \HashContext $context ): string {
+	public static function save_context( \HashContext $context ): string {
 		return bin2hex( serialize( $context ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- HashContext state (PHP 8.1+), read back with allowed_classes limited to HashContext.
 	}
 
-	private static function restore_context( string $saved ): \HashContext {
-		$context = '' !== $saved ? unserialize( (string) hex2bin( $saved ), array( 'allowed_classes' => array( \HashContext::class ) ) ) : false; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- only HashContext may be instantiated.
+	/** A hash state saved by save_context() (only a HashContext can come back). */
+	public static function restore_context( string $saved ): \HashContext {
+		$context = 1 === preg_match( '/^(?:[0-9a-f]{2})+$/i', $saved ) ? unserialize( (string) hex2bin( $saved ), array( 'allowed_classes' => array( \HashContext::class ) ) ) : false; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- only HashContext may be instantiated.
 
 		if ( ! $context instanceof \HashContext ) {
 			throw new \RuntimeException( esc_html__( 'The saved progress of a checksum is unreadable. Start again.', 'wrensafe' ) );

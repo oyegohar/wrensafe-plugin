@@ -227,6 +227,8 @@ abstract class AbstractPage {
 	public static function render_brand_bar(): void {
 		$brand = self::brand();
 		$tab   = '<span class="screen-reader-text"> ' . esc_html__( '(opens in a new tab)', 'wrensafe' ) . '</span>';
+		// Not on a White Label site, and only for users who can open Settings.
+		$support = $brand['credit'] && CapabilityManager::current_user_can( CapabilityManager::MANAGE_SETTINGS );
 		?>
 		<div class="wpbp-brandbar">
 			<div class="wpbp-brandbar-main">
@@ -243,11 +245,26 @@ abstract class AbstractPage {
 					<?php endif; ?>
 				</div>
 			</div>
-			<?php if ( $brand['links'] || $brand['credit'] ) : ?>
-				<nav class="wpbp-brandbar-links" aria-label="<?php esc_attr_e( 'Wrensafe help', 'wrensafe' ); ?>">
+			<?php if ( $brand['links'] || $brand['credit'] || $support || \WPBP\Admin\GuidedTours::available() || \WPBP\Admin\Changelog::available() ) : ?>
+				<nav class="wpbp-brandbar-links" aria-label="<?php esc_attr_e( 'Help', 'wrensafe' ); ?>">
+					<?php if ( \WPBP\Admin\GuidedTours::available() ) : ?>
+						<button type="button" class="wpbp-brandbar-guide" data-wpbp-tours-open><span class="dashicons dashicons-location-alt" aria-hidden="true"></span><?php esc_html_e( 'Guided tours', 'wrensafe' ); ?></button>
+					<?php endif; ?>
+					<?php if ( \WPBP\Admin\Changelog::available() ) : ?>
+						<a class="wpbp-brandbar-changelog" href="<?php echo esc_url( self::page_url( ChangelogPage::SLUG ) ); ?>">
+							<?php esc_html_e( 'Changelog', 'wrensafe' ); ?>
+							<?php if ( \WPBP\Admin\Changelog::has_news() ) : ?>
+								<span class="wpbp-brandbar-new" aria-hidden="true"></span>
+								<span class="screen-reader-text"><?php esc_html_e( '(new version)', 'wrensafe' ); ?></span>
+							<?php endif; ?>
+						</a>
+					<?php endif; ?>
 					<?php foreach ( $brand['links'] as $link ) : ?>
 						<a href="<?php echo esc_url( $link['url'] ); ?>" target="_blank" rel="noopener"><?php echo esc_html( $link['label'] ) . wp_kses( $tab, Kses::allowed() ); ?></a>
 					<?php endforeach; ?>
+					<?php if ( $support ) : ?>
+						<a class="wpbp-brandbar-support" href="<?php echo esc_url( self::page_url( SettingsPage::MENU_SLUG, array( 'tab' => 'support-us' ) ) ); ?>"><?php echo wp_kses( \WPBP\Admin\SupportUs::CUP_SVG, Kses::allowed() ); ?><?php esc_html_e( 'Support Us', 'wrensafe' ); ?></a>
+					<?php endif; ?>
 					<?php if ( $brand['credit'] ) : ?>
 						<a class="wpbp-credit" href="<?php echo esc_url( self::AUTHOR_URL ); ?>" target="_blank" rel="noopener">
 							<?php

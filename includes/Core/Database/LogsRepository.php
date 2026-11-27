@@ -130,6 +130,101 @@ class LogsRepository {
 	}
 
 	/**
+	 * Entries older than an id, newest first (the Activity Logs timeline reads back in steps).
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	public static function before( int $id, int $limit ): array {
+		global $wpdb;
+
+		return (array) $wpdb->get_results(
+			$wpdb->prepare( 'SELECT id, level, message, job_id, created_at FROM %i WHERE id < %d ORDER BY id DESC LIMIT %d', self::table(), $id, $limit ),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Every entry of these jobs, oldest first.
+	 *
+	 * @param int[] $job_ids
+	 * @return array<int,array<string,mixed>>
+	 */
+	public static function for_jobs( array $job_ids, int $limit ): array {
+		global $wpdb;
+
+		$job_ids = array_values( array_unique( array_filter( array_map( 'intval', $job_ids ) ) ) );
+
+		if ( ! $job_ids ) {
+			return array();
+		}
+
+		return (array) $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT id, level, message, job_id, created_at FROM %i WHERE job_id IN (' . implode( ', ', array_fill( 0, count( $job_ids ), '%d' ) ) . ') ORDER BY id ASC LIMIT %d',
+				array_merge( array( self::table() ), $job_ids, array( $limit ) )
+			),
+			ARRAY_A
+		);
+	}
+
+	/**
+	 * Backups, restores and Safe Updates runs that finished since a (site-time) date, and how many things went wrong.
+	 *
+	 * @return array{backups:int,restores:int,updates:int,problems:int}
+	 */
+	public static function totals_since( string $since ): array {
+		global $wpdb;
+
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT
+					COUNT( DISTINCT CASE WHEN message LIKE %s THEN job_id END ) AS backups,
+					COUNT( DISTINCT CASE WHEN message LIKE %s THEN job_id END ) AS restores,
+					COUNT( DISTINCT CASE WHEN message LIKE %s AND job_id IS NOT NULL THEN job_id END ) AS updates,
+					COUNT( DISTINCT CASE WHEN level IN ( 'failed', 'critical', 'error' ) THEN COALESCE( job_id, -id ) END ) AS problems
+				FROM %i WHERE created_at >= %s",
+				$wpdb->esc_like( 'backup_completed:' ) . '%',
+				$wpdb->esc_like( 'restore_completed:' ) . '%',
+				$wpdb->esc_like( 'Safe Updates' ) . '%',
+				self::table(),
+				$since
+			),
+			ARRAY_A
+		);
+
+		return array(
+			'backups'  => (int) ( $row['backups'] ?? 0 ),
+			'restores' => (int) ( $row['restores'] ?? 0 ),
+			'updates'  => (int) ( $row['updates'] ?? 0 ),
+			'problems' => (int) ( $row['problems'] ?? 0 ),
+		);
+	}
+
+	/** The newest entry's id (0 when there is none). */
+	public static function max_id(): int {
+		global $wpdb;
+
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT MAX(id) FROM %i', self::table() ) );
+	}
+
+	/**
+	 * The newest entry after an id whose message starts with $start (Settings → AI assistants waits for an
+	 * assistant's first call).
+	 *
+	 * @return array<string,mixed>|null
+	 */
+	public static function first_after( int $id, string $start ): ?array {
+		global $wpdb;
+
+		$row = $wpdb->get_row(
+			$wpdb->prepare( 'SELECT id, message, created_at FROM %i WHERE id > %d AND message LIKE %s ORDER BY id DESC LIMIT 1', self::table(), $id, $wpdb->esc_like( $start ) . '%' ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $row : null;
+	}
+
+	/**
 	 * Delete every log entry (Activity Logs -> Clear Logs).
 	 */
 	public static function clear(): void {

@@ -95,14 +95,24 @@ class Plugin {
 		( new \WPBP\Admin\SiteHealth() )->register_hooks();
 		// After a restore that moved the site: a link check waits for the next administrator screen.
 		\WPBP\Restore\LinkCheck::register();
+		// AI assistants (MCP): abilities are asked for over REST and WP-CLI, and WP-Cron finishes their jobs.
+		\WPBP\Mcp\Abilities::register();
 		\WPBP\Admin\MenuBadges::register();
 		\WPBP\Admin\ReviewRequest::register();
+		\WPBP\Admin\GuidedTours::register();
 
 		if ( is_admin() ) {
 			$this->container->get( AdminMenu::class )->register_hooks();
 			$this->container->get( Assets::class )->register_hooks();
 			$this->container->get( Notices::class )->register_hooks();
 			( new \WPBP\Admin\Onboarding() )->register_hooks();
+			\WPBP\Admin\SupportUs::register();
+			\WPBP\Admin\Changelog::register();
+			\WPBP\Admin\ActivityTimeline::register();
+			\WPBP\Admin\RestoreTestScreen::register();
+			\WPBP\Mcp\Requests::register();
+			\WPBP\Admin\McpSettings::register();
+			\WPBP\Admin\WhatsNew::register();
 			( new \WPBP\Admin\DashboardWidget() )->register_hooks();
 			$this->container->get( AjaxRouter::class )->register_hooks();
 			$this->container->get( DownloadHandler::class )->register_hooks();

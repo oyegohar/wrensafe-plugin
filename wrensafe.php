@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Wrensafe – Backup, Restore & Migration
  * Description:       Back up, restore and migrate WordPress with confidence: full or partial backups, encryption, schedules, staging, rollback, and restores of backups made by other plugins.
- * Version:           1.2.8
+ * Version:           1.3.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Husnain Gohar
@@ -119,7 +119,7 @@ if ( defined( 'WPBP_VERSION' ) ) {
 // Core plugin constants.
 // ---------------------------------------------------------------------------
 
-define( 'WPBP_VERSION', '1.2.8' );
+define( 'WPBP_VERSION', '1.3.0' );
 define( 'WPBP_PLUGIN_FILE', __FILE__ );
 define( 'WPBP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPBP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -132,6 +132,7 @@ define( 'WPBP_LEGACY_STORAGE_DIR_NAME', 'wp-backup-pilot-storage' );
 // Support Us links. Blank by default — no link/button is rendered until a
 // real URL is set (constant, or the wpbp_support_link filter; see SupportUs::link()).
 defined( 'WPBP_SUPPORT_URL' ) || define( 'WPBP_SUPPORT_URL', '' );
+defined( 'WPBP_TIP_URL' ) || define( 'WPBP_TIP_URL', 'https://buy.stripe.com/4gMaEXfvddbfdVV2j65os00' );
 defined( 'WPBP_REVIEW_URL' ) || define( 'WPBP_REVIEW_URL', 'https://wordpress.org/support/plugin/wrensafe/reviews/' );
 defined( 'WPBP_FEATURE_REQUEST_URL' ) || define( 'WPBP_FEATURE_REQUEST_URL', '' );
 defined( 'WPBP_REPORT_ISSUE_URL' ) || define( 'WPBP_REPORT_ISSUE_URL', '' );

@@ -130,7 +130,7 @@ class VerifyManager {
 	 *
 	 * @return array The initial job state (also persisted to the transient).
 	 */
-	public static function start( int $backup_id, string $password = '' ): array {
+	public static function start( int $backup_id, string $password = '', bool $keep_decrypted = false ): array {
 		$job_id = 'verify_' . wp_generate_password( 12, false );
 
 		$checks = array();
@@ -156,6 +156,7 @@ class VerifyManager {
 			'work_path'              => $backup['file_path'] ?? '',
 			'decrypted_path'         => null,
 			'skip_status_update'     => false,
+			'keep_decrypted'         => $keep_decrypted, // A Restore Test reads the decrypted copy next, then removes it.
 			'status'                 => self::STATUS_RUNNING,
 			'progress'               => 5,
 			'current_step'           => __( 'Checking backup record…', 'wrensafe' ),
@@ -473,24 +474,31 @@ class VerifyManager {
 			return;
 		}
 
-		$reader = new ArchiveReader( $state['work_path'] );
-		$end    = min( $total, $state['db_index'] + self::DB_BATCH );
+		$reader   = new ArchiveReader( $state['work_path'] );
+		$end      = min( $total, $state['db_index'] + self::DB_BATCH );
+		$deadline = self::step_deadline();
 
-		for ( ; $state['db_index'] < $end; $state['db_index']++ ) {
+		// Up to DB_BATCH tables, but never past the request budget: a table
+		// of several gigabytes is checked across requests (check_entry_step()).
+		while ( $state['db_index'] < $end ) {
 			$entry = $entries[ $state['db_index'] ];
 
 			foreach ( array(
 				'schema' => array( 'schema_file', 'schema_checksum', 'db_schema_ok', 'db_schema_fail_msg' ),
 				'data'   => array( 'data_file', 'data_checksum', 'db_data_ok', 'db_data_fail_msg' ),
-			) as $cols ) {
+			) as $part => $cols ) {
 				list( $file_key, $checksum_key, $ok_key, $msg_key ) = $cols;
 
-				if ( empty( $entry[ $file_key ] ) ) {
+				if ( empty( $entry[ $file_key ] ) || ( 'schema' === $part && ! empty( $state['db_schema_done'] ) ) ) {
 					continue;
 				}
 
 				$entry_name = 'database/' . $entry[ $file_key ];
-				$problem    = self::check_entry( $reader, $entry_name, (string) ( $entry[ $checksum_key ] ?? '' ) );
+				$problem    = self::check_entry_step( $reader, $entry_name, (string) ( $entry[ $checksum_key ] ?? '' ), $state, $deadline );
+
+				if ( false === $problem ) {
+					break 2; // Continues in the next request.
+				}
 
 				if ( null !== $problem && $state[ $ok_key ] ) {
 					$state[ $ok_key ]  = false;
@@ -499,6 +507,17 @@ class VerifyManager {
 				}
 
 				++$state['checked_database_files'];
+
+				if ( 'schema' === $part ) {
+					$state['db_schema_done'] = true;
+				}
+			}
+
+			unset( $state['db_schema_done'] );
+			++$state['db_index'];
+
+			if ( microtime( true ) >= $deadline ) {
+				break;
 			}
 		}
 
@@ -565,8 +584,7 @@ class VerifyManager {
 		$total     = count( $names );
 
 		$end      = min( $total, $state['file_index'] + self::FILE_BATCH );
-		$max_time = (int) ini_get( 'max_execution_time' );
-		$deadline = microtime( true ) + ( ( $max_time > 0 && $max_time < 20 ) ? max( 4, $max_time - 6 ) : 10 );
+		$deadline = self::step_deadline();
 
 		// Up to FILE_BATCH entries, but never past the request budget — 200
 		// large media files can take longer than a 30-second host allows.
@@ -578,7 +596,11 @@ class VerifyManager {
 			}
 
 			$entry_name = (string) $names[ $state['file_index'] ];
-			$problem    = self::check_entry( $reader, $entry_name, (string) $files_map[ $entry_name ] );
+			$problem    = self::check_entry_step( $reader, $entry_name, (string) $files_map[ $entry_name ], $state, $deadline );
+
+			if ( false === $problem ) {
+				break; // A very large file: continues in the next request.
+			}
 
 			if ( null !== $problem && $state['file_ok'] ) {
 				$state['file_ok']       = false;
@@ -736,12 +758,37 @@ class VerifyManager {
 	// Helpers.
 	// ---------------------------------------------------------------------
 
+	/** When this request's hashing stops (shorter on hosts with a low time limit). */
+	private static function step_deadline(): float {
+		$max_time = (int) ini_get( 'max_execution_time' );
+
+		return microtime( true ) + ( ( $max_time > 0 && $max_time < 20 ) ? max( 4, $max_time - 6 ) : 10 );
+	}
+
 	/**
-	 * Stream-hash one archive entry and compare against the expected value.
-	 * Returns null when fine, or a human-readable problem naming the entry.
+	 * Stream-hash one archive entry and compare against the expected value,
+	 * in steps (ArchiveReader::checksum_entry_step()). Returns null when
+	 * fine, a human-readable problem naming the entry, or false when the
+	 * deadline came first; the progress is then kept in $state['entry_step'].
+	 *
+	 * @param array<string,mixed> $state
+	 * @return string|false|null
 	 */
-	private static function check_entry( ArchiveReader $reader, string $entry_name, string $expected_checksum ): ?string {
-		$actual = $reader->checksum_entry( $entry_name, $expected_checksum );
+	private static function check_entry_step( ArchiveReader $reader, string $entry_name, string $expected_checksum, array &$state, float $deadline ) {
+		$saved = (array) ( $state['entry_step'] ?? array() );
+		$step  = $reader->checksum_entry_step( $entry_name, $expected_checksum, ( $saved['name'] ?? '' ) === $entry_name ? (array) ( $saved['state'] ?? array() ) : array(), $deadline );
+
+		if ( ! $step['done'] ) {
+			$state['entry_step'] = array(
+				'name'  => $entry_name,
+				'state' => $step['state'],
+			);
+
+			return false;
+		}
+
+		unset( $state['entry_step'] );
+		$actual = $step['checksum'];
 
 		if ( null === $actual ) {
 			return sprintf(
@@ -828,8 +875,9 @@ class VerifyManager {
 		$state['completed_at'] = time();
 		$state['status']       = self::STATUS_FAILED === $result_status ? self::STATUS_FAILED : self::STATUS_COMPLETED;
 
-		// Remove the temporary decrypted copy of an encrypted backup, if any.
-		if ( ! empty( $state['decrypted_path'] ) && file_exists( $state['decrypted_path'] ) ) {
+		// Remove the temporary decrypted copy of an encrypted backup, if any (unless a Restore Test reads it next and
+		// removes it itself, or this verification failed).
+		if ( ! empty( $state['decrypted_path'] ) && file_exists( $state['decrypted_path'] ) && ( empty( $state['keep_decrypted'] ) || self::STATUS_FAILED === $result_status ) ) {
 			wp_delete_file( $state['decrypted_path'] );
 			$state['decrypted_path'] = null;
 		}

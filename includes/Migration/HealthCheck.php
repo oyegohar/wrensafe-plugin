@@ -134,6 +134,8 @@ class HealthCheck {
 	private function check_archive_backend(): void {
 		if ( class_exists( '\ZipArchive' ) ) {
 			$this->add( __( 'Archive engine', 'wrensafe' ), 'pass', 'ZipArchive' );
+		} elseif ( \WPBP\Backup\ZipStreamWriter::available() ) {
+			$this->add( __( 'Archive engine', 'wrensafe' ), 'pass', __( 'Wrensafe’s built-in ZIP engine (PHP’s zip extension is off)', 'wrensafe' ) );
 		} elseif ( class_exists( '\PharData' ) ) {
 			$this->add( __( 'Archive engine', 'wrensafe' ), 'warning', __( 'Using Phar fallback — ZipArchive is recommended.', 'wrensafe' ), 3 );
 		} else {
